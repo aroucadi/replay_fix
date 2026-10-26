@@ -1,2 +1,0 @@
-[target.x86_64-pc-windows-msvc]
-runner = ["powershell", "-ExecutionPolicy", "Bypass", "-Command", "& { param($exe) $c = (Get-ChildItem Cert:\\CurrentUser\\My -CodeSigningCert)[0]; if ($c) { Set-AuthenticodeSignature -FilePath $exe -Certificate $c | Out-Null }; & $exe $args; exit $LASTEXITCODE }"]

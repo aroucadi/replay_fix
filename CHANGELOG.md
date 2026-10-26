@@ -36,8 +36,10 @@ The full production release **v1.0.0** requires completing and verifying the fol
   - Bounded verification of `startup_timeout_ms` (100ms to 600,000ms).
 - **Regex DoS & Churn Elimination**:
   - Transitioned all regex patterns in `doctor` and `manifest` parsing to static `std::sync::OnceLock` singletons, eliminating runtime regex recompilation overhead.
-- **Windows Enterprise Code Integrity / SAC Compatibility**:
-  - Added `.cargo/config.toml` target runner configuration to support local development code-signing on systems enforcing Windows Smart App Control (SAC).
+- **Windows Code Signing & SAC Architecture**:
+  - Replaced machine-specific Cargo runner overrides with native execution and standalone developer scripts (`scripts/setup-dev-cert.ps1` and `scripts/sign-binary.ps1`).
+  - Eliminated PowerShell execution wrapper overhead and associated Smart App Control toast warnings during local testing.
+  - Added comprehensive architectural and troubleshooting documentation in `docs/windows-code-signing.md`.
 - **Automated Regression Tests**:
   - Added 6 automated security tests (`test_security_violation_on_unc_path`, `test_security_violation_on_dos_device`, `test_security_violation_on_intermediate_dos_device`, `test_security_violation_on_ads_colon`, `test_from_file_rejects_unc_manifest_path`, and `test_environment_adapter_security_validation`). All 13 workspace tests pass cleanly.
 

@@ -140,7 +140,23 @@ Run the full workspace unit and integration test suite:
 cargo test --workspace
 ```
 
-*Note for Windows users with Smart App Control (SAC) enabled:* ReplayFix includes runner automation in `.cargo/config.toml` that signs debug test binaries with a local developer certificate, ensuring smooth execution without code integrity blocks.
+All test suites execute natively and rapidly across Windows, macOS, and Linux without external wrappers.
+
+### Windows Developer Code Signing (Smart App Control)
+For developers compiling on Windows 11 with Smart App Control (SAC) or WDAC active, ReplayFix includes non-intrusive PowerShell bootstrap scripts to safely manage a local developer certificate:
+
+```powershell
+# Verify certificate status
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-cert.ps1 -Check
+
+# Generate local developer certificate (no admin rights required)
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-cert.ps1
+
+# Sign a standalone release binary
+powershell -ExecutionPolicy Bypass -File .\scripts\sign-binary.ps1 target\release\replayfix.exe
+```
+
+See the [Windows Code Signing Guide](docs/windows-code-signing.md) for architectural details, Smart App Control behavior, and troubleshooting.
 
 ---
 
