@@ -13,12 +13,16 @@
   - `TaskManifest` and `EnvironmentAdapter` strictly conforming to canonical `task_manifest.schema.json`.
   - Dual CLI/JSON file manifest ingestion in `replayfix repro`.
   - Security boundary defense: path traversal detection rejecting `../` escapes with code 11.
-- [x] **v0.1.1 CSO Security Hardening**:
+- [x] **v0.1.1 CSO Security Hardening & Cross-Platform Refinement**:
   - UNC path rejection (`\\host\share`, `//host/share`) preventing SMB credential coercion / NTLM theft.
-  - Windows reserved DOS device name filtering (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`).
+  - Windows reserved DOS device name filtering (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) across all path components.
+  - Alternate Data Stream (ADS) colon inspection preventing stream injection.
+  - Cross-platform manifest path backslash normalization (`\` $\rightarrow$ `/`) preventing traversal bypasses on POSIX systems.
+  - Refined `OsFamily` taxonomy (`Windows`, `MacOS`, `Linux`, `OtherUnix`) and platform-adaptive doctor suggestions (`winget`, `brew`, `apt`/`dnf`).
   - Regex `OnceLock` singleton optimization across all modules.
-  - Auto-signing runner in `.cargo/config.toml` ensuring full Windows Smart App Control compliance.
-  - 9/9 automated unit & security tests passing across workspace.
+  - Clean native test execution without PowerShell wrappers, resolving Smart App Control toast warnings.
+  - Standalone signing scripts (`scripts/setup-dev-cert.ps1` and `scripts/sign-binary.ps1`).
+  - 17/17 automated unit, security, and cross-platform tests passing in 0.18s across workspace.
 
 ## 3. Toolchain & Environment
 - **Host OS**: Windows 11 (MSVC native)

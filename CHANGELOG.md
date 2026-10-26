@@ -36,12 +36,16 @@ The full production release **v1.0.0** requires completing and verifying the fol
   - Bounded verification of `startup_timeout_ms` (100ms to 600,000ms).
 - **Regex DoS & Churn Elimination**:
   - Transitioned all regex patterns in `doctor` and `manifest` parsing to static `std::sync::OnceLock` singletons, eliminating runtime regex recompilation overhead.
+- **Cross-Platform Path Normalization & Portability**:
+  - Normalized Windows backslashes (`\`) to forward slashes (`/`) during path decomposition in `assert_safe_path`, ensuring path traversal and DOS device checks execute identically across Linux, macOS, and Windows.
+  - Refined `OsFamily` taxonomy with discrete `MacOS`, `Linux`, `OtherUnix`, and `Windows` variants, along with `is_windows()` and `is_unix()` helpers.
+  - Implemented platform-adaptive installation suggestions in `replayfix doctor` (`brew` for macOS, `apt`/`dnf` for Linux, `winget` for Windows).
 - **Windows Code Signing & SAC Architecture**:
   - Replaced machine-specific Cargo runner overrides with native execution and standalone developer scripts (`scripts/setup-dev-cert.ps1` and `scripts/sign-binary.ps1`).
   - Eliminated PowerShell execution wrapper overhead and associated Smart App Control toast warnings during local testing.
   - Added comprehensive architectural and troubleshooting documentation in `docs/windows-code-signing.md`.
 - **Automated Regression Tests**:
-  - Added 6 automated security tests (`test_security_violation_on_unc_path`, `test_security_violation_on_dos_device`, `test_security_violation_on_intermediate_dos_device`, `test_security_violation_on_ads_colon`, `test_from_file_rejects_unc_manifest_path`, and `test_environment_adapter_security_validation`). All 13 workspace tests pass cleanly.
+  - Added comprehensive automated security and cross-platform tests (including `test_security_violation_on_unc_path`, `test_security_violation_on_dos_device`, `test_security_violation_on_intermediate_dos_device`, `test_security_violation_on_ads_colon`, `test_from_file_rejects_unc_manifest_path`, `test_environment_adapter_security_validation`, `test_windows_backslash_path_normalization`, `test_security_violation_on_backslash_path_traversal`, `test_security_violation_on_backslash_dos_device`, `test_platform_os_family`, and `test_platform_remediation_suggestions`). All 17 workspace tests pass cleanly.
 
 ---
 

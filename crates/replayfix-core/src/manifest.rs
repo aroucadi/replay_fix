@@ -233,7 +233,9 @@ impl TaskManifest {
             }
         }
 
-        let path = Path::new(path_str);
+        // Normalize backslashes to forward slashes for cross-platform POSIX and Windows compatibility
+        let normalized = path_str.replace('\\', "/");
+        let path = Path::new(&normalized);
 
         // Check for reserved DOS device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) in ANY component
         for component in path.components() {
@@ -510,5 +512,72 @@ mod tests {
             startup_timeout_ms: 5000,
         };
         assert!(valid_adapter.validate().is_ok());
+    }
+
+    #[test]
+    fn test_windows_backslash_path_normalization() {
+        let manifest = TaskManifest {
+            task_id: "RF-01".to_string(),
+            title: "Test".to_string(),
+            category: None,
+            repo_path: r"repos\subproject\repo".to_string(),
+            bug_ref: "bug/RF-01".to_string(),
+            clean_ref: None,
+            video_path: r"recordings\sub\test.mp4".to_string(),
+            audio_path: None,
+            expected_behavior: None,
+            environment_adapter: None,
+            headed: false,
+        };
+
+        assert!(manifest.validate().is_ok());
+    }
+
+    #[test]
+    fn test_security_violation_on_backslash_path_traversal() {
+        let manifest = TaskManifest {
+            task_id: "RF-01".to_string(),
+            title: "Test".to_string(),
+            category: None,
+            repo_path: r"repos\..\..\etc\shadow".to_string(),
+            bug_ref: "bug/RF-01".to_string(),
+            clean_ref: None,
+            video_path: "test.mp4".to_string(),
+            audio_path: None,
+            expected_behavior: None,
+            environment_adapter: None,
+            headed: false,
+        };
+
+        match manifest.validate() {
+            Err(CoreError::SecurityViolation(msg)) => {
+                assert!(msg.contains("Path traversal detected"));
+            }
+            res => panic!("Expected SecurityViolation, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_security_violation_on_backslash_dos_device() {
+        let manifest = TaskManifest {
+            task_id: "RF-01".to_string(),
+            title: "Test".to_string(),
+            category: None,
+            repo_path: r"repos\con\repo".to_string(),
+            bug_ref: "bug/RF-01".to_string(),
+            clean_ref: None,
+            video_path: "test.mp4".to_string(),
+            audio_path: None,
+            expected_behavior: None,
+            environment_adapter: None,
+            headed: false,
+        };
+
+        match manifest.validate() {
+            Err(CoreError::SecurityViolation(msg)) => {
+                assert!(msg.contains("Reserved DOS device name prohibited"));
+            }
+            res => panic!("Expected SecurityViolation, got {:?}", res),
+        }
     }
 }

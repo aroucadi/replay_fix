@@ -128,9 +128,7 @@ impl Doctor {
         let name = "Git".to_string();
         let executable = "git".to_string();
         let required_version = "2.30.0".to_string();
-        let remediation = Some(
-            "Install Git from https://git-scm.com or run 'winget install Git.Git'".to_string(),
-        );
+        let remediation = Some(Platform::suggest_git_install().to_string());
 
         match Self::run_version_command("git", &["--version"]) {
             Ok(out) => {
@@ -179,10 +177,7 @@ impl Doctor {
         let name = "Node.js".to_string();
         let executable = "node".to_string();
         let required_version = "18.0.0".to_string();
-        let remediation = Some(
-            "Install Node.js 18+ from https://nodejs.org or run 'winget install OpenJS.NodeJS'"
-                .to_string(),
-        );
+        let remediation = Some(Platform::suggest_node_install().to_string());
 
         match Self::run_version_command("node", &["--version"]) {
             Ok(out) => {
@@ -231,7 +226,7 @@ impl Doctor {
         let name = "Playwright".to_string();
         let executable = "playwright".to_string();
         let required_version = "1.40.0".to_string();
-        let remediation = Some("Install Playwright via 'npm install -D playwright' and install browsers via 'npx playwright install chromium'".to_string());
+        let remediation = Some(Platform::suggest_playwright_install().to_string());
 
         // Probe directly via npx or playwright CLI
         let probe = Self::run_version_command("npx", &["--no-install", "playwright", "--version"])
@@ -284,10 +279,7 @@ impl Doctor {
         let name = "FFmpeg".to_string();
         let executable = "ffmpeg".to_string();
         let required_version = "4.4.0".to_string();
-        let remediation = Some(
-            "Install FFmpeg via 'winget install Gyan.FFmpeg' or your system package manager"
-                .to_string(),
-        );
+        let remediation = Some(Platform::suggest_ffmpeg_install().to_string());
 
         match Self::run_version_command("ffmpeg", &["-version"]) {
             Ok(out) => {
