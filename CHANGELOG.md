@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] - Roadmap to v1.0.0
+
+The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
+- **Spec 020 (v0.2.0)**: Dual-gate FSM state machine (`Init` $\rightarrow$ `Gate1Red` $\rightarrow$ `Repair` $\rightarrow$ `Gate2Green`).
+- **Spec 030 (v0.3.0)**: Ephemeral dual-worktree repository isolation ($\Delta\text{repo} = 0$) and dynamic port allocation (`:0`).
+- **Spec 040 (v0.4.0)**: Playwright CDP spatial grounding, `ariaSnapshot` inspection, and coordinate snapping.
+- **Spec 050 (v0.5.0)**: Video telemetry ingestion, FFmpeg keyframe extraction, and SAM 3.1 centroid alignment.
+- **Spec 060 (v0.6.0)**: Meta Muse Wonder bounded AST repair and localized patch synthesis.
+- **Spec 070 (v0.7.0)**: Differential diagnosis, SHA-256 test freezing, and 2-run stability pass.
+- **Spec 080 (v0.8.0)**: Observability suite, headed replay mode (`--headed`), and trace visualization.
+- **Spec 090 (v0.9.0 & v1.0.0)**: RFC 6962 Merkle tree audit receipt generation, Ed25519 signing, and 5-bug benchmark sweep on `MetaPulse`.
+
+---
+
+## [0.1.1] - 2026-10-26
+
+### Security Hardening (CSO Audit)
+- **UNC Network Injection Defense**:
+  - Rejection of UNC network paths (`\\host\share` and `//host/share`) in `TaskManifest::assert_safe_path` to prevent SMB credential coercion and NTLM reflection attacks.
+- **DOS Device Name Sanitation**:
+  - Prevention of Windows reserved device filenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) across repository and recording paths to eliminate descriptor hijacking and process hangs.
+- **Regex DoS & Churn Elimination**:
+  - Transitioned all regex patterns in `doctor` and `manifest` parsing to static `std::sync::OnceLock` instances, eliminating runtime regex recompilation overhead.
+- **Windows Enterprise Code Integrity / SAC Compatibility**:
+  - Added `.cargo/config.toml` target runner configuration to support local development code-signing on systems enforcing Windows Smart App Control (SAC).
+- **Automated Regression Tests**:
+  - Added `test_security_violation_on_unc_path` and `test_security_violation_on_dos_device`. All 9 workspace tests pass cleanly.
+
+---
+
 ## [0.1.0] - 2026-10-26
 
 ### Added

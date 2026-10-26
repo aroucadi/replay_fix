@@ -1,6 +1,6 @@
 [package]
 name = "replayfix-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["ReplayFix Contributors"]
 description = "Core verification harness, state machine, platform abstractions, and perception engine for ReplayFix"

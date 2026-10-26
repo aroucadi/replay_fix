@@ -6,7 +6,7 @@ use std::process::exit;
 #[derive(Parser, Debug)]
 #[command(
     name = "replayfix",
-    version = "0.1.0",
+    version = "0.1.1",
     about = "Deterministic Rust verification harness for visual bug reproduction and repair"
 )]
 struct Cli {
@@ -242,7 +242,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Status: Ready for Gate 1 Baseline Execution (Slice 010 Walking Skeleton)");
         }
         None => {
-            println!("ReplayFix CLI v0.1.0 — Deterministic Visual Bug Reproduction Harness");
+            println!("ReplayFix CLI v0.1.1 — Deterministic Visual Bug Reproduction Harness");
             println!("Host OS: {:?}", Platform::os_family());
             println!("Run 'replayfix --help' for available commands.");
         }

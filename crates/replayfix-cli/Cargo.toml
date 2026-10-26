@@ -1,6 +1,6 @@
 [package]
 name = "replayfix-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["ReplayFix Contributors"]
 description = "Deterministic CLI verification harness for ReplayFix"
