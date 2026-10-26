@@ -23,17 +23,23 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ## [0.1.1] - 2026-10-26
 
-### Security Hardening (CSO Audit)
+### Security Hardening (CSO Comprehensive Audit)
 - **UNC Network Injection Defense**:
-  - Rejection of UNC network paths (`\\host\share` and `//host/share`) in `TaskManifest::assert_safe_path` to prevent SMB credential coercion and NTLM reflection attacks.
-- **DOS Device Name Sanitation**:
-  - Prevention of Windows reserved device filenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) across repository and recording paths to eliminate descriptor hijacking and process hangs.
+  - Rejection of UNC network paths (`\\host\share` and `//host/share`) across repository, recording, and manifest file paths (`TaskManifest::from_file`) to prevent SMB credential coercion and NTLM reflection attacks.
+- **Multi-Component DOS Device Sanitization**:
+  - Rejection of Windows reserved device filenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) across all path components (including subdirectories like `projects/CON/repo`), eliminating descriptor hijacking and process hangs.
+- **Alternate Data Stream (ADS) Defense**:
+  - Rejection of unauthorized NTFS stream delimiters (`:`) in paths outside of valid Windows drive prefixes, blocking hidden payloads and stream smuggling.
+- **Environment Adapter Sanitization**:
+  - Strict regex enforcement on environment variable names (`port_env_var` matching `^[a-zA-Z_][a-zA-Z0-9_]*$`).
+  - Validation of `healthcheck_path` against CRLF injection, control characters, and whitespace to prevent HTTP header injection.
+  - Bounded verification of `startup_timeout_ms` (100ms to 600,000ms).
 - **Regex DoS & Churn Elimination**:
-  - Transitioned all regex patterns in `doctor` and `manifest` parsing to static `std::sync::OnceLock` instances, eliminating runtime regex recompilation overhead.
+  - Transitioned all regex patterns in `doctor` and `manifest` parsing to static `std::sync::OnceLock` singletons, eliminating runtime regex recompilation overhead.
 - **Windows Enterprise Code Integrity / SAC Compatibility**:
   - Added `.cargo/config.toml` target runner configuration to support local development code-signing on systems enforcing Windows Smart App Control (SAC).
 - **Automated Regression Tests**:
-  - Added `test_security_violation_on_unc_path` and `test_security_violation_on_dos_device`. All 9 workspace tests pass cleanly.
+  - Added 6 automated security tests (`test_security_violation_on_unc_path`, `test_security_violation_on_dos_device`, `test_security_violation_on_intermediate_dos_device`, `test_security_violation_on_ads_colon`, `test_from_file_rejects_unc_manifest_path`, and `test_environment_adapter_security_validation`). All 13 workspace tests pass cleanly.
 
 ---
 

@@ -124,9 +124,11 @@ Status: Ready for Gate 1 Baseline Execution (Slice 010 Walking Skeleton)
 Following a comprehensive Chief Security Officer (CSO) audit, ReplayFix enforces strict defensive validation on all user inputs:
 
 1. **Path Traversal Protection**: Inputs containing directory traversal sequences (`../`) that escape root boundaries are rejected with `SECURITY_VIOLATION` (exit code 11).
-2. **UNC Path Injection Defense**: UNC paths (`\\server\share` or `//server/share`) are disallowed to prevent Windows SMB credential reflection attacks (NTLM theft).
-3. **DOS Device Name Filtering**: Reserved Windows device names (such as `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) are blocked to prevent OS process hangs or descriptor hijacking.
-4. **Regex DoS Mitigation**: Regex evaluation across diagnostics and manifests uses thread-safe `std::sync::OnceLock` singletons, preventing repeated recompilation churn.
+2. **UNC Path Injection Defense**: UNC paths (`\\server\share` or `//server/share`) are disallowed across all CLI arguments, manifests, and file inputs to prevent Windows SMB credential reflection attacks (NTLM theft).
+3. **Multi-Component DOS Device Filtering**: Reserved Windows device names (such as `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) are rejected across all path segments (including intermediate directories) to prevent OS process hangs or descriptor hijacking.
+4. **NTFS Alternate Data Stream (ADS) Defense**: Colons in paths outside valid Windows drive prefixes are strictly blocked to prevent hidden payload execution or stream tampering.
+5. **Environment & HTTP Parameter Sanitization**: Environment variable names are validated against `^[a-zA-Z_][a-zA-Z0-9_]*$`, and healthcheck paths are checked for CRLF and whitespace to prevent HTTP header injection.
+6. **Regex DoS Mitigation**: Regex evaluation across diagnostics and manifests uses thread-safe `std::sync::OnceLock` singletons, preventing repeated recompilation churn.
 
 ---
 

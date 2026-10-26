@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use replayfix_core::{DependencyStatus, Doctor, EnvironmentAdapter, Platform, TaskManifest};
+use replayfix_core::{CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Platform, TaskManifest};
 use std::path::PathBuf;
 use std::process::exit;
 
@@ -163,6 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         m
                     }
+                    Err(CoreError::SecurityViolation(msg)) => {
+                        eprintln!("SECURITY_VIOLATION: {}", msg);
+                        exit(11);
+                    }
                     Err(e) => {
                         eprintln!("Error loading manifest file {}: {}", manifest_path.display(), e);
                         exit(2);
@@ -210,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Err(e) = m.validate() {
                     match e {
-                        replayfix_core::CoreError::SecurityViolation(msg) => {
+                        CoreError::SecurityViolation(msg) => {
                             eprintln!("SECURITY_VIOLATION: {}", msg);
                             exit(11);
                         }
