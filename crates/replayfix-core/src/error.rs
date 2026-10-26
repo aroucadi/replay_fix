@@ -14,6 +14,12 @@ pub enum CoreError {
     #[error("Environment doctor error: {0}")]
     Environment(String),
 
+    #[error("Task manifest validation error: {0}")]
+    Manifest(String),
+
+    #[error("Security boundary violation: {0}")]
+    SecurityViolation(String),
+
     #[error("Verification failed: {0}")]
     Verification(String),
 }
