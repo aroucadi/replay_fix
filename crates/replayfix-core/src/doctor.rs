@@ -27,7 +27,8 @@ fn get_playwright_re() -> &'static Regex {
 }
 
 fn get_ffmpeg_re() -> &'static Regex {
-    FFMPEG_RE.get_or_init(|| Regex::new(r"ffmpeg version n?(\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
+    FFMPEG_RE
+        .get_or_init(|| Regex::new(r"ffmpeg version n?(\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
 }
 
 fn get_ffmpeg_fallback_re() -> &'static Regex {
@@ -68,15 +69,22 @@ impl Doctor {
         let caps = get_version_re().captures(version_str)?;
 
         let major = caps.get(1)?.as_str().parse::<u64>().ok()?;
-        let minor = caps.get(2).map_or(0, |m| m.as_str().parse::<u64>().unwrap_or(0));
-        let patch = caps.get(3).map_or(0, |m| m.as_str().parse::<u64>().unwrap_or(0));
+        let minor = caps
+            .get(2)
+            .map_or(0, |m| m.as_str().parse::<u64>().unwrap_or(0));
+        let patch = caps
+            .get(3)
+            .map_or(0, |m| m.as_str().parse::<u64>().unwrap_or(0));
 
         Some((major, minor, patch))
     }
 
     /// Compare if found version meets or exceeds required version
     pub fn is_compatible(found: &str, required: &str) -> bool {
-        match (Self::parse_version_tuple(found), Self::parse_version_tuple(required)) {
+        match (
+            Self::parse_version_tuple(found),
+            Self::parse_version_tuple(required),
+        ) {
             (Some(f), Some(r)) => f >= r,
             _ => false,
         }
@@ -120,7 +128,9 @@ impl Doctor {
         let name = "Git".to_string();
         let executable = "git".to_string();
         let required_version = "2.30.0".to_string();
-        let remediation = Some("Install Git from https://git-scm.com or run 'winget install Git.Git'".to_string());
+        let remediation = Some(
+            "Install Git from https://git-scm.com or run 'winget install Git.Git'".to_string(),
+        );
 
         match Self::run_version_command("git", &["--version"]) {
             Ok(out) => {
@@ -169,7 +179,10 @@ impl Doctor {
         let name = "Node.js".to_string();
         let executable = "node".to_string();
         let required_version = "18.0.0".to_string();
-        let remediation = Some("Install Node.js 18+ from https://nodejs.org or run 'winget install OpenJS.NodeJS'".to_string());
+        let remediation = Some(
+            "Install Node.js 18+ from https://nodejs.org or run 'winget install OpenJS.NodeJS'"
+                .to_string(),
+        );
 
         match Self::run_version_command("node", &["--version"]) {
             Ok(out) => {
@@ -271,7 +284,10 @@ impl Doctor {
         let name = "FFmpeg".to_string();
         let executable = "ffmpeg".to_string();
         let required_version = "4.4.0".to_string();
-        let remediation = Some("Install FFmpeg via 'winget install Gyan.FFmpeg' or your system package manager".to_string());
+        let remediation = Some(
+            "Install FFmpeg via 'winget install Gyan.FFmpeg' or your system package manager"
+                .to_string(),
+        );
 
         match Self::run_version_command("ffmpeg", &["-version"]) {
             Ok(out) => {
@@ -330,7 +346,9 @@ impl Doctor {
             Self::check_ffmpeg(),
         ];
 
-        let overall_status = checks.iter().all(|c| c.status == DependencyStatus::Compatible);
+        let overall_status = checks
+            .iter()
+            .all(|c| c.status == DependencyStatus::Compatible);
 
         DoctorReport {
             overall_status,

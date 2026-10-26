@@ -1,5 +1,7 @@
-use clap::{Parser, Subcommand};
-use replayfix_core::{CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Platform, TaskManifest};
+use clap::{Args, Parser, Subcommand};
+use replayfix_core::{
+    CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Platform, TaskManifest,
+};
 use std::path::PathBuf;
 use std::process::exit;
 
@@ -14,6 +16,65 @@ struct Cli {
     command: Option<Commands>,
 }
 
+#[derive(Args, Debug)]
+pub struct ReproArgs {
+    /// Path to JSON task manifest file adhering to task_manifest.schema.json
+    #[arg(long)]
+    pub manifest: Option<PathBuf>,
+
+    /// Target bug identifier (e.g. RF-01)
+    #[arg(long)]
+    pub task_id: Option<String>,
+
+    /// Description or title of the defect
+    #[arg(long)]
+    pub title: Option<String>,
+
+    /// Path to target git repository
+    #[arg(long, default_value = ".")]
+    pub repo: String,
+
+    /// Git branch or ref containing the defect (e.g. bug/RF-01)
+    #[arg(long)]
+    pub bug_ref: Option<String>,
+
+    /// Optional clean reference baseline branch (e.g. main)
+    #[arg(long)]
+    pub clean_ref: Option<String>,
+
+    /// Path to target bug video recording (MP4/WebM)
+    #[arg(long)]
+    pub video: Option<String>,
+
+    /// Optional path to audio recording
+    #[arg(long)]
+    pub audio: Option<String>,
+
+    /// Optional command to launch application server
+    #[arg(long)]
+    pub server_cmd: Option<String>,
+
+    /// Environment variable used by application for port (default: PORT)
+    #[arg(long, default_value = "PORT")]
+    pub port_env_var: String,
+
+    /// Healthcheck endpoint path (default: /api/health)
+    #[arg(long, default_value = "/api/health")]
+    pub healthcheck_path: String,
+
+    /// Timeout in milliseconds for application healthcheck readiness
+    #[arg(long, default_value = "10000")]
+    pub startup_timeout_ms: u64,
+
+    /// Run browser replay in visible headed mode
+    #[arg(long)]
+    pub headed: bool,
+
+    /// Export Playwright trace for visual inspection
+    #[arg(long)]
+    pub trace: bool,
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Environment diagnostics check (Git, Node.js, Playwright, FFmpeg)
@@ -23,63 +84,7 @@ enum Commands {
         json: bool,
     },
     /// Reproduce, verify, and repair visual defects
-    Repro {
-        /// Path to JSON task manifest file adhering to task_manifest.schema.json
-        #[arg(long)]
-        manifest: Option<PathBuf>,
-
-        /// Target bug identifier (e.g. RF-01)
-        #[arg(long)]
-        task_id: Option<String>,
-
-        /// Description or title of the defect
-        #[arg(long)]
-        title: Option<String>,
-
-        /// Path to target git repository
-        #[arg(long, default_value = ".")]
-        repo: String,
-
-        /// Git branch or ref containing the defect (e.g. bug/RF-01)
-        #[arg(long)]
-        bug_ref: Option<String>,
-
-        /// Optional clean reference baseline branch (e.g. main)
-        #[arg(long)]
-        clean_ref: Option<String>,
-
-        /// Path to target bug video recording (MP4/WebM)
-        #[arg(long)]
-        video: Option<String>,
-
-        /// Optional path to audio recording
-        #[arg(long)]
-        audio: Option<String>,
-
-        /// Optional command to launch application server
-        #[arg(long)]
-        server_cmd: Option<String>,
-
-        /// Environment variable used by application for port (default: PORT)
-        #[arg(long, default_value = "PORT")]
-        port_env_var: String,
-
-        /// Healthcheck endpoint path (default: /api/health)
-        #[arg(long, default_value = "/api/health")]
-        healthcheck_path: String,
-
-        /// Timeout in milliseconds for application healthcheck readiness
-        #[arg(long, default_value = "10000")]
-        startup_timeout_ms: u64,
-
-        /// Run browser replay in visible headed mode
-        #[arg(long)]
-        headed: bool,
-
-        /// Export Playwright trace for visual inspection
-        #[arg(long)]
-        trace: bool,
-    },
+    Repro(Box<ReproArgs>),
 }
 
 #[tokio::main]
@@ -119,7 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let found = check.found_version.as_deref().unwrap_or("none");
                     println!(
                         "{:<12} {:<12} {:<16} {:<16} {}{}",
-                        check.name, check.executable, found, check.required_version, status_str, status_color
+                        check.name,
+                        check.executable,
+                        found,
+                        check.required_version,
+                        status_str,
+                        status_color
                     );
 
                     if let Some(remedy) = &check.remediation {
@@ -131,29 +141,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 println!("-----------------------------------------------------------------------------------------");
                 if report.overall_status {
-                    println!("Result: ALL SYSTEM DEPENDENCIES SATISFIED (System Ready for Reproduction)");
+                    println!(
+                        "Result: ALL SYSTEM DEPENDENCIES SATISFIED (System Ready for Reproduction)"
+                    );
                 } else {
                     eprintln!("Result: DEPENDENCY DEFICIT DETECTED (Please remediate missing tools above)");
                     exit(1);
                 }
             }
         }
-        Some(Commands::Repro {
-            manifest,
-            task_id,
-            title,
-            repo,
-            bug_ref,
-            clean_ref,
-            video,
-            audio,
-            server_cmd,
-            port_env_var,
-            healthcheck_path,
-            startup_timeout_ms,
-            headed,
-            trace,
-        }) => {
+        Some(Commands::Repro(args)) => {
+            let ReproArgs {
+                manifest,
+                task_id,
+                title,
+                repo,
+                bug_ref,
+                clean_ref,
+                video,
+                audio,
+                server_cmd,
+                port_env_var,
+                healthcheck_path,
+                startup_timeout_ms,
+                headed,
+                trace,
+            } = *args;
+
             let task_manifest = if let Some(manifest_path) = manifest {
                 match TaskManifest::from_file(&manifest_path) {
                     Ok(mut m) => {
@@ -168,13 +182,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         exit(11);
                     }
                     Err(e) => {
-                        eprintln!("Error loading manifest file {}: {}", manifest_path.display(), e);
+                        eprintln!(
+                            "Error loading manifest file {}: {}",
+                            manifest_path.display(),
+                            e
+                        );
                         exit(2);
                     }
                 }
             } else {
                 let id = task_id.unwrap_or_else(|| {
-                    eprintln!("Error: Missing required argument '--task-id' (or specify '--manifest')");
+                    eprintln!(
+                        "Error: Missing required argument '--task-id' (or specify '--manifest')"
+                    );
                     exit(2);
                 });
                 let bug_branch = bug_ref.unwrap_or_else(|| {

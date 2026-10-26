@@ -17,7 +17,8 @@ fn get_ref_regex() -> &'static Regex {
 }
 
 fn get_env_var_regex() -> &'static Regex {
-    ENV_VAR_REGEX.get_or_init(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid env var regex"))
+    ENV_VAR_REGEX
+        .get_or_init(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid env var regex"))
 }
 
 fn default_port_env_var() -> String {
@@ -75,7 +76,11 @@ impl EnvironmentAdapter {
             )));
         }
 
-        if self.healthcheck_path.chars().any(|c| c.is_ascii_control() || c.is_whitespace()) {
+        if self
+            .healthcheck_path
+            .chars()
+            .any(|c| c.is_ascii_control() || c.is_whitespace())
+        {
             return Err(CoreError::SecurityViolation(format!(
                 "healthcheck_path '{}' contains illegal control or whitespace characters",
                 self.healthcheck_path
@@ -158,7 +163,9 @@ impl TaskManifest {
         }
 
         if self.title.trim().is_empty() {
-            return Err(CoreError::Manifest("Manifest title cannot be empty".to_string()));
+            return Err(CoreError::Manifest(
+                "Manifest title cannot be empty".to_string(),
+            ));
         }
 
         if !get_ref_regex().is_match(&self.bug_ref) {
@@ -212,7 +219,11 @@ impl TaskManifest {
         // Disallow Alternate Data Stream (ADS) colons in non-drive positions
         for (idx, ch) in path_str.chars().enumerate() {
             if ch == ':' {
-                let is_windows_drive = idx == 1 && path_str.chars().next().map_or(false, |c| c.is_ascii_alphabetic());
+                let is_windows_drive = idx == 1
+                    && path_str
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic());
                 if !is_windows_drive {
                     return Err(CoreError::SecurityViolation(format!(
                         "Alternate Data Stream (ADS) or invalid colon prohibited in {}: '{}'",
@@ -235,9 +246,28 @@ impl TaskManifest {
                     let upper = stem.to_ascii_uppercase();
                     let is_dos_device = matches!(
                         upper.as_str(),
-                        "CON" | "PRN" | "AUX" | "NUL"
-                            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
-                            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+                        "CON"
+                            | "PRN"
+                            | "AUX"
+                            | "NUL"
+                            | "COM1"
+                            | "COM2"
+                            | "COM3"
+                            | "COM4"
+                            | "COM5"
+                            | "COM6"
+                            | "COM7"
+                            | "COM8"
+                            | "COM9"
+                            | "LPT1"
+                            | "LPT2"
+                            | "LPT3"
+                            | "LPT4"
+                            | "LPT5"
+                            | "LPT6"
+                            | "LPT7"
+                            | "LPT8"
+                            | "LPT9"
                     );
                     if is_dos_device {
                         return Err(CoreError::SecurityViolation(format!(
@@ -297,7 +327,7 @@ mod tests {
 
         let manifest: TaskManifest = serde_json::from_str(json).unwrap();
         assert_eq!(manifest.task_id, "RF-01");
-        assert_eq!(manifest.headed, true);
+        assert!(manifest.headed);
         assert!(manifest.validate().is_ok());
 
         let adapter = manifest.environment_adapter.unwrap();
