@@ -1,6 +1,38 @@
 use crate::platform::Platform;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+static VERSION_RE: OnceLock<Regex> = OnceLock::new();
+static GIT_RE: OnceLock<Regex> = OnceLock::new();
+static NODE_RE: OnceLock<Regex> = OnceLock::new();
+static PLAYWRIGHT_RE: OnceLock<Regex> = OnceLock::new();
+static FFMPEG_RE: OnceLock<Regex> = OnceLock::new();
+static FFMPEG_FALLBACK_RE: OnceLock<Regex> = OnceLock::new();
+
+fn get_version_re() -> &'static Regex {
+    VERSION_RE.get_or_init(|| Regex::new(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?").expect("valid regex"))
+}
+
+fn get_git_re() -> &'static Regex {
+    GIT_RE.get_or_init(|| Regex::new(r"git version (\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
+}
+
+fn get_node_re() -> &'static Regex {
+    NODE_RE.get_or_init(|| Regex::new(r"v?(\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
+}
+
+fn get_playwright_re() -> &'static Regex {
+    PLAYWRIGHT_RE.get_or_init(|| Regex::new(r"(\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
+}
+
+fn get_ffmpeg_re() -> &'static Regex {
+    FFMPEG_RE.get_or_init(|| Regex::new(r"ffmpeg version n?(\d+\.\d+(?:\.\d+)?)").expect("valid regex"))
+}
+
+fn get_ffmpeg_fallback_re() -> &'static Regex {
+    FFMPEG_FALLBACK_RE.get_or_init(|| Regex::new(r"(\d+\.\d+)").expect("valid regex"))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DependencyStatus {
@@ -33,8 +65,7 @@ pub struct Doctor;
 impl Doctor {
     /// Parse a semantic version tuple (major, minor, patch) from string
     pub fn parse_version_tuple(version_str: &str) -> Option<(u64, u64, u64)> {
-        let re = Regex::new(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?").ok()?;
-        let caps = re.captures(version_str)?;
+        let caps = get_version_re().captures(version_str)?;
 
         let major = caps.get(1)?.as_str().parse::<u64>().ok()?;
         let minor = caps.get(2).map_or(0, |m| m.as_str().parse::<u64>().unwrap_or(0));
@@ -93,8 +124,8 @@ impl Doctor {
 
         match Self::run_version_command("git", &["--version"]) {
             Ok(out) => {
-                let re = Regex::new(r"git version (\d+\.\d+(?:\.\d+)?)").unwrap();
-                let found = re.captures(&out)
+                let found = get_git_re()
+                    .captures(&out)
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| out.trim().to_string());
@@ -142,8 +173,8 @@ impl Doctor {
 
         match Self::run_version_command("node", &["--version"]) {
             Ok(out) => {
-                let re = Regex::new(r"v?(\d+\.\d+(?:\.\d+)?)").unwrap();
-                let found = re.captures(&out)
+                let found = get_node_re()
+                    .captures(&out)
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| out.trim().to_string());
@@ -195,8 +226,8 @@ impl Doctor {
 
         match probe {
             Ok(out) => {
-                let re = Regex::new(r"(\d+\.\d+(?:\.\d+)?)").unwrap();
-                let found = re.captures(&out)
+                let found = get_playwright_re()
+                    .captures(&out)
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| out.trim().to_string());
@@ -244,14 +275,13 @@ impl Doctor {
 
         match Self::run_version_command("ffmpeg", &["-version"]) {
             Ok(out) => {
-                let re = Regex::new(r"ffmpeg version n?(\d+\.\d+(?:\.\d+)?)").unwrap();
-                let found = re.captures(&out)
+                let found = get_ffmpeg_re()
+                    .captures(&out)
                     .and_then(|c| c.get(1))
                     .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| {
-                        // Fallback simple numeric regex
-                        Regex::new(r"(\d+\.\d+)").ok()
-                            .and_then(|r| r.captures(&out))
+                        get_ffmpeg_fallback_re()
+                            .captures(&out)
                             .and_then(|c| c.get(1))
                             .map(|m| m.as_str().to_string())
                             .unwrap_or_else(|| out.trim().to_string())
