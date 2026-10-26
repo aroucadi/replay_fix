@@ -1,0 +1,46 @@
+# Spec Kit & AI Agent Workflows
+.specify/
+.spec/
+.agents/
+.agent/
+AGENTS.md
+
+# Rust Build Artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# ReplayFix Ephemeral Runs, Traces & Worktrees
+.replayfix/
+runs/
+test-results/
+playwright-report/
+blob-report/
+*.trace
+*.patch
+audit_receipt.json
+triage_report.json
+
+# Node.js & Package Managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment & Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+
+# IDE, Editor & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
