@@ -1,9 +1,12 @@
+pub mod ui;
+
 use clap::{Args, Parser, Subcommand};
 use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
 use replayfix_core::{
     CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Fixture, HealOutcome, MockHealer,
     Platform, TaskManifest,
 };
+use ui::{print_banner, print_field, print_step, Symbols, Theme};
 
 /// Standard CLI process exit codes aligned with verification schemas.
 pub mod exit_codes {
@@ -22,9 +25,9 @@ const MAX_PATCH_BYTES: u64 = 1024 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "replayfix",
+    name = "fixtream",
     version,
-    about = "Deterministic Rust verification harness for visual bug reproduction and repair"
+    about = "FixTream CLI — Deterministic verification and repair harness for modern web applications"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -114,27 +117,32 @@ enum Commands {
     Repro(Box<ReproArgs>),
 }
 
-const RULE: &str =
-    "=========================================================================================";
-const THIN_RULE: &str =
-    "-----------------------------------------------------------------------------------------";
-
 /// Print an error and exit. Security violations use the dedicated exit code 11.
 fn fail(err: CoreError, context: &str) -> ! {
+    let theme = Theme::for_stderr();
     match err {
         CoreError::SecurityViolation(msg) => {
-            eprintln!("SECURITY_VIOLATION: {msg}");
+            eprintln!(
+                "{} {}: {msg}",
+                theme.error(Symbols::CROSS),
+                theme.error("SECURITY_VIOLATION")
+            );
             exit(exit_codes::SECURITY_VIOLATION);
         }
         other => {
-            eprintln!("{context}: {other}");
+            eprintln!("{} {context}: {other}", theme.error(Symbols::CROSS));
             exit(exit_codes::USAGE_OR_INPUT_ERROR);
         }
     }
 }
 
 fn usage_error(message: &str) -> ! {
-    eprintln!("Error: {message}");
+    let theme = Theme::for_stderr();
+    eprintln!(
+        "{} {}: {message}",
+        theme.error(Symbols::CROSS),
+        theme.error("Error")
+    );
     exit(exit_codes::USAGE_OR_INPUT_ERROR);
 }
 
@@ -146,44 +154,79 @@ fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    println!("{RULE}");
-    println!("                              ReplayFix Doctor Diagnostics");
-    println!("{RULE}");
-    println!("Host OS    : {}", report.host_os);
-    println!("Checked At : {}", report.timestamp);
-    println!("{THIN_RULE}");
-    println!(
-        "{:<12} {:<12} {:<16} {:<16} {:<10}",
-        "Dependency", "Executable", "Found Version", "Required", "Status"
-    );
-    println!("{THIN_RULE}");
+    let theme = Theme::for_stdout();
+    print_banner(&theme, "Environment Diagnostics");
+    print_field(&theme, "Host OS", &report.host_os, None);
+    print_field(&theme, "Checked At", &report.timestamp, None);
+    println!();
+
+    let dep_hdr = format!("{}", theme.muted("Dependency"));
+    let exe_hdr = format!("{}", theme.muted("Executable"));
+    let found_hdr = format!("{}", theme.muted("Found Version"));
+    let req_hdr = format!("{}", theme.muted("Required"));
+    let status_hdr = format!("{}", theme.muted("Status"));
+
+    if theme.color_enabled {
+        println!("  {dep_hdr:<21} {exe_hdr:<21} {found_hdr:<25} {req_hdr:<25} {status_hdr}");
+    } else {
+        println!(
+            "  {:<12} {:<12} {:<16} {:<16} Status",
+            "Dependency", "Executable", "Found Version", "Required"
+        );
+    }
+    println!("  {}", theme.muted(&"─".repeat(68)));
 
     for check in &report.checks {
-        let status = match &check.status {
-            DependencyStatus::Compatible => "[OK]",
-            DependencyStatus::IncompatibleVersion { .. } => "[OUTDATED]",
-            DependencyStatus::NotFound => "[MISSING]",
-            DependencyStatus::PermissionDenied => "[DENIED]",
+        let (status_text, is_ok) = match &check.status {
+            DependencyStatus::Compatible => (format!("{} [OK]", Symbols::CHECK), true),
+            DependencyStatus::IncompatibleVersion { .. } => {
+                (format!("{} [OUTDATED]", Symbols::WARN), false)
+            }
+            DependencyStatus::NotFound => (format!("{} [MISSING]", Symbols::CROSS), false),
+            DependencyStatus::PermissionDenied => (format!("{} [DENIED]", Symbols::CROSS), false),
+        };
+        let styled_status = if is_ok {
+            format!("{}", theme.success(&status_text))
+        } else {
+            format!("{}", theme.error(&status_text))
         };
         let found = check.found_version.as_deref().unwrap_or("none");
-        println!(
-            "{:<12} {:<12} {:<16} {:<16} {}",
-            check.name, check.executable, found, check.required_version, status
-        );
+        if theme.color_enabled {
+            let styled_name = format!("{}", theme.bold(&check.name));
+            println!(
+                "  {:<21} {:<12} {:<16} {:<16} {}",
+                styled_name, check.executable, found, check.required_version, styled_status
+            );
+        } else {
+            println!(
+                "  {:<12} {:<12} {:<16} {:<16} {}",
+                check.name, check.executable, found, check.required_version, styled_status
+            );
+        }
         if let Some(remedy) = &check.remediation {
             if check.status != DependencyStatus::Compatible {
-                println!("   >> Remedy: {remedy}");
+                println!(
+                    "     {} Remediation: {remedy}",
+                    theme.warning(Symbols::ARROW_RIGHT)
+                );
             }
         }
     }
 
-    println!("{THIN_RULE}");
+    println!("  {}", theme.muted(&"─".repeat(68)));
     if report.overall_status {
-        println!("Result: all dependencies are satisfied. ReplayFix is ready to run.");
+        println!(
+            "  {} {}",
+            theme.success(Symbols::CHECK),
+            theme.success("All dependencies are satisfied. FixTream is ready to run.")
+        );
         Ok(())
     } else {
         eprintln!(
-            "Result: one or more dependencies are missing or outdated. See the remedies above."
+            "  {} {}",
+            theme.error(Symbols::CROSS),
+            theme
+                .error("One or more dependencies are missing or outdated. See the remedies above.")
         );
         exit(exit_codes::DOCTOR_FAILED);
     }
@@ -227,7 +270,6 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
     if let Some(manifest_path) = manifest {
         return match TaskManifest::from_file(&manifest_path) {
             Ok(mut m) => {
-                // The command-line --headed flag wins over the manifest value.
                 if headed {
                     m.headed = true;
                 }
@@ -276,24 +318,27 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
 }
 
 fn print_ingestion(m: &TaskManifest, trace: bool) {
-    println!("{RULE}");
-    println!("                           ReplayFix Task Ingestion Verified");
-    println!("{RULE}");
-    println!("Task ID       : {}", m.task_id);
-    println!("Title         : {}", m.title);
-    println!("Target Repo   : {}", m.repo_path);
-    println!("Bug Ref       : {}", m.bug_ref);
+    let theme = Theme::for_stdout();
+    print_banner(&theme, "Task Ingestion Verified");
+    print_field(&theme, "Task ID", &m.task_id, None);
+    print_field(&theme, "Title", &m.title, None);
+    print_field(&theme, "Target Repo", &m.repo_path, None);
+    print_field(&theme, "Bug Ref", &m.bug_ref, None);
     if let Some(clean) = &m.clean_ref {
-        println!("Clean Ref     : {clean}");
+        print_field(&theme, "Clean Ref", clean, None);
     }
-    println!("Video Source  : {}", m.video_path);
-    println!("Headed Mode   : {}", m.headed);
-    println!("Trace Export  : {trace}");
-    println!("Manifest State: VALIDATED (conforms to task_manifest.schema.json)");
-    println!("{THIN_RULE}");
+    print_field(&theme, "Video Source", &m.video_path, None);
+    print_field(&theme, "Headed Mode", &m.headed.to_string(), None);
+    print_field(&theme, "Trace Export", &trace.to_string(), None);
+    print_field(
+        &theme,
+        "Manifest State",
+        "VALIDATED",
+        Some("conforms to task_manifest.schema.json"),
+    );
+    println!("  {}", theme.muted(&"─".repeat(60)));
 }
 
-/// Resolve `--mock-patch` into diff text. Files are path-validated and size-limited.
 fn load_patch(fixture: &Fixture, spec: &str) -> String {
     match spec {
         "builtin" => fixture.builtin_diff.to_string(),
@@ -357,40 +402,82 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
                 exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
             });
 
+    let theme = Theme::for_stdout();
     match outcome {
         HealOutcome::Verified(receipt) => {
             let path = write_artifact(&out_dir, |dir| write_audit_receipt(dir, &receipt));
+            print_step(
+                &theme,
+                "Sandbox",
+                "INFO",
+                Some(&format!(
+                    "isolated scratch workspace (ephemeral port :{}, base tree {})",
+                    receipt.ephemeral_port,
+                    short(&receipt.base_tree_sha256)
+                )),
+            );
+            print_step(
+                &theme,
+                "Gate 1",
+                "RED",
+                Some(&format!(
+                    "RED   (defect reproduced; contract {})",
+                    short(&receipt.gate1.contract_sha256)
+                )),
+            );
+            print_step(
+                &theme,
+                "Repair",
+                "DONE",
+                Some(&format!(
+                    "patch applied in scratch sandbox to {} (+{} -{}, sandbox tree {})",
+                    receipt.patch.target_path,
+                    receipt.patch.insertions,
+                    receipt.patch.deletions,
+                    short(&receipt.sandbox_tree_sha256)
+                )),
+            );
+            print_step(
+                &theme,
+                "Gate 2",
+                "GREEN",
+                Some(&format!(
+                    "GREEN (same contract {}, base repo unmodified: {})",
+                    short(&receipt.gate2.contract_sha256),
+                    receipt.base_repo_unmodified_verified
+                )),
+            );
+            println!("  {}", theme.muted(&"─".repeat(60)));
             println!(
-                "Sandbox  : isolated scratch workspace (ephemeral port :{}, base tree {})",
-                receipt.ephemeral_port,
-                short(&receipt.base_tree_sha256)
+                "  {} Result   : {} (simulated oracle; no browser was run)",
+                theme.success(Symbols::CHECK),
+                theme.success("VERIFIED_REPAIRED")
             );
             println!(
-                "Gate 1   : RED   (defect reproduced; contract {})",
-                short(&receipt.gate1.contract_sha256)
+                "  {} Receipt  : {}",
+                theme.info(Symbols::ARROW_RIGHT),
+                path.display()
             );
-            println!(
-                "Repair   : patch applied in scratch sandbox to {} (+{} -{}, sandbox tree {})",
-                receipt.patch.target_path,
-                receipt.patch.insertions,
-                receipt.patch.deletions,
-                short(&receipt.sandbox_tree_sha256)
-            );
-            println!(
-                "Gate 2   : GREEN (same contract {}, base repo unmodified: {})",
-                short(&receipt.gate2.contract_sha256),
-                receipt.base_repo_unmodified_verified
-            );
-            println!("{THIN_RULE}");
-            println!("Result   : VERIFIED_REPAIRED (simulated oracle; no browser was run)");
-            println!("Receipt  : {}", path.display());
             exit(exit_codes::SUCCESS);
         }
         HealOutcome::Rejected(report) => {
             let path = write_artifact(&out_dir, |dir| write_triage_report(dir, &report));
-            eprintln!("Result   : {} (repair rejected)", report.status);
-            eprintln!("Reason   : {}", report.reason);
-            eprintln!("Triage   : {}", path.display());
+            let err_theme = Theme::for_stderr();
+            eprintln!(
+                "  {} Result   : {} (repair rejected)",
+                err_theme.error(Symbols::CROSS),
+                err_theme.error(&report.status.to_string())
+            );
+            eprintln!(
+                "  {} Reason   : {}",
+                err_theme.warning(Symbols::ARROW_RIGHT),
+                report.reason
+            );
+            eprintln!(
+                "  {} Triage   : {}",
+                err_theme.info(Symbols::ARROW_RIGHT),
+                path.display()
+            );
             exit(report.exit_code);
         }
     }
@@ -416,17 +503,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if extras.mock_heal {
                 run_mock_heal(&manifest, &extras.mock_patch, &extras.output_dir);
             }
+            let theme = Theme::for_stdout();
             println!(
-                "Status: manifest is valid. Add --mock-heal to run the simulated two-gate loop (real browser gates arrive in v0.4)."
+                "  {} Status: manifest is valid. Add --mock-heal to run the simulated two-gate loop (real browser gates arrive in v0.4).",
+                theme.info(Symbols::BULLET)
             );
         }
         None => {
-            println!(
-                "ReplayFix {} - deterministic visual bug reproduction harness",
-                env!("CARGO_PKG_VERSION")
+            let theme = Theme::for_stdout();
+            print_banner(&theme, "Deterministic Verification Harness");
+            print_field(&theme, "Version", env!("CARGO_PKG_VERSION"), None);
+            print_field(
+                &theme,
+                "Host OS",
+                &format!("{:?}", Platform::os_family()),
+                None,
             );
-            println!("Host OS: {:?}", Platform::os_family());
-            println!("Run 'replayfix --help' to see the available commands.");
+            println!();
+            println!(
+                "  Run '{}' to explore available commands and options.",
+                theme.brand("fixtream --help")
+            );
         }
     }
 
