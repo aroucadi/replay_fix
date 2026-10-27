@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.3.0` (Ephemeral scratch isolation, $\Delta \text{repo} = 0$, dynamic ephemeral ports, process tree cleanup)
-- **Status**: Delivered & verified; ready for Spec 040 (`040-v0.4-playwright-cdp-grounding`)
+- **Active Milestone**: `v0.3.3` (v0.3 Release Quality Gate, Workspace Version Harmonization, BeautifulRust Verified)
+- **Status**: Qualified & shipped; baseline locked for Spec 040 (`040-v0.4-playwright-cdp-grounding`)
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -19,11 +19,17 @@
   - `ScratchSandbox`: clones `--repo` into an isolated OS temp directory, runs Gate 1 -> disk patch -> Gate 2 inside the sandbox, verifies $\Delta \text{repo} = 0$ (`BASE_REPO_DIRTY_MUTATION_DETECTED`, exit code 11 on violation), and tears down child process trees and read-only files with retry backoff.
   - `EphemeralPort::allocate()` (`127.0.0.1:0`) and `Platform::terminate_process_tree(pid)`.
   - Receipt schema `"0.3"` (`base_tree_sha256`, `sandbox_tree_sha256`, `base_repo_unmodified_verified`, `ephemeral_port`).
-  - 77 core unit tests + 17 CLI integration tests (94 total) passing; clippy and fmt clean.
   - **Honesty note**: the gate oracle is still simulated (static inspection of `src/cart-summary.js` inside the scratch sandbox for `RF-01`). Real browser gates arrive in Spec 040.
+- [x] **v0.3.1 & v0.3.2 Terminal UX & Interaction Engineering**:
+  - Semantic styling, accessible symbols, output modes (`Human`, `Quiet`, `Machine`), deterministic color precedence (`--color auto|always|never`).
+  - Security boundary trust cards ($\Delta \text{repo} = 0$, scratch isolation, test freeze), structured doctor diagnostics with remediation, and `--dry-run`.
+- [x] **v0.3.3 Release Quality Gate & Version Harmonization**:
+  - Workspace crate versions synchronized to `0.3.3` across `replayfix-core` and `replayfix-cli`.
+  - Windows `.cmd` batch probe resolution for `npx` and `playwright`, resulting in 100% green `replayfix doctor` (Git 2.55, Node 24.19, Playwright 1.64.1, FFmpeg 15.2).
+  - 96 automated tests passing (77 core, 17 integration, 2 UI); zero Clippy warnings; zero `.unwrap()` or `.expect()` in production source.
 
 ## 3. Toolchain & Environment
-- Windows 11 (MSVC native), Rust 1.99.1, Node.js 24, Git 2.55, FFmpeg present. Playwright not installed on the dev machine (`doctor` reports it as missing, which is expected).
+- Windows 11 (MSVC native), Rust 1.99.1, Node.js 24, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
 - Windows Smart App Control can block fresh build outputs: use `scripts/sign-build-outputs.ps1` (see `docs/windows-code-signing.md`).
 
 ## 4. Deferred Items (documented, not hidden)
