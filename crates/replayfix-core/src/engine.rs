@@ -127,6 +127,7 @@ pub enum HealOutcome {
     Rejected(Box<TriageReport>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MockHealer;
 
 impl MockHealer {

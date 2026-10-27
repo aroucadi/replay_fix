@@ -61,6 +61,7 @@ pub struct DoctorReport {
     pub timestamp: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Doctor;
 
 impl Doctor {

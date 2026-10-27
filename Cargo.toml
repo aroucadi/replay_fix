@@ -10,3 +10,11 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }

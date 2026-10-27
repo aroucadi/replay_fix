@@ -49,6 +49,7 @@ struct Hunk {
     lines: Vec<(char, String)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UnifiedPatcher;
 
 impl UnifiedPatcher {
