@@ -52,6 +52,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["schema_version"], "0.3");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -63,6 +64,11 @@ fn mock_heal_verifies_and_writes_receipt() {
         receipt["phase_trace"],
         serde_json::json!(["INIT", "GATE1_RED", "REPAIR", "GATE2_GREEN"])
     );
+    assert_eq!(receipt["base_repo_unmodified_verified"], true);
+    assert_eq!(receipt["base_tree_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(receipt["sandbox_tree_sha256"].as_str().unwrap().len(), 64);
+    assert_ne!(receipt["base_tree_sha256"], receipt["sandbox_tree_sha256"]);
+    assert!(receipt["ephemeral_port"].as_u64().unwrap() > 0);
     assert!(receipt["disclaimer"]
         .as_str()
         .unwrap()
@@ -77,6 +83,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
+    assert_eq!(triage["schema_version"], "0.3");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -243,4 +250,36 @@ fn missing_required_arguments_exit_with_code_2() {
         .output()
         .unwrap();
     assert_eq!(code(&out), 2);
+}
+
+#[test]
+fn mock_heal_leaves_existing_base_repo_files_unmodified() {
+    let dir = scratch("preserve-repo");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    let buggy = "export function cartItemCount(cart) {\n  return cart.items.length;\n}\n";
+    fs::write(dir.join("src/cart-summary.js"), buggy).unwrap();
+
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Base repository file must remain completely untouched
+    let after = fs::read_to_string(dir.join("src/cart-summary.js")).unwrap();
+    assert_eq!(after, buggy);
+
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["base_repo_unmodified_verified"], true);
+    assert_ne!(receipt["base_tree_sha256"], receipt["sandbox_tree_sha256"]);
+}
+
+#[test]
+fn nonexistent_repo_directory_is_a_usage_error() {
+    let dir = scratch("missing-repo");
+    let out = run(&dir, &["--repo", "does-not-exist", "--mock-heal"]);
+    assert_eq!(code(&out), 2);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("does not exist"));
 }

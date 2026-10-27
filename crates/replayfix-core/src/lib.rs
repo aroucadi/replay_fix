@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod patch;
 pub mod platform;
 pub mod receipt;
+pub mod worktree;
 
 pub use digest::{canonical_json, sha256_hex};
 pub use doctor::{DependencyCheck, DependencyStatus, Doctor, DoctorReport};
@@ -19,7 +20,8 @@ pub use fixtures::Fixture;
 pub use fsm::{Phase, PhaseMachine};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use patch::{PatchOutcome, UnifiedPatcher};
-pub use platform::{OsFamily, Platform};
+pub use platform::{EphemeralPort, OsFamily, Platform};
 pub use receipt::{
     AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
 };
+pub use worktree::{FileEntry, ScratchSandbox, WorktreeManifest};

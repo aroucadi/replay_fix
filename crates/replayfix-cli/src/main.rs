@@ -332,6 +332,14 @@ fn short(digest: &str) -> &str {
 fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
     let out_dir = TaskManifest::assert_safe_path(output_dir, "output-dir")
         .unwrap_or_else(|e| fail(e, "Invalid --output-dir"));
+    let repo_dir = TaskManifest::assert_safe_path(&m.repo_path, "repo_path")
+        .unwrap_or_else(|e| fail(e, "Invalid --repo path"));
+    if !repo_dir.exists() || !repo_dir.is_dir() {
+        usage_error(&format!(
+            "Target repository directory '{}' does not exist or is not a directory",
+            m.repo_path
+        ));
+    }
 
     let fixture = Fixture::for_task(&m.task_id).unwrap_or_else(|| {
         usage_error(&format!(
@@ -342,25 +350,36 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
     });
     let diff = load_patch(&fixture, mock_patch);
 
-    let outcome = MockHealer::run(&fixture, &diff).unwrap_or_else(|e| {
-        eprintln!("Internal error while running the two-gate loop: {e}");
-        exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
-    });
+    let outcome =
+        MockHealer::run_in_repo(&fixture, &diff, &repo_dir, std::slice::from_ref(&out_dir))
+            .unwrap_or_else(|e| {
+                eprintln!("Internal error while running the two-gate loop: {e}");
+                exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
+            });
 
     match outcome {
         HealOutcome::Verified(receipt) => {
             let path = write_artifact(&out_dir, |dir| write_audit_receipt(dir, &receipt));
             println!(
+                "Sandbox  : isolated scratch workspace (ephemeral port :{}, base tree {})",
+                receipt.ephemeral_port,
+                short(&receipt.base_tree_sha256)
+            );
+            println!(
                 "Gate 1   : RED   (defect reproduced; contract {})",
                 short(&receipt.gate1.contract_sha256)
             );
             println!(
-                "Repair   : patch applied in memory to {} (+{} -{})",
-                receipt.patch.target_path, receipt.patch.insertions, receipt.patch.deletions
+                "Repair   : patch applied in scratch sandbox to {} (+{} -{}, sandbox tree {})",
+                receipt.patch.target_path,
+                receipt.patch.insertions,
+                receipt.patch.deletions,
+                short(&receipt.sandbox_tree_sha256)
             );
             println!(
-                "Gate 2   : GREEN (same contract {})",
-                short(&receipt.gate2.contract_sha256)
+                "Gate 2   : GREEN (same contract {}, base repo unmodified: {})",
+                short(&receipt.gate2.contract_sha256),
+                receipt.base_repo_unmodified_verified
             );
             println!("{THIN_RULE}");
             println!("Result   : VERIFIED_REPAIRED (simulated oracle; no browser was run)");
@@ -385,6 +404,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Doctor { json }) => run_doctor(json)?,
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args);
+            let repo_dir = TaskManifest::assert_safe_path(&manifest.repo_path, "repo_path")
+                .unwrap_or_else(|e| fail(e, "Invalid --repo path"));
+            if !repo_dir.exists() || !repo_dir.is_dir() {
+                usage_error(&format!(
+                    "Target repository directory '{}' does not exist or is not a directory",
+                    manifest.repo_path
+                ));
+            }
             print_ingestion(&manifest, extras.trace);
             if extras.mock_heal {
                 run_mock_heal(&manifest, &extras.mock_patch, &extras.output_dir);

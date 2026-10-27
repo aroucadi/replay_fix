@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Roadmap to v1.0.0
 
 The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
-- **Spec 030 (v0.3.0)**: Ephemeral dual-worktree repository isolation ($\Delta\text{repo} = 0$) and dynamic port allocation (`:0`).
 - **Spec 040 (v0.4.0)**: Playwright CDP spatial grounding, `ariaSnapshot` inspection, and coordinate snapping.
 - **Spec 050 (v0.5.0)**: Video telemetry ingestion, FFmpeg keyframe extraction, and SAM 3.1 centroid alignment.
 - **Spec 060 (v0.6.0)**: Meta Muse Wonder bounded AST repair and localized patch synthesis.
@@ -20,27 +19,60 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.3.0] - 2026-10-27
+
+Delivers **Spec 030 (`030-v0.3-ephemeral-scratch-isolation`)**: Ephemeral scratch workspace isolation, dual-layer repository integrity ($\Delta \text{repo} = 0$), dynamic ephemeral port allocation (`127.0.0.1:0`), and cross-platform process tree supervision with Windows file-lock defense. Full notes: [docs/release-notes/v0.3.0.md](docs/release-notes/v0.3.0.md).
+
+### Added
+- **Dual-Layer Workspace Integrity (`replayfix_core::worktree::WorktreeManifest`)**:
+  - **Layer 1**: Recursive filesystem walk computing SHA-256 over every non-excluded regular file (`FileEntry { path, size, sha256 }`) and hashing the RFC 8785 canonical JSON array into `tree_sha256`.
+  - **Layer 2**: Automatic capture and verification of `git status --porcelain=v1 -uall` when `.git` is present in the target repository.
+  - Built-in exclusion of `.git`, `.replayfix`, `node_modules`, `target`, and custom `--output-dir` directories.
+- **Ephemeral Scratch Sandbox (`replayfix_core::worktree::ScratchSandbox`)**:
+  - Clones target repository working files into a unique OS temporary directory (`replayfix-sandbox-<task>-<pid>-<seq>`).
+  - Executes Gate 1, disk-backed patch application, and Gate 2 strictly inside the scratch sandbox while keeping the user's base repository untouched ($\Delta \text{repo} = 0$).
+  - Automatic `Drop` and `teardown()` lifecycle that terminates registered child process trees, clears read-only file attributes, and retries `remove_dir_all` with bounded backoff (`10ms`–`200ms`) to defeat Windows file locks (`os error 5` / `os error 32`).
+- **Dynamic Ephemeral Port Allocation (`replayfix_core::platform::EphemeralPort`)**:
+  - Binds `TcpListener::bind("127.0.0.1:0")` to allocate a guaranteed non-zero OS ephemeral port (`NonZeroU16`) per run, preventing `EADDRINUSE` collisions across concurrent sessions.
+- **Cross-Platform Process Tree Termination (`Platform::terminate_process_tree`)**:
+  - Terminates spawned child process trees via `taskkill /F /T /PID <pid>` on Windows and `pkill -KILL -P <pid>` / `kill -9 <pid>` on Unix, with self/zero PID safety guards and idempotent handling of already-exited processes.
+- **Receipt Schema `"0.3"` & Base-Repo Mutation Triage**:
+  - Added `TriageStatus::BaseRepoDirtyMutationDetected` (`"BASE_REPO_DIRTY_MUTATION_DETECTED"`, exit code `11`).
+  - Added `base_tree_sha256`, `sandbox_tree_sha256`, `base_repo_unmodified_verified`, and `ephemeral_port` to `AuditReceipt`.
+- **Engineering Principles Codification**:
+  - Codified the 10 Rust Engineering Principles in [docs/engineering-principles-rust.md](docs/engineering-principles-rust.md) and enforced workspace-wide `unsafe_code = "forbid"` and `missing_debug_implementations = "warn"` lints.
+- **Spec Kit Artifacts & Expanded Test Suite**:
+  - Complete specification, plan, research, data model, quickstart, checklist, and task breakdown under `specs/030-v0.3-ephemeral-scratch-isolation/`.
+  - Expanded automated test suite to 94 tests (77 core unit tests + 17 CLI integration tests).
+
+### Changed
+- `MockHealer` now executes Gate 1, patch application, and Gate 2 against real files on disk inside `ScratchSandbox` rather than purely in-memory strings, and verifies pre-run vs. post-run `WorktreeManifest` parity on `--repo`.
+- `replayfix repro` now validates that `--repo` exists and is a directory (exiting with code `2` if missing) and prints scratch sandbox, ephemeral port, and tree digest telemetry during `--mock-heal`.
+- Bumped `SCHEMA_VERSION` in `replayfix_core::receipt` from `"0.2"` to `"0.3"`.
+
+### Security
+- Added symlink escape detection and relative path enforcement inside `ScratchSandbox` (`resolve_safe_path` and `reject_symlink_chain`).
+- Added a 32 MiB per-file safety limit (`MAX_WORKSPACE_FILE_BYTES`) during workspace snapshot and sandbox cloning to prevent memory exhaustion DoS.
+- Unauthorized mutation of the base repository during a run fails closed with `BASE_REPO_DIRTY_MUTATION_DETECTED` (exit code `11`).
+
+---
+
 ## [0.2.1] - 2026-10-27
 
 Maintenance and clean-architecture refactoring release following the comprehensive engineering confidence audit. Full notes: [docs/release-notes/v0.2.1.md](docs/release-notes/v0.2.1.md).
 
 ### Added
-- **SSOT String Representation for TriageStatus**: Added s_str() and Display implementation directly on TriageStatus in
-eplayfix_core::receipt, eliminating runtime serde string extraction overhead.
-- **SSOT CLI Exit Codes**: Introduced
-eplayfix_cli::exit_codes (SUCCESS = 0, DOCTOR_FAILED = 1, USAGE_OR_INPUT_ERROR = 2, INTERNAL_OR_SYSTEM_ERROR = 10, SECURITY_VIOLATION = 11, REPAIR_REJECTED = 30) centralizing all CLI termination pathways.
-- **Root Crate Re-exports**: Re-exported TriageStatus, AUDIT_RECEIPT_FILE, and TRIAGE_REPORT_FILE from
-eplayfix_core crate root.
-- **Automated Property Tests**: Added 	est_triage_status_as_str_and_display and 	est_triage_status_serde_parity ensuring exact equivalence between serde serialization and string representation.
+- **SSOT String Representation for `TriageStatus`**: Added `as_str()` and `Display` implementation directly on `TriageStatus` in `replayfix_core::receipt`, eliminating runtime serde string extraction overhead.
+- **SSOT CLI Exit Codes**: Introduced `replayfix_cli::exit_codes` (`SUCCESS = 0`, `DOCTOR_FAILED = 1`, `USAGE_OR_INPUT_ERROR = 2`, `INTERNAL_OR_SYSTEM_ERROR = 10`, `SECURITY_VIOLATION = 11`, `REPAIR_REJECTED = 30`) centralizing all CLI termination pathways.
+- **Root Crate Re-exports**: Re-exported `TriageStatus`, `AUDIT_RECEIPT_FILE`, and `TRIAGE_REPORT_FILE` from `replayfix_core` crate root.
+- **Automated Property Tests**: Added `test_triage_status_as_str_and_display` and `test_triage_status_serde_parity` ensuring exact equivalence between serde serialization and string representation.
 
 ### Changed
-- Refactored CLI triage report output to use native Display formatting directly on
-eport.status.
-- Replaced magic exit code numbers across CLI handlers with named exit_codes constants.
+- Refactored CLI triage report output to use native `Display` formatting directly on `report.status`.
+- Replaced magic exit code numbers across CLI handlers with named `exit_codes` constants.
 
 ### Removed
-- Debloated redundant status_name helper in
-eplayfix-cli.
+- Debloated redundant `status_name` helper in `replayfix-cli`.
 
 ---
 
@@ -49,7 +81,7 @@ eplayfix-cli.
 First release of the dual-gate loop. It runs against a **simulated oracle**: no browser, video, model or repository access is involved yet. Full notes: [docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md).
 
 ### Added
-- **Dual-gate state machine** (`replayfix_core::fsm`): `Init` Ã¢â€ â€™ `Gate1Red` Ã¢â€ â€™ `Repair` Ã¢â€ â€™ `Gate2Green`, plus a terminal `Rejected`. Illegal transitions fail closed.
+- **Dual-gate state machine** (`replayfix_core::fsm`): `Init` -> `Gate1Red` -> `Repair` -> `Gate2Green`, plus a terminal `Rejected`. Illegal transitions fail closed.
 - **Mock healer engine** (`replayfix_core::engine`): Gate 1 must be RED before repair; Gate 2 re-evaluates the same behavioral contract, compared by SHA-256 of its canonical JSON. RED is valid only when setup, target and action pass before a failed assertion.
 - **In-memory unified-diff patcher** (`replayfix_core::patch`): single file, exact offsets and context, no fuzz; rejects bad headers, mismatched hunk counts, overlaps, multi-file patches, creation and rename headers, and unsafe header paths.
 - **Anti-no-op guard**: empty, whitespace-only and net-zero patches end as `REPAIR_NOOP_REJECTED`.

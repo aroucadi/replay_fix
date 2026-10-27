@@ -9,7 +9,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.2";
+pub const SCHEMA_VERSION: &str = "0.3";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
 pub const AUDIT_RECEIPT_FILE: &str = "audit_receipt.json";
@@ -50,6 +50,10 @@ pub struct AuditReceipt {
     pub patch: PatchRecord,
     pub gate2: GateRecord,
     pub phase_trace: Vec<Phase>,
+    pub base_tree_sha256: String,
+    pub sandbox_tree_sha256: String,
+    pub base_repo_unmodified_verified: bool,
+    pub ephemeral_port: u16,
     pub created_at: String,
 }
 
@@ -62,6 +66,7 @@ pub enum TriageStatus {
     Gate2NotGreen,
     ContractMismatch,
     SecurityViolation,
+    BaseRepoDirtyMutationDetected,
 }
 
 impl TriageStatus {
@@ -75,6 +80,7 @@ impl TriageStatus {
             Self::Gate2NotGreen => "GATE2_NOT_GREEN",
             Self::ContractMismatch => "CONTRACT_MISMATCH",
             Self::SecurityViolation => "SECURITY_VIOLATION",
+            Self::BaseRepoDirtyMutationDetected => "BASE_REPO_DIRTY_MUTATION_DETECTED",
         }
     }
 
@@ -83,7 +89,7 @@ impl TriageStatus {
     pub const fn exit_code(self) -> i32 {
         match self {
             Self::Gate1NotRed | Self::ContractMismatch => 10,
-            Self::SecurityViolation => 11,
+            Self::SecurityViolation | Self::BaseRepoDirtyMutationDetected => 11,
             Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
         }
     }
@@ -181,6 +187,7 @@ mod tests {
         assert_eq!(TriageStatus::Gate1NotRed.exit_code(), 10);
         assert_eq!(TriageStatus::ContractMismatch.exit_code(), 10);
         assert_eq!(TriageStatus::SecurityViolation.exit_code(), 11);
+        assert_eq!(TriageStatus::BaseRepoDirtyMutationDetected.exit_code(), 11);
         assert_eq!(TriageStatus::RepairNoopRejected.exit_code(), 30);
         assert_eq!(TriageStatus::PatchApplyFailed.exit_code(), 30);
         assert_eq!(TriageStatus::Gate2NotGreen.exit_code(), 30);
@@ -234,6 +241,10 @@ mod tests {
             TriageStatus::SecurityViolation.to_string(),
             "SECURITY_VIOLATION"
         );
+        assert_eq!(
+            TriageStatus::BaseRepoDirtyMutationDetected.as_str(),
+            "BASE_REPO_DIRTY_MUTATION_DETECTED"
+        );
     }
 
     #[test]
@@ -245,6 +256,7 @@ mod tests {
             TriageStatus::Gate2NotGreen,
             TriageStatus::ContractMismatch,
             TriageStatus::SecurityViolation,
+            TriageStatus::BaseRepoDirtyMutationDetected,
         ] {
             let serialized = serde_json::to_string(&status).unwrap();
             assert_eq!(serialized, format!("\"{}\"", status.as_str()));
