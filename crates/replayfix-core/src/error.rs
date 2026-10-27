@@ -32,6 +32,9 @@ pub enum CoreError {
     #[error("Browser bridge error: {0}")]
     Browser(String),
 
+    #[error("CDP or bridge command timeout: {0}")]
+    CdpTimeout(String),
+
     #[error("Ambiguous or ungrounded locator: {0}")]
     Grounding(String),
 }

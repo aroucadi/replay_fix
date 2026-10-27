@@ -335,3 +335,22 @@ fn nonexistent_repo_directory_is_a_usage_error() {
     assert_eq!(code(&out), 2);
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not exist"));
 }
+
+#[test]
+fn run_subcommand_alias_with_bug_flag_works() {
+    let dir = scratch("run-bug-alias");
+    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args(["run", "--bug", "RF-01", "--mock-heal"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["task_id"], "RF-01");
+    assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+}

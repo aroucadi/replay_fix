@@ -816,7 +816,7 @@ impl PlaywrightBridge {
             let now = Instant::now();
             let Some(remaining) = deadline.checked_duration_since(now) else {
                 self.poison_and_terminate();
-                return Err(CoreError::Browser(format!(
+                return Err(CoreError::CdpTimeout(format!(
                     "Playwright bridge timed out after {}ms waiting for request_id={req_id}{}",
                     timeout.as_millis(),
                     self.format_stderr_suffix()
@@ -872,7 +872,7 @@ impl PlaywrightBridge {
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     self.poison_and_terminate();
-                    return Err(CoreError::Browser(format!(
+                    return Err(CoreError::CdpTimeout(format!(
                         "Playwright bridge timed out after {}ms waiting for request_id={req_id}{}",
                         timeout.as_millis(),
                         self.format_stderr_suffix()

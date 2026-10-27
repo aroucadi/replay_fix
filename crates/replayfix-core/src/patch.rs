@@ -8,11 +8,10 @@ use crate::manifest::TaskManifest;
 use regex::Regex;
 use std::sync::OnceLock;
 
-fn hunk_header_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@").expect("valid hunk regex")
-    })
+fn hunk_header_regex() -> Option<&'static Regex> {
+    static RE: OnceLock<Option<Regex>> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@").ok())
+        .as_ref()
 }
 
 /// Result of applying a unified diff in memory.
@@ -164,7 +163,7 @@ impl UnifiedPatcher {
         let mut i = header + 2;
         while i < lines.len() {
             let line = lines[i];
-            let Some(caps) = hunk_header_regex().captures(line) else {
+            let Some(caps) = hunk_header_regex().and_then(|re| re.captures(line)) else {
                 if line.starts_with("--- ") {
                     return Err(CoreError::Patch(
                         "Multi-file patches are not supported".to_string(),

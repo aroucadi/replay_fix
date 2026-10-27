@@ -57,6 +57,10 @@ pub struct ReproArgs {
     #[arg(long)]
     pub task_id: Option<String>,
 
+    /// Shorthand bug identifier (e.g. RF-01) that populates --task-id, --bug-ref, and --video when omitted
+    #[arg(long)]
+    pub bug: Option<String>,
+
     /// Description or title of the defect
     #[arg(long)]
     pub title: Option<String>,
@@ -139,6 +143,7 @@ enum Commands {
         json: bool,
     },
     /// Reproduce, verify, and repair visual defects
+    #[command(visible_alias = "run")]
     Repro(Box<ReproArgs>),
 }
 
@@ -260,6 +265,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
     let ReproArgs {
         manifest,
         task_id,
+        bug,
         title,
         repo,
         bug_ref,
@@ -313,16 +319,21 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         };
     }
 
-    let id = task_id.unwrap_or_else(|| {
-        usage_error(
-            "Missing required argument '--task-id' (or specify '--manifest')",
-            theme,
-        )
-    });
-    let bug_branch =
-        bug_ref.unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
-    let video_file =
-        video.unwrap_or_else(|| usage_error("Missing required argument '--video'", theme));
+    let bug_shorthand = bug.as_deref();
+    let id = task_id
+        .or_else(|| bug_shorthand.map(str::to_string))
+        .unwrap_or_else(|| {
+            usage_error(
+                "Missing required argument '--task-id' (or specify '--bug' / '--manifest')",
+                theme,
+            )
+        });
+    let bug_branch = bug_ref
+        .or_else(|| bug_shorthand.map(|b| format!("bug/{b}")))
+        .unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
+    let video_file = video
+        .or_else(|| bug_shorthand.map(|b| format!("recordings/{b}.mp4")))
+        .unwrap_or_else(|| usage_error("Missing required argument '--video'", theme));
     let task_title = title.unwrap_or_else(|| format!("Reproduction Task {id}"));
 
     let adapter = server_cmd.is_some().then_some(EnvironmentAdapter {

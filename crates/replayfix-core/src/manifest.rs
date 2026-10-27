@@ -1,24 +1,25 @@
 use crate::error::{CoreError, Result};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
-static ID_REGEX: OnceLock<Regex> = OnceLock::new();
-static REF_REGEX: OnceLock<Regex> = OnceLock::new();
-static ENV_VAR_REGEX: OnceLock<Regex> = OnceLock::new();
-
-fn get_id_regex() -> &'static Regex {
-    ID_REGEX.get_or_init(|| Regex::new(r"^[a-zA-Z0-9_-]+$").expect("valid id regex"))
+fn is_valid_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
 }
 
-fn get_ref_regex() -> &'static Regex {
-    REF_REGEX.get_or_init(|| Regex::new(r"^[a-zA-Z0-9_\-\./]+$").expect("valid ref regex"))
+fn is_valid_ref(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/'))
 }
 
-fn get_env_var_regex() -> &'static Regex {
-    ENV_VAR_REGEX
-        .get_or_init(|| Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$").expect("valid env var regex"))
+fn is_valid_env_var(s: &str) -> bool {
+    let mut bytes = s.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 fn default_port_env_var() -> String {
@@ -62,7 +63,7 @@ impl Default for EnvironmentAdapter {
 impl EnvironmentAdapter {
     /// Validate environment adapter fields against injection and malicious payloads
     pub fn validate(&self) -> Result<()> {
-        if !get_env_var_regex().is_match(&self.port_env_var) {
+        if !is_valid_env_var(&self.port_env_var) {
             return Err(CoreError::SecurityViolation(format!(
                 "Invalid port_env_var '{}': must be a valid environment variable name matching ^[a-zA-Z_][a-zA-Z0-9_]*$",
                 self.port_env_var
@@ -155,7 +156,7 @@ impl TaskManifest {
 
     /// Validate the manifest according to canonical task_manifest schema rules
     pub fn validate(&self) -> Result<()> {
-        if !get_id_regex().is_match(&self.task_id) {
+        if !is_valid_id(&self.task_id) {
             return Err(CoreError::Manifest(format!(
                 "Invalid task_id '{}': must match ^[a-zA-Z0-9_-]+$",
                 self.task_id
@@ -168,7 +169,7 @@ impl TaskManifest {
             ));
         }
 
-        if !get_ref_regex().is_match(&self.bug_ref) {
+        if !is_valid_ref(&self.bug_ref) {
             return Err(CoreError::Manifest(format!(
                 "Invalid bug_ref '{}': must match ^[a-zA-Z0-9_\\-\\./]+$",
                 self.bug_ref
@@ -176,7 +177,7 @@ impl TaskManifest {
         }
 
         if let Some(clean_ref) = &self.clean_ref {
-            if !get_ref_regex().is_match(clean_ref) {
+            if !is_valid_ref(clean_ref) {
                 return Err(CoreError::Manifest(format!(
                     "Invalid clean_ref '{}': must match ^[a-zA-Z0-9_\\-\\./]+$",
                     clean_ref
