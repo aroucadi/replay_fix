@@ -28,6 +28,12 @@ pub enum CoreError {
 
     #[error("Worktree isolation error: {0}")]
     Worktree(String),
+
+    #[error("Browser bridge error: {0}")]
+    Browser(String),
+
+    #[error("Ambiguous or ungrounded locator: {0}")]
+    Grounding(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

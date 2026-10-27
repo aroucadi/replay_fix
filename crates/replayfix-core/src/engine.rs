@@ -1,18 +1,20 @@
-//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN), driven by a simulated oracle
-//! inside an isolated ephemeral scratch sandbox ($\Delta \text{repo} = 0$).
-//!
-//! The oracle statically inspects the sandbox file for the `cart.items.length`
-//! defect signature. It stands in for browser execution until real gates exist.
+//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN), supporting both the
+//! deterministic simulated oracle and live Playwright CDP browser execution inside an
+//! isolated ephemeral scratch sandbox ($\Delta \text{repo} = 0$).
 
+use crate::browser::{
+    BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer, BRIDGE_SCRIPT_FILENAME,
+};
 use crate::digest::{canonical_json, sha256_hex};
 use crate::error::{CoreError, Result};
 use crate::fixtures::Fixture;
 use crate::fsm::{Phase, PhaseMachine};
+use crate::locator::{DomCandidate, GroundedTarget, LocatorResolver};
 use crate::patch::UnifiedPatcher;
 use crate::platform::EphemeralPort;
 use crate::receipt::{
     timestamp_now, AuditReceipt, GateRecord, PatchRecord, TriageReport, TriageStatus, DISCLAIMER,
-    SCHEMA_VERSION, SUBSTRATE,
+    DISCLAIMER_LIVE_BROWSER, SCHEMA_VERSION, SUBSTRATE, SUBSTRATE_LIVE_BROWSER,
 };
 use crate::worktree::{ScratchSandbox, WorktreeManifest};
 use serde::{Deserialize, Serialize};
@@ -128,7 +130,14 @@ fn describe_invalid(events: &[OracleEvent]) -> String {
     }
 }
 
-/// Terminal result of a mock-heal run.
+/// Options for live Playwright CDP browser execution.
+#[derive(Debug, Clone, Default)]
+pub struct LiveBrowserOptions {
+    pub headed: bool,
+    pub candidate_override: Option<Vec<DomCandidate>>,
+}
+
+/// Terminal result of a mock-heal or live-browser run.
 #[derive(Debug, Clone)]
 pub enum HealOutcome {
     Verified(Box<AuditReceipt>),
@@ -181,6 +190,385 @@ impl MockHealer {
             &fixture.contract,
             None,
         )
+    }
+
+    /// Run the full two-gate loop in a live Chromium browser via Playwright CDP grounding
+    /// (`document.elementFromPoint` + `ariaSnapshot` + `LocatorResolver`), serving the
+    /// isolated `ScratchSandbox` over an OS-assigned ephemeral localhost port.
+    pub fn run_live_browser_in_repo(
+        fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        options: &LiveBrowserOptions,
+    ) -> Result<HealOutcome> {
+        let task_id = fixture.task_id;
+        let mut fsm = PhaseMachine::new();
+
+        // 1. Capture pre-run dual-layer workspace manifest on the base repository.
+        let pre_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
+
+        // 2. Create isolated scratch sandbox.
+        let mut sandbox = ScratchSandbox::create_with_excludes(repo_path, task_id, extra_excludes)?;
+
+        macro_rules! reject_live {
+            ($status:expr, $reason:expr) => {{
+                let _ = sandbox.teardown();
+                fsm.advance(Phase::Rejected)?;
+                return Ok(HealOutcome::Rejected(Box::new(
+                    TriageReport::with_substrate(
+                        $status,
+                        $reason,
+                        task_id,
+                        SUBSTRATE_LIVE_BROWSER,
+                        fsm.trace(),
+                    ),
+                )));
+            }};
+        }
+
+        // 3. Materialize target source file and HTML host shell inside the scratch sandbox.
+        let sandbox_target_file = sandbox.resolve_safe_path(fixture.target_path)?;
+        if !sandbox_target_file.exists() {
+            sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
+        }
+        let sandbox_index_html = sandbox.resolve_safe_path("index.html")?;
+        if !sandbox_index_html.exists() {
+            sandbox.write_file("index.html", fixture.index_html)?;
+        }
+        let initial_source = sandbox.read_file(fixture.target_path)?;
+
+        // 4. Start embedded localhost HTTP server on an OS-assigned ephemeral port (127.0.0.1:0).
+        let mut server = match SandboxServer::start(sandbox.root(), None) {
+            Ok(s) => s,
+            Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
+        };
+        let ephemeral_port = server.port();
+        let page_url = format!("{}/index.html", server.base_url());
+
+        // 5. Start Playwright Node.js stdio bridge.
+        let mut bridge = match PlaywrightBridge::start(
+            sandbox.root(),
+            options.headed,
+            fixture.viewport_width,
+            fixture.viewport_height,
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                server.shutdown();
+                reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string());
+            }
+        };
+        sandbox.register_child_pid(bridge.pid());
+
+        // 6. Gate 1 (Live Browser RED): Probe, ground locator, click, and observe runtime TypeError.
+        let contract_sha256 = fixture.contract.digest()?;
+        let (gate1_grounded, gate1_events) = match Self::execute_browser_gate(
+            &mut bridge,
+            fixture,
+            &page_url,
+            options.candidate_override.as_deref(),
+        ) {
+            Ok(pair) => pair,
+            Err(CoreError::Grounding(msg)) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::AmbiguousGrounding, msg);
+            }
+            Err(e) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string());
+            }
+        };
+
+        let gate1_verdict = classify(&gate1_events);
+        if gate1_verdict != GateVerdict::Red {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::Gate1NotRed,
+                format!(
+                    "Gate 1 must be RED in live browser before repair (got {:?}): {}",
+                    gate1_verdict,
+                    describe_invalid(&gate1_events)
+                )
+            );
+        }
+        fsm.advance(Phase::Gate1Red)?;
+        let gate1_at = timestamp_now();
+
+        // 7. Repair: validate and apply candidate patch on disk inside the scratch sandbox.
+        fsm.advance(Phase::Repair)?;
+        if diff.trim().is_empty() {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::RepairNoopRejected,
+                "The candidate patch is empty; a repair must change the source"
+            );
+        }
+        let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
+            Ok(o) => o,
+            Err(CoreError::SecurityViolation(msg)) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::SecurityViolation, msg);
+            }
+            Err(e) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
+            }
+        };
+        if outcome.target_path != fixture.target_path {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::PatchApplyFailed,
+                format!(
+                    "Patch targets '{}' but the repair scope is '{}'",
+                    outcome.target_path, fixture.target_path
+                )
+            );
+        }
+        if outcome.is_noop(&initial_source) {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::RepairNoopRejected,
+                "The patch applies cleanly but leaves the source unchanged"
+            );
+        }
+
+        sandbox.write_file(&outcome.target_path, &outcome.patched)?;
+        let bridge_script_exclude = vec![PathBuf::from(BRIDGE_SCRIPT_FILENAME)];
+        let sandbox_manifest =
+            WorktreeManifest::capture_with_excludes(sandbox.root(), &bridge_script_exclude)?;
+        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
+
+        // 8. Gate 2 (Live Browser GREEN): Reload page from sandbox server, verify same grounded target, click, and assert clean output.
+        let gate2_sha256 = fixture.contract.digest()?;
+        if gate2_sha256 != contract_sha256 {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::ContractMismatch,
+                "Gate 2 contract digest differs from Gate 1; refusing to compare results"
+            );
+        }
+
+        let (gate2_grounded, gate2_events) = match Self::execute_browser_gate(
+            &mut bridge,
+            fixture,
+            &page_url,
+            options.candidate_override.as_deref(),
+        ) {
+            Ok(pair) => pair,
+            Err(CoreError::Grounding(msg)) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::AmbiguousGrounding, msg);
+            }
+            Err(e) => {
+                bridge.shutdown();
+                server.shutdown();
+                reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string());
+            }
+        };
+
+        if gate2_grounded.selector != gate1_grounded.selector {
+            bridge.shutdown();
+            server.shutdown();
+            reject_live!(
+                TriageStatus::ContractMismatch,
+                format!(
+                    "Gate 2 grounded selector '{}' differs from Gate 1 selector '{}'",
+                    gate2_grounded.selector, gate1_grounded.selector
+                )
+            );
+        }
+
+        bridge.shutdown();
+        server.shutdown();
+
+        let gate2_verdict = classify(&gate2_events);
+        match gate2_verdict {
+            GateVerdict::Green => {}
+            GateVerdict::Red => reject_live!(
+                TriageStatus::Gate2NotGreen,
+                "The defect still reproduces in live browser after the patch"
+            ),
+            GateVerdict::Invalid => reject_live!(
+                TriageStatus::Gate2NotGreen,
+                format!(
+                    "Gate 2 produced no valid verdict in live browser: {}",
+                    describe_invalid(&gate2_events)
+                )
+            ),
+        }
+
+        // 9. Verify dual-layer base repository integrity (\Delta repo = 0) before accepting Gate 2.
+        let post_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
+        if let Err(err) = pre_manifest.verify_unchanged(&post_manifest) {
+            reject_live!(TriageStatus::BaseRepoDirtyMutationDetected, err.to_string());
+        }
+
+        // 10. Teardown the scratch sandbox cleanly.
+        sandbox.teardown()?;
+
+        fsm.advance(Phase::Gate2Green)?;
+        let gate2_at = timestamp_now();
+
+        Ok(HealOutcome::Verified(Box::new(AuditReceipt {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: "VERIFIED_REPAIRED".to_string(),
+            task_id: task_id.to_string(),
+            substrate: SUBSTRATE_LIVE_BROWSER.to_string(),
+            disclaimer: DISCLAIMER_LIVE_BROWSER.to_string(),
+            contract_id: fixture.contract.contract_id.clone(),
+            contract_sha256: contract_sha256.clone(),
+            gate1: GateRecord {
+                observed_at: gate1_at,
+                verdict: gate1_verdict,
+                contract_sha256,
+                events: gate1_events,
+            },
+            patch: PatchRecord {
+                target_path: outcome.target_path.clone(),
+                sha256: sha256_hex(diff.as_bytes()),
+                insertions: outcome.insertions,
+                deletions: outcome.deletions,
+                files_changed: outcome.files_changed,
+            },
+            gate2: GateRecord {
+                observed_at: gate2_at,
+                verdict: gate2_verdict,
+                contract_sha256: gate2_sha256,
+                events: gate2_events,
+            },
+            phase_trace: fsm.trace().to_vec(),
+            base_tree_sha256: pre_manifest.tree_sha256,
+            sandbox_tree_sha256,
+            base_repo_unmodified_verified: true,
+            ephemeral_port,
+            grounding_telemetry: Some(gate1_grounded.telemetry),
+            created_at: timestamp_now(),
+        })))
+    }
+
+    fn execute_browser_gate(
+        bridge: &mut PlaywrightBridge,
+        fixture: &Fixture,
+        page_url: &str,
+        candidate_override: Option<&[DomCandidate]>,
+    ) -> Result<(GroundedTarget, Vec<OracleEvent>)> {
+        let probe_resp = bridge.send_command(&BridgeCommand::ProbePage {
+            url: page_url.to_string(),
+            click_x: fixture.click_x,
+            click_y: fixture.click_y,
+        })?;
+
+        let (navigated, aria_snapshot, live_candidates, probe_errors) = match probe_resp {
+            BridgeResponse::ProbeResult {
+                navigated,
+                aria_snapshot,
+                candidates,
+                page_errors,
+            } => (navigated, aria_snapshot, candidates, page_errors),
+            BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+            other => {
+                return Err(CoreError::Browser(format!(
+                    "Unexpected response to PROBE_PAGE: {other:?}"
+                )))
+            }
+        };
+
+        if !navigated || !probe_errors.is_empty() {
+            return Ok((
+                GroundedTarget {
+                    candidate: DomCandidate {
+                        tag: String::new(),
+                        role: String::new(),
+                        accessible_name: String::new(),
+                        test_id: None,
+                        bbox: crate::locator::BoundingBox {
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                        },
+                        is_element_from_point: false,
+                    },
+                    selector: String::new(),
+                    telemetry: crate::locator::GroundingTelemetry {
+                        click_x: fixture.click_x,
+                        click_y: fixture.click_y,
+                        viewport_normalized: false,
+                        element_from_point_match: false,
+                        accessible_name_match: false,
+                        candidate_score_bps: 0,
+                        score_margin_bps: 0,
+                        matched_selector: String::new(),
+                        aria_snapshot_excerpt: String::new(),
+                    },
+                },
+                vec![OracleEvent {
+                    seq: 0,
+                    kind: OracleEventKind::Setup,
+                    passed: false,
+                }],
+            ));
+        }
+
+        let effective_candidates = candidate_override.unwrap_or(&live_candidates);
+        let grounded = LocatorResolver::resolve(
+            fixture.click_x,
+            fixture.click_y,
+            fixture.viewport_width,
+            fixture.viewport_height,
+            &aria_snapshot,
+            effective_candidates,
+        )?;
+
+        let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
+            role: grounded.candidate.role.clone(),
+            accessible_name: grounded.candidate.accessible_name.clone(),
+            test_id: grounded.candidate.test_id.clone(),
+            output_selector: "#cart-summary-output".to_string(),
+        })?;
+
+        let (clicked, click_errors, result_text) = match click_resp {
+            BridgeResponse::ClickResult {
+                clicked,
+                page_errors,
+                result_text,
+            } => (clicked, page_errors, result_text),
+            BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+            other => {
+                return Err(CoreError::Browser(format!(
+                    "Unexpected response to CLICK_AND_OBSERVE: {other:?}"
+                )))
+            }
+        };
+
+        let assert_passed =
+            clicked && click_errors.is_empty() && result_text == fixture.expected_output_text;
+
+        let checks = [true, true, clicked, assert_passed];
+        let mut events = Vec::with_capacity(4);
+        for (seq, (kind, passed)) in EVENT_ORDER.iter().zip(checks).enumerate() {
+            events.push(OracleEvent {
+                seq: seq as u32,
+                kind: *kind,
+                passed,
+            });
+            if !passed {
+                break;
+            }
+        }
+
+        Ok((grounded, events))
     }
 
     fn run_in_repo_with_options(
@@ -352,6 +740,7 @@ impl MockHealer {
             sandbox_tree_sha256,
             base_repo_unmodified_verified: true,
             ephemeral_port,
+            grounding_telemetry: None,
             created_at: timestamp_now(),
         })))
     }
@@ -360,6 +749,7 @@ impl MockHealer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::locator::BoundingBox;
 
     fn rf01() -> Fixture {
         Fixture::for_task("RF-01").unwrap()
@@ -403,7 +793,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.3");
+        assert_eq!(receipt.schema_version, "0.4");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -428,6 +818,90 @@ mod tests {
         assert_eq!((receipt.patch.insertions, receipt.patch.deletions), (1, 1));
         assert_eq!(receipt.gate2.events.len(), 4);
         assert!(receipt.gate2.events.iter().all(|e| e.passed));
+    }
+
+    #[test]
+    fn test_live_browser_two_gate_verification_and_ambiguity_abstention() {
+        let f = rf01();
+        let repo = temp_repo_dir("live-browser");
+
+        // 1. Happy path in real Chromium browser
+        let opts = LiveBrowserOptions::default();
+        let HealOutcome::Verified(receipt) =
+            MockHealer::run_live_browser_in_repo(&f, f.builtin_diff, &repo, &[], &opts).unwrap()
+        else {
+            panic!("expected live browser verification");
+        };
+        assert_eq!(receipt.schema_version, "0.4");
+        assert_eq!(receipt.substrate, "playwright-cdp");
+        assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
+        assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
+        assert!(receipt.base_repo_unmodified_verified);
+        let telemetry = receipt
+            .grounding_telemetry
+            .expect("expected grounding telemetry");
+        assert_eq!(
+            telemetry.matched_selector,
+            "page.getByRole('button', { name: 'Refresh Cart', exact: true })"
+        );
+        assert!(telemetry.element_from_point_match);
+        assert!(telemetry.accessible_name_match);
+        assert_eq!(telemetry.candidate_score_bps, 10_000);
+
+        // 2. Ambiguous candidate tie fails closed with AMBIGUOUS_GROUNDING (exit 22)
+        let ambiguous_opts = LiveBrowserOptions {
+            headed: false,
+            candidate_override: Some(vec![
+                DomCandidate {
+                    tag: "button".into(),
+                    role: "button".into(),
+                    accessible_name: "Refresh Cart".into(),
+                    test_id: None,
+                    bbox: BoundingBox {
+                        x: 100,
+                        y: 100,
+                        width: 120,
+                        height: 40,
+                    },
+                    is_element_from_point: true,
+                },
+                DomCandidate {
+                    tag: "button".into(),
+                    role: "button".into(),
+                    accessible_name: "Refresh Cart".into(),
+                    test_id: Some("duplicate-cart-btn".into()),
+                    bbox: BoundingBox {
+                        x: 102,
+                        y: 100,
+                        width: 120,
+                        height: 40,
+                    },
+                    is_element_from_point: false,
+                },
+                DomCandidate {
+                    tag: "button".into(),
+                    role: "button".into(),
+                    accessible_name: "Secondary Action".into(),
+                    test_id: Some("secondary-btn".into()),
+                    bbox: BoundingBox {
+                        x: 100,
+                        y: 100,
+                        width: 120,
+                        height: 40,
+                    },
+                    is_element_from_point: true,
+                },
+            ]),
+        };
+        let outcome =
+            MockHealer::run_live_browser_in_repo(&f, f.builtin_diff, &repo, &[], &ambiguous_opts)
+                .unwrap();
+        let t = rejected(outcome);
+        assert_eq!(t.status, TriageStatus::AmbiguousGrounding);
+        assert_eq!(t.exit_code, 22);
+        assert_eq!(t.substrate, "playwright-cdp");
+
+        let _ = fs::remove_dir_all(&repo);
     }
 
     #[test]

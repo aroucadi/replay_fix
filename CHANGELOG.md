@@ -10,12 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Roadmap to v1.0.0
 
 The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
-- **Spec 040 (v0.4.0)**: Playwright CDP spatial grounding, `ariaSnapshot` inspection, and coordinate snapping.
 - **Spec 050 (v0.5.0)**: Video telemetry ingestion, FFmpeg keyframe extraction, and SAM 3.1 centroid alignment.
 - **Spec 060 (v0.6.0)**: Meta Muse Wonder bounded AST repair and localized patch synthesis.
 - **Spec 070 (v0.7.0)**: Differential diagnosis, SHA-256 test freezing, and 2-run stability pass.
 - **Spec 080 (v0.8.0)**: Observability suite, headed replay mode (`--headed`), and trace visualization.
 - **Spec 090 (v0.9.0 & v1.0.0)**: RFC 6962 Merkle tree audit receipt generation, Ed25519 signing, and 5-bug benchmark sweep on `MetaPulse`.
+
+---
+
+## [0.4.0] - 2026-10-27
+
+Delivers **Spec 040 (`040-v0.4-playwright-cdp-grounding`)**: Playwright CDP spatial-semantic grounding, accessibility tree (`ariaSnapshot`) DOM Grounding Invariant verification, fail-closed ambiguity abstention (`AMBIGUOUS_GROUNDING`, exit code `22`), line-delimited JSON-lines stdio IPC (`PlaywrightBridge`), and live Chromium two-gate verification (`--live-browser` and `--headed`). Full notes: [docs/release-notes/v0.4.0.md](docs/release-notes/v0.4.0.md).
+
+### Added
+- **Spatial-Semantic Locator Grounding (`replayfix_core::locator`)**:
+  - `BoundingBox`, `DomCandidate`, `GroundedTarget`, `GroundingTelemetry`, and `LocatorResolver`.
+  - Integer basis-point composite scoring (`0..=10_000` bps) combining spatial containment (`4000` bps), semantic accessibility identity (`4000` bps), and DOM hierarchy specificity (`0..=2000` bps) for full RFC 8785 canonical JSON compatibility.
+  - **DOM Grounding Invariant**: Cross-checks every synthesized semantic locator (`getByRole` / `getByTestId`) against Playwright's live `ariaSnapshot` YAML before execution.
+  - **Strict `.first()` Ban**: Rejects positional disambiguators (`.first()`, `.nth()`, `:nth-match`).
+  - **Fail-Closed Ambiguity Guard**: Abstains when the top two candidates score within $|\Delta S| < 0.25$ (`< 2500` bps), emitting `triage_report.json` with `status: "AMBIGUOUS_GROUNDING"` (exit code `22`).
+- **Ephemeral Sandbox HTTP Server & Playwright Bridge (`replayfix_core::browser`)**:
+  - `SandboxServer`: Serves isolated `ScratchSandbox` files over `127.0.0.1:<ephemeral_port>` with path-traversal, Windows drive-letter prefix, and symlink defenses (`403 Forbidden`).
+  - `PlaywrightBridge`: Spawns a Node.js child process speaking flushed line-delimited JSON (`\n`) over `stdin`/`stdout` (`START_BROWSER`, `PROBE_PAGE`, `CLICK_AND_OBSERVE`, `SHUTDOWN`), automatically resolving Playwright from local `node_modules` or npm `_npx` caches and registering its process tree for deterministic cleanup.
+- **Live Browser Two-Gate Verification (`--live-browser` & `--headed`)**:
+  - `MockHealer::run_live_browser_in_repo` and `LiveBrowserOptions` in `replayfix_core::engine` driving Gate 1 (RED runtime `TypeError` in Chromium) -> disk patch in `ScratchSandbox` -> Gate 2 (GREEN DOM assertion in Chromium) under identical SHA-256 behavioral contracts and $\Delta \text{repo} = 0$ verification.
+  - Added `--live-browser` and `--mock-ambiguous` flags to `replayfix repro` (with `--headed` launching visible Chromium).
+- **Receipt Schema `"0.4"`**:
+  - Bumped `SCHEMA_VERSION` to `"0.4"`, added `SUBSTRATE_LIVE_BROWSER` (`"playwright-cdp"`), `TriageStatus::AmbiguousGrounding` (exit code `22`), `TriageStatus::BridgeExecutionFailed` (exit code `20`), and `grounding_telemetry: Option<GroundingTelemetry>` on `AuditReceipt`.
+- **Spec Kit Artifacts & Expanded Test Suite**:
+  - Complete specification, plan, research, data model, quickstart, checklist, and task breakdown under `specs/040-v0.4-playwright-cdp-grounding/`.
+  - Expanded automated test suite to 107 tests (86 core unit tests + 19 CLI integration tests + 2 CLI UI unit tests).
+
+### Changed
+- Bumped workspace crate versions in `replayfix-core` and `replayfix-cli` from `0.3.3` to `0.4.0`.
+- Extended `Fixture::rf01()` with `index_html`, `click_x: 160`, `click_y: 120`, `viewport_width: 1280`, `viewport_height: 720`, and `expected_output_text: "Items: 0"`.
+
+### Security
+- `SandboxServer` binds strictly to `127.0.0.1` loopback and rejects path traversal (`../`), Windows drive-letter prefixes (`GET /C:/...`), and symlinks with `403 Forbidden`.
+- `LocatorResolver` enforces the DOM Grounding Invariant against `ariaSnapshot` and bans `.first()` / `:nth-match` selectors.
 
 ---
 

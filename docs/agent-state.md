@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.3.3` (v0.3 Release Quality Gate, Workspace Version Harmonization, BeautifulRust Verified)
-- **Status**: Qualified & shipped; baseline locked for Spec 040 (`040-v0.4-playwright-cdp-grounding`)
+- **Active Milestone**: `v0.4.0` (`040-v0.4-playwright-cdp-grounding` — Playwright CDP Grounding & Live Browser Verification)
+- **Status**: Qualified & shipped; baseline locked for Spec 050 (`050-v0.5-video-telemetry-ingestion`)
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -14,19 +14,16 @@
   - Gates evaluate the same contract (SHA-256 of canonical JSON); mismatch aborts.
   - Strict unified-diff patcher; anti-no-op guard; receipts (`audit_receipt.json` / `triage_report.json`) with stale-artifact removal.
   - Codified 10 Rust Engineering Principles (`docs/engineering-principles-rust.md`) with `unsafe_code = "forbid"` and `missing_debug_implementations = "warn"`.
-- [x] **v0.3.0 Ephemeral Scratch Isolation**:
+- [x] **v0.3.0 – v0.3.3 Ephemeral Scratch Isolation & Terminal UX**:
   - `WorktreeManifest`: dual-layer workspace integrity snapshot (Layer 1 recursive SHA-256 content tree + Layer 2 `git status --porcelain=v1 -uall`).
   - `ScratchSandbox`: clones `--repo` into an isolated OS temp directory, runs Gate 1 -> disk patch -> Gate 2 inside the sandbox, verifies $\Delta \text{repo} = 0$ (`BASE_REPO_DIRTY_MUTATION_DETECTED`, exit code 11 on violation), and tears down child process trees and read-only files with retry backoff.
   - `EphemeralPort::allocate()` (`127.0.0.1:0`) and `Platform::terminate_process_tree(pid)`.
-  - Receipt schema `"0.3"` (`base_tree_sha256`, `sandbox_tree_sha256`, `base_repo_unmodified_verified`, `ephemeral_port`).
-  - **Honesty note**: the gate oracle is still simulated (static inspection of `src/cart-summary.js` inside the scratch sandbox for `RF-01`). Real browser gates arrive in Spec 040.
-- [x] **v0.3.1 & v0.3.2 Terminal UX & Interaction Engineering**:
-  - Semantic styling, accessible symbols, output modes (`Human`, `Quiet`, `Machine`), deterministic color precedence (`--color auto|always|never`).
-  - Security boundary trust cards ($\Delta \text{repo} = 0$, scratch isolation, test freeze), structured doctor diagnostics with remediation, and `--dry-run`.
-- [x] **v0.3.3 Release Quality Gate & Version Harmonization**:
-  - Workspace crate versions synchronized to `0.3.3` across `replayfix-core` and `replayfix-cli`.
-  - Windows `.cmd` batch probe resolution for `npx` and `playwright`, resulting in 100% green `replayfix doctor` (Git 2.55, Node 24.19, Playwright 1.64.1, FFmpeg 15.2).
-  - 96 automated tests passing (77 core, 17 integration, 2 UI); zero Clippy warnings; zero `.unwrap()` or `.expect()` in production source.
+  - Terminal UX (`OutputMode`, `--color`, `--quiet`, `--dry-run`, trust boundary cards, structured `doctor` diagnostics).
+- [x] **v0.4.0 Playwright CDP Grounding & Live Browser Verification**:
+  - `LocatorResolver`: spatial-semantic candidate scoring in integer basis points (`0..=10_000` bps), **DOM Grounding Invariant** cross-checked against Playwright `ariaSnapshot`, `.first()` / `:nth-match` ban, and **Fail-Closed Ambiguity Guard** ($|\Delta S| < 0.25$ / `< 2_500` bps -> `AMBIGUOUS_GROUNDING`, exit code `22`).
+  - `SandboxServer` & `PlaywrightBridge`: serves `ScratchSandbox` over `127.0.0.1:<ephemeral_port>` with path-traversal/drive-prefix/symlink defenses, and drives real Chromium over line-delimited JSON-lines stdio IPC.
+  - `replayfix repro --live-browser` (and `--headed`): executes Gate 1 (RED) -> disk patch -> Gate 2 (GREEN) in live Chromium inside `ScratchSandbox` with $\Delta \text{repo} = 0$ verification and receipt schema `"0.4"` (`substrate: "playwright-cdp"`, `grounding_telemetry`).
+  - 107 automated tests passing (86 core unit tests, 19 CLI integration tests, 2 CLI UI unit tests); zero Clippy warnings; zero `.unwrap()` or `.expect()` in production source.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
@@ -34,11 +31,11 @@
 
 ## 4. Deferred Items (documented, not hidden)
 - `tracing_subscriber` is initialised but nothing logs yet; kept because later specs add structured logging.
+- Click hotspot coordinates `(160, 120)` in v0.4.0 come from the `RF-01` fixture metadata; FFmpeg video keyframe extraction and SAM 3.1 perception arrive in Spec 050.
 - Patches touching test files are not rejected yet (Spec 070). Receipts are unsigned (Spec 090).
-- Only `RF-01` has a built-in mock scenario; real browser scenarios arrive with Playwright CDP grounding (Spec 040).
 
 ## 5. v1.0.0 Readiness
-- **Shipping status**: BLOCKED until Specs 040–090 are implemented and verified.
+- **Shipping status**: BLOCKED until Specs 050–090 are implemented and verified.
 
 ## 6. Next Immediate Task
-- Advance to Spec 040: `040-v0.4-playwright-cdp-grounding`.
+- Advance to Spec 050: `050-v0.5-video-telemetry-ingestion`.
