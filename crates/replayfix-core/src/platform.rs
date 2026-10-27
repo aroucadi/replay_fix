@@ -79,8 +79,20 @@ impl Platform {
         }
     }
 
-    /// Run a command adapting for Windows vs Unix differences cleanly
+    /// Run a command adapting for Windows vs Unix differences cleanly.
+    ///
+    /// On Windows, batch and shell scripts (.cmd, .bat) installed by npm/Node (such as npx.cmd,
+    /// playwright.cmd, npm.cmd) are not Win32 PE .exe binaries and cannot be spawned directly by
+    /// CreateProcessW without their .cmd extension.
     pub fn create_command(program: &str) -> Command {
+        if cfg!(windows)
+            && !program.ends_with(".exe")
+            && !program.ends_with(".cmd")
+            && !program.ends_with(".bat")
+            && (program == "npx" || program == "npm" || program == "playwright")
+        {
+            return Command::new(format!("{program}.cmd"));
+        }
         Command::new(program)
     }
 
