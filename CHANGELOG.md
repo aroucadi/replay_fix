@@ -18,6 +18,24 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.4.1] - 2026-10-27
+
+High-Risk Systems Gate adversarial hardening release for Playwright CDP grounding, child process timeout enforcement, protocol correlation, and DOM TOCTOU safety. Full notes: [docs/release-notes/v0.4.1.md](docs/release-notes/v0.4.1.md).
+
+### Fixed & Hardened
+- **Deadline-Bounded Non-Blocking Stdout Reader (`PlaywrightBridge`)**: Replaced blocking `BufReader::read_line` on the child's OS pipe with a dedicated reader thread (`spawn_stdout_reader`), `read_bounded_line` (`4 MiB` cap), and `mpsc::Receiver::recv_timeout` (`DEFAULT_BRIDGE_STARTUP_TIMEOUT = 20s`, `DEFAULT_BRIDGE_COMMAND_TIMEOUT = 15s`, `SHUTDOWN_COMMAND_TIMEOUT = 1.5s`), immediately poisoning and terminating the child process tree on timeout.
+- **Continuous Background `stderr` Drain (`spawn_stderr_drainer`)**: Eliminated OS pipe buffer backpressure deadlocks when Node.js/Chromium writes >64 KiB to `stderr` and surfaced captured `stderr` context in all timeout, EOF, and protocol errors.
+- **Monotonic Request Correlation (`request_id`)**: Added `request_id: u64` envelope correlation to `PlaywrightBridge` and `PLAYWRIGHT_BRIDGE_JS`, discarding late responses from prior requests (`resp_id < req_id`) and failing closed on mismatched future IDs (`resp_id > req_id`) or malformed JSON.
+- **Browser WebSocket Disconnect, Target Crash & CDP Timeouts (`PLAYWRIGHT_BRIDGE_JS`)**: Added `browser.on('disconnected')`, `page.on('crash')`, `page.on('close')` tracking, `ensureActivePage()` health assertions, and `withTimeout` promise race guards across all Playwright/CDP calls.
+- **DOM Node TOCTOU & Duplicate-Selector Ambiguity Guard (`LocatorResolver` & `CLICK_AND_OBSERVE`)**:
+  - `LocatorResolver::resolve` now rejects selectors that match `> 1` grounded DOM candidates on the page (`Ambiguous grounding ... matches N distinct DOM elements`).
+  - `LocatorResolver::synthesize_selector_for_grounding` and `execute_browser_gate` only synthesize/use `page.getByRole(...)` when `aria_verified == true` and fall back to `page.getByTestId(...)` otherwise.
+  - `CLICK_AND_OBSERVE` verifies `locator.count() === 1` and non-zero `locator.boundingBox()` before clicking, surfacing `DOM_NODE_DETACHED` or `AMBIGUOUS_GROUNDING` immediately.
+- **Idempotent Single-Termination Shutdown (`PlaywrightBridge::shutdown`)**: Added `shut_down` and `terminated` state guards and bounded `try_wait` reaping (`500ms`) so `Platform::terminate_process_tree` is called at most once per child instance.
+- **Concurrent Per-Connection HTTP Handling (`SandboxServer`)**: Spawned short-lived per-connection threads with a 250ms loopback read timeout and 32 MiB file size cap (`MAX_HTTP_FILE_BYTES`) so idle TCP sockets cannot stall concurrent asset requests or server shutdown.
+
+---
+
 ## [0.4.0] - 2026-10-27
 
 Delivers **Spec 040 (`040-v0.4-playwright-cdp-grounding`)**: Playwright CDP spatial-semantic grounding, accessibility tree (`ariaSnapshot`) DOM Grounding Invariant verification, fail-closed ambiguity abstention (`AMBIGUOUS_GROUNDING`, exit code `22`), line-delimited JSON-lines stdio IPC (`PlaywrightBridge`), and live Chromium two-gate verification (`--live-browser` and `--headed`). Full notes: [docs/release-notes/v0.4.0.md](docs/release-notes/v0.4.0.md).

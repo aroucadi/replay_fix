@@ -2,7 +2,7 @@
 
 ReplayFix is a deterministic Rust harness for reproducing, verifying and repairing visual bugs in web applications. The long-term design is simple: a bug is only "fixed" when the same behavioral check goes from RED to GREEN, inside an isolated scratch workspace, with a receipt you can audit.
 
-> **Where the project stands (v0.4.0).** ReplayFix is built in small, verified slices. Today it checks your environment, validates bug-reproduction tasks, clones your target repository into an **isolated ephemeral scratch sandbox**, verifies **dual-layer repository immutability ($\Delta \text{repo} = 0$)**, allocates **dynamic ephemeral ports (`127.0.0.1:0`)**, and runs the full two-gate loop (Gate 1 RED → repair → Gate 2 GREEN) either in a **live Playwright Chromium browser (`--live-browser` / `--headed`)** with **spatial-semantic CDP grounding (`elementFromPoint` + `ariaSnapshot`) and fail-closed ambiguity abstention (`AMBIGUOUS_GROUNDING`, exit code 22)**, or against a fast **simulated oracle (`--mock-heal`)**. Video keyframe ingestion and model-driven repair arrive in later releases (see the roadmap).
+> **Where the project stands (v0.4.1).** ReplayFix is built in small, verified slices. Today it checks your environment, validates bug-reproduction tasks, clones your target repository into an **isolated ephemeral scratch sandbox**, verifies **dual-layer repository immutability ($\Delta \text{repo} = 0$)**, allocates **dynamic ephemeral ports (`127.0.0.1:0`)**, and runs the full two-gate loop (Gate 1 RED → repair → Gate 2 GREEN) either in a **live Playwright Chromium browser (`--live-browser` / `--headed`)** with **spatial-semantic CDP grounding (`elementFromPoint` + `ariaSnapshot`), fail-closed ambiguity abstention (`AMBIGUOUS_GROUNDING`, exit code 22), and deadline-bounded IPC**, or against a fast **simulated oracle (`--mock-heal`)**. Video keyframe ingestion and model-driven repair arrive in later releases (see the roadmap).
 
 ---
 
@@ -180,7 +180,7 @@ Tests run natively on every platform with no custom runner.
 | v0.1.0 / v0.1.1 | `doctor`, manifest ingestion, input hardening | Delivered |
 | v0.2.0 / v0.2.1 | Dual-gate state machine, unified patcher, no-op guard, receipts (simulated oracle) | Delivered |
 | v0.3.0 – v0.3.3 | Isolated scratch sandboxes, $\Delta \text{repo} = 0$ verification, ephemeral ports, process tree cleanup, terminal UX & release quality gate | Delivered |
-| **v0.4.0** | **Playwright CDP spatial-semantic grounding, `ariaSnapshot` DOM Grounding Invariant, fail-closed ambiguity guard (`AMBIGUOUS_GROUNDING`), and live Chromium browser gates (`--live-browser`)** | **Delivered** |
+| **v0.4.0 / v0.4.1** | **Playwright CDP spatial-semantic grounding, `ariaSnapshot` DOM Grounding Invariant, fail-closed ambiguity guard (`AMBIGUOUS_GROUNDING`), live Chromium browser gates (`--live-browser`), and adversarial systems hardening** | **Delivered** |
 | v0.5.0 | Video keyframes and SAM 3.1 perception | Planned |
 | v0.6.0 | Model-driven bounded repair | Planned |
 | v0.7.0 | Test freezing, two-run stability, regression parity | Planned |

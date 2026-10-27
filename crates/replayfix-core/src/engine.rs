@@ -531,9 +531,18 @@ impl MockHealer {
             effective_candidates,
         )?;
 
+        let (click_role, click_name) = if grounded.telemetry.accessible_name_match {
+            (
+                grounded.candidate.role.clone(),
+                grounded.candidate.accessible_name.clone(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+
         let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
-            role: grounded.candidate.role.clone(),
-            accessible_name: grounded.candidate.accessible_name.clone(),
+            role: click_role,
+            accessible_name: click_name,
             test_id: grounded.candidate.test_id.clone(),
             output_selector: "#cart-summary-output".to_string(),
         })?;
@@ -544,7 +553,12 @@ impl MockHealer {
                 page_errors,
                 result_text,
             } => (clicked, page_errors, result_text),
-            BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+            BridgeResponse::Error { message } => {
+                if message.contains("AMBIGUOUS_GROUNDING") {
+                    return Err(CoreError::Grounding(message));
+                }
+                return Err(CoreError::Browser(message));
+            }
             other => {
                 return Err(CoreError::Browser(format!(
                     "Unexpected response to CLICK_AND_OBSERVE: {other:?}"

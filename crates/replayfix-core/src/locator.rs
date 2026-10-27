@@ -10,8 +10,9 @@
 //!    a resilient Playwright locator (`getByRole` / `getByTestId`) free of blind
 //!    `.first()`, `.last()`, or `:nth-match` indexing.
 //! 2. **Fail-Closed Ambiguity Guard**: If no candidate reaches the minimum
-//!    grounding score (`5_000` bps) or the top two distinct candidates differ by
-//!    less than `2_500` bps ($|\Delta S| < 0.25$), resolution fails closed with
+//!    grounding score (`5_000` bps), if the synthesized selector matches multiple
+//!    DOM elements on the page, or if the top two candidates differ by less than
+//!    `2_500` bps ($|\Delta S| < 0.25$), resolution fails closed with
 //!    `CoreError::Grounding`.
 
 use crate::error::{CoreError, Result};
@@ -149,9 +150,18 @@ impl LocatorResolver {
 
     /// Synthesizes a resilient Playwright locator for `candidate` without `.first()`.
     pub fn synthesize_selector(candidate: &DomCandidate) -> Result<String> {
+        Self::synthesize_selector_for_grounding(candidate, true)
+    }
+
+    /// Synthesizes a resilient Playwright locator, only permitting `getByRole` when
+    /// `aria_verified` is true and falling back to `getByTestId` otherwise.
+    pub fn synthesize_selector_for_grounding(
+        candidate: &DomCandidate,
+        aria_verified: bool,
+    ) -> Result<String> {
         let role = normalize_whitespace(&candidate.role);
         let name = normalize_whitespace(&candidate.accessible_name);
-        let selector = if !role.is_empty() && !name.is_empty() {
+        let selector = if aria_verified && !role.is_empty() && !name.is_empty() {
             let escaped_role = escape_single_quotes(&role);
             let escaped_name = escape_single_quotes(&name);
             format!("page.getByRole('{escaped_role}', {{ name: '{escaped_name}', exact: true }})")
@@ -165,7 +175,8 @@ impl LocatorResolver {
             format!("page.getByTestId('{escaped_id}')")
         } else {
             return Err(CoreError::Grounding(
-                "Candidate lacks both (role + accessible_name) and data-testid".into(),
+                "Candidate lacks both ariaSnapshot-verified (role + accessible_name) and data-testid"
+                    .into(),
             ));
         };
         Self::validate_selector(&selector)?;
@@ -217,7 +228,7 @@ impl LocatorResolver {
     }
 
     /// Resolves `(click_x, click_y)` against `candidates` and `aria_snapshot`, failing closed on
-    /// ungrounded coordinates or ambiguous candidate ties ($|\Delta S| < 2500$ bps).
+    /// ungrounded coordinates, non-unique selectors, or ambiguous candidate ties ($|\Delta S| < 2500$ bps).
     pub fn resolve(
         click_x: i32,
         click_y: i32,
@@ -247,14 +258,15 @@ impl LocatorResolver {
 
         let mut scored: Vec<(u32, bool, String, &DomCandidate)> = Vec::new();
         for cand in candidates {
-            let Ok(selector) = Self::synthesize_selector(cand) else {
-                continue;
-            };
             let (score_bps, aria_ok) =
                 Self::score_candidate(cand, click_x, click_y, snapshot_trimmed);
-            if score_bps > 0 {
-                scored.push((score_bps, aria_ok, selector, cand));
+            if score_bps == 0 {
+                continue;
             }
+            let Ok(selector) = Self::synthesize_selector_for_grounding(cand, aria_ok) else {
+                continue;
+            };
+            scored.push((score_bps, aria_ok, selector, cand));
         }
 
         // Sort descending by score_bps, breaking ties deterministically by selector string.
@@ -273,13 +285,21 @@ impl LocatorResolver {
             )));
         }
 
-        // Find the highest-scoring runner-up with a distinct selector.
-        let runner_up = scored
+        // Verify selector uniqueness across all grounded candidates on the page:
+        // because `.first()` / `:nth-match` are banned, a selector that matches multiple
+        // DOM elements on the page is inherently ambiguous in Playwright strict mode.
+        let matching_selector_count = scored
             .iter()
-            .skip(1)
-            .find(|(_, _, sel, _)| sel != &top_selector);
+            .filter(|(_, _, sel, _)| sel == &top_selector)
+            .count();
+        if matching_selector_count > 1 {
+            return Err(CoreError::Grounding(format!(
+                "Ambiguous grounding at ({click_x}, {click_y}): selector '{top_selector}' matches {matching_selector_count} distinct DOM elements on the page (positional .first() disambiguation is forbidden)"
+            )));
+        }
 
-        let score_margin_bps = if let Some((second_score, _, second_selector, _)) = runner_up {
+        // Check runner-up score margin across all remaining candidates.
+        let score_margin_bps = if let Some((second_score, _, second_selector, _)) = scored.get(1) {
             let margin = top_score.saturating_sub(*second_score);
             if margin < MIN_AMBIGUITY_MARGIN_BPS {
                 return Err(CoreError::Grounding(format!(
@@ -400,6 +420,55 @@ mod tests {
             LocatorResolver::resolve(150, 120, 1280, 720, snapshot, &[cand_a, cand_b]).unwrap_err();
         assert!(matches!(err, CoreError::Grounding(_)));
         assert!(err.to_string().contains("Ambiguous grounding"));
+    }
+
+    #[test]
+    fn test_rejects_duplicate_identical_buttons_as_ambiguous() {
+        let snapshot = "- button \"Refresh Cart\"\n- button \"Refresh Cart\"";
+        let primary = sample_button_candidate();
+        let duplicate = DomCandidate {
+            tag: "button".into(),
+            role: "button".into(),
+            accessible_name: "Refresh Cart".into(),
+            test_id: None,
+            bbox: BoundingBox {
+                x: 800,
+                y: 500,
+                width: 120,
+                height: 40,
+            },
+            is_element_from_point: false,
+        };
+
+        let err = LocatorResolver::resolve(160, 120, 1280, 720, snapshot, &[primary, duplicate])
+            .unwrap_err();
+        assert!(matches!(err, CoreError::Grounding(_)));
+        assert!(err.to_string().contains("matches 2 distinct DOM elements"));
+    }
+
+    #[test]
+    fn test_uses_testid_when_role_is_not_in_aria_snapshot() {
+        let snapshot = "- main:\n  - heading \"Shopping Cart\"";
+        let cand = DomCandidate {
+            tag: "div".into(),
+            role: "div".into(),
+            accessible_name: "Custom Refresh Trigger".into(),
+            test_id: Some("custom-refresh-trigger".into()),
+            bbox: BoundingBox {
+                x: 100,
+                y: 100,
+                width: 120,
+                height: 40,
+            },
+            is_element_from_point: true,
+        };
+
+        let grounded = LocatorResolver::resolve(160, 120, 1280, 720, snapshot, &[cand]).unwrap();
+        assert_eq!(
+            grounded.selector,
+            "page.getByTestId('custom-refresh-trigger')"
+        );
+        assert!(!grounded.telemetry.accessible_name_match);
     }
 
     #[test]
