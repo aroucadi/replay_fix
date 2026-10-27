@@ -19,6 +19,18 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.3.1] - 2026-10-27
+
+Terminal UX and Interaction Engineering patch. Full notes: [docs/release-notes/v0.3.1.md](docs/release-notes/v0.3.1.md).
+
+### Added
+- Dedicated Terminal UI Module (replayfix_cli::ui).
+- Semantic styling painter (Theme) and accessible symbols (Symbols: check, cross, warn, arrow).
+- Standard color policy detection honoring NO_COLOR, CLICOLOR_FORCE, TERM=dumb, and std::io::IsTerminal.
+- Doctor diagnostic badges and repro step progress indicators.
+
+---
+
 ## [0.3.0] - 2026-10-27
 
 Delivers **Spec 030 (`030-v0.3-ephemeral-scratch-isolation`)**: Ephemeral scratch workspace isolation, dual-layer repository integrity ($\Delta \text{repo} = 0$), dynamic ephemeral port allocation (`127.0.0.1:0`), and cross-platform process tree supervision with Windows file-lock defense. Full notes: [docs/release-notes/v0.3.0.md](docs/release-notes/v0.3.0.md).
