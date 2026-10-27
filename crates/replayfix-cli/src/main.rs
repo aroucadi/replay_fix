@@ -286,6 +286,28 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         dry_run,
     } = args;
 
+    let inferred_from_video = if task_id.is_none() && bug.is_none() {
+        video.as_deref().and_then(|v| {
+            let lower = Path::new(v)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if lower.starts_with("rf01") || lower.starts_with("rf-01") {
+                Some("RF-01")
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    };
+
+    let auto_live_from_video = inferred_from_video.is_some()
+        && !mock_heal
+        && video.as_deref().is_some_and(|v| Path::new(v).exists());
+    let live_browser = live_browser || auto_live_from_video;
+
     if !mock_heal && !live_browser && (mock_patch != "builtin" || output_dir != ".replayfix") {
         usage_error(
             "'--mock-patch' and '--output-dir' require either '--mock-heal' or '--live-browser'",
@@ -319,7 +341,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         };
     }
 
-    let bug_shorthand = bug.as_deref();
+    let bug_shorthand = bug.as_deref().or(inferred_from_video);
     let id = task_id
         .or_else(|| bug_shorthand.map(str::to_string))
         .unwrap_or_else(|| {
@@ -502,6 +524,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         let opts = LiveBrowserOptions {
             headed: m.headed,
             candidate_override,
+            video_path: Some(PathBuf::from(&m.video_path)),
+            keyframe_dir: Some(out_dir.join("keyframes")),
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -532,6 +556,47 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     short(&receipt.base_tree_sha256)
                 )),
             );
+            if let Some(vtel) = &receipt.video_telemetry {
+                print_step(
+                    theme,
+                    "Video Probe",
+                    StepStatus::Done,
+                    "Probed recording & extracted ROI keyframes",
+                    Some(&format!(
+                        "{}x{} ({}ms), {} keyframe(s) -> {}/keyframes/",
+                        vtel.video_metadata.width,
+                        vtel.video_metadata.height,
+                        vtel.video_metadata.duration_ms,
+                        vtel.keyframe_paths.len(),
+                        extras.output_dir
+                    )),
+                );
+                if let Some(cue) = &vtel.narration {
+                    print_step(
+                        theme,
+                        "ASR Align",
+                        StepStatus::Done,
+                        "Aligned spoken narration via audioProcessedMs",
+                        Some(&format!(
+                            "{} @ {}ms: \"{}\"",
+                            cue.model, cue.audio_processed_ms, cue.transcript
+                        )),
+                    );
+                }
+                print_step(
+                    theme,
+                    "SAM 3.1 Snap",
+                    StepStatus::Done,
+                    "Snapped hotspot to contour centroid",
+                    Some(&format!(
+                        "{} {} -> CSS ({}, {})",
+                        vtel.sam_snap.model,
+                        vtel.sam_snap.wire_token,
+                        vtel.sam_snap.calibrated_x_css,
+                        vtel.sam_snap.calibrated_y_css
+                    )),
+                );
+            }
             if let Some(tel) = &receipt.grounding_telemetry {
                 print_step(
                     theme,

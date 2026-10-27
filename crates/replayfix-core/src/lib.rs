@@ -8,8 +8,11 @@ pub mod fsm;
 pub mod locator;
 pub mod manifest;
 pub mod patch;
+pub mod perception;
 pub mod platform;
+pub mod process;
 pub mod receipt;
+pub mod video;
 pub mod worktree;
 
 pub use browser::{BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer};
@@ -25,8 +28,16 @@ pub use fsm::{Phase, PhaseMachine};
 pub use locator::{BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry, LocatorResolver};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use patch::{PatchOutcome, UnifiedPatcher};
+pub use perception::{
+    AsrRequestConfig, AsrTranscriber, NarrationCue, SamContourBox, SamSegmenter, SamSnapResult,
+    VideoTelemetry, ASR_MODEL_SLUG, SAM_MODEL_SLUG,
+};
 pub use platform::{EphemeralPort, OsFamily, Platform};
 pub use receipt::{
     AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
+};
+pub use video::{
+    DetectionParams, FrameSet, GeometricCalibration, InteractionEvidence, RoiDiffer, VideoMetadata,
+    VideoPreprocessor,
 };
 pub use worktree::{FileEntry, ScratchSandbox, WorktreeManifest};

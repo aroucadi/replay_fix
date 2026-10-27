@@ -52,7 +52,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.4");
+    assert_eq!(receipt["schema_version"], "0.5");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -88,7 +88,7 @@ fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.4");
+    assert_eq!(receipt["schema_version"], "0.5");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
@@ -121,7 +121,7 @@ fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.4");
+    assert_eq!(triage["schema_version"], "0.5");
     assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
     assert_eq!(triage["exit_code"], 22);
     assert_eq!(triage["substrate"], "playwright-cdp");
@@ -135,7 +135,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.4");
+    assert_eq!(triage["schema_version"], "0.5");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -353,4 +353,54 @@ fn run_subcommand_alias_with_bug_flag_works() {
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
     assert_eq!(receipt["task_id"], "RF-01");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+}
+
+#[test]
+fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
+    let dir = scratch("video-telemetry-e2e");
+    let video_dir = dir.join("assets").join("fixtures");
+    fs::create_dir_all(&video_dir).unwrap();
+    let mp4_path = video_dir.join("rf01_demo.mp4");
+    replayfix_core::VideoPreprocessor::synthesize_demo_video(&mp4_path).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args([
+            "run",
+            "--video",
+            "assets/fixtures/rf01_demo.mp4",
+            "--repo",
+            ".",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["schema_version"], "0.5");
+    assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(receipt["substrate"], "playwright-cdp");
+    assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
+    assert_eq!(
+        receipt["video_telemetry"]["sam_snap"]["calibrated_x_css"],
+        160
+    );
+    assert_eq!(
+        receipt["video_telemetry"]["sam_snap"]["calibrated_y_css"],
+        120
+    );
+    assert_eq!(
+        receipt["video_telemetry"]["narration"]["model"],
+        "muse-voice-transcribe-1.0"
+    );
+    let keyframes = receipt["video_telemetry"]["keyframe_paths"]
+        .as_array()
+        .expect("keyframe_paths array");
+    assert_eq!(keyframes.len(), 1);
+    assert!(dir.join(".replayfix/keyframes").exists());
 }

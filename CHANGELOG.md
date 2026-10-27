@@ -10,11 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Roadmap to v1.0.0
 
 The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
-- **Spec 050 (v0.5.0)**: Video telemetry ingestion, FFmpeg keyframe extraction, and SAM 3.1 centroid alignment.
 - **Spec 060 (v0.6.0)**: Meta Muse Wonder bounded AST repair and localized patch synthesis.
 - **Spec 070 (v0.7.0)**: Differential diagnosis, SHA-256 test freezing, and 2-run stability pass.
 - **Spec 080 (v0.8.0)**: Observability suite, headed replay mode (`--headed`), and trace visualization.
 - **Spec 090 (v0.9.0 & v1.0.0)**: RFC 6962 Merkle tree audit receipt generation, Ed25519 signing, and 5-bug benchmark sweep on `MetaPulse`.
+
+---
+
+## [0.5.0] - 2026-10-27
+
+Delivers **Spec 050 (`050-v0.5-video-telemetry-ingestion`)**: Multimodal video telemetry ingestion, bounded FFmpeg/FFprobe subprocess execution, cursor-bounded $120 \times 120\text{px}$ ROI $L_1$ optical-flow frame differencing, geometric calibration across resolution/letterbox/DPR, Meta Superpower #1 (`sam-3.1`) wire-token centroid snapping, Meta Superpower #2 (`muse-voice-transcribe-1.0`) 24 kHz mono PCM `audioProcessedMs` narration alignment with strict Zero-Audio enforcement on `muse-spark-1.3`, and end-to-end CDP grounding integration. Full notes: [docs/release-notes/v0.5.0.md](docs/release-notes/v0.5.0.md).
+
+### Added
+- **Bounded Subprocess Supervisor (`replayfix_core::process`)**:
+  - `run_bounded` and `BoundedOutput` enforcing wall-clock deadlines via `mpsc::Receiver::recv_timeout`, stdout size caps, stderr tail ring drains, and automatic process-tree termination (`Platform::terminate_process_tree`) on timeout or overflow.
+- **FFmpeg Video Prober, Geometric Calibration & Cursor-Bounded ROI Differencer (`replayfix_core::video`)**:
+  - `VideoPreprocessor`: Container safety validation (`.mp4`, `.webm`, `.mov`, $\le 120\text{s}$), `ffprobe` JSON metadata inspection (`VideoMetadata`), bounded grayscale frame extraction, keyframe PNG writer (`MAX_KEYFRAMES = 10` to `.replayfix/keyframes/`), 24 kHz mono 16-bit PCM WAV extraction (`pcm_s16le`), and deterministic demo MP4 synthesis (`synthesize_demo_video`).
+  - `GeometricCalibration`: Integer-math coordinate transformation from video pixel space to CSS logical pixel space accounting for resolution scaling, letterbox/pillarbox padding, and device-pixel-ratio (`dpr_milli`).
+  - `RoiDiffer`: $120 \times 120\text{px}$ cursor-bounded ROI $L_1$ frame differencer (`InteractionEvidence`) isolating the click timestamp `t_ms` and rough hotspot `(x_video, y_video)` while failing closed (`AMBIGUOUS_GROUNDING`, exit code `22`) on static/noisy frames or competing peaks within `< 2_500` bps ($|\Delta S| < 0.25$).
+- **Meta Multimodal Perception Engine (`replayfix_core::perception`)**:
+  - **Meta Superpower #1 (`sam-3.1` - `SamSegmenter`)**: Parses `<|box;x1=...;y1=...;x2=...;y2=...|><|mask;...|>` wire tokens, computes contour centroids $\left(\frac{x_1+x_2}{2}, \frac{y_1+y_2}{2}\right)$, enforces the `< 2_500` bps fail-closed ambiguity guard, and projects centroids into CSS logical pixels (`SamSnapResult`).
+  - **Meta Superpower #2 (`muse-voice-transcribe-1.0` - `AsrTranscriber`)**: Enforces the strict **Zero-Audio Rule** (blocking `muse-spark-1.3` from receiving audio with `CoreError::SecurityViolation`), validates 24 kHz mono PCM streaming config (`PCM_24KHZ`, `ENDPOINTING`, `DELTA`, `emit_audio_progress: true`), and aligns developer narration using cumulative `audioProcessedMs` (`NarrationCue`).
+  - `VideoTelemetry::ingest`: End-to-end multimodal ingestion pipeline wired into `MockHealer::run_live_browser_in_repo` and CLI `replayfix run --video assets/fixtures/rf01_demo.mp4 --repo .`.
+- **Receipt Schema `"0.5"` & Demo Video Fixture**:
+  - Bumped `SCHEMA_VERSION` to `"0.5"` and added `video_telemetry: Option<VideoTelemetry>` to `AuditReceipt` (100% float-free for RFC 8785 canonical JSON).
+  - Added deterministic `assets/fixtures/rf01_demo.mp4` (`1280x720`, 24 kHz mono audio, UI click transition at `(100, 100)..(220, 140)`).
+  - Expanded automated test suite to 138 tests (115 core unit tests + 21 CLI integration tests + 2 CLI UI unit tests).
 
 ---
 
@@ -122,7 +143,7 @@ Delivers **Spec 030 (`030-v0.3-ephemeral-scratch-isolation`)**: Ephemeral scratc
 - **Ephemeral Scratch Sandbox (`replayfix_core::worktree::ScratchSandbox`)**:
   - Clones target repository working files into a unique OS temporary directory (`replayfix-sandbox-<task>-<pid>-<seq>`).
   - Executes Gate 1, disk-backed patch application, and Gate 2 strictly inside the scratch sandbox while keeping the user's base repository untouched ($\Delta \text{repo} = 0$).
-  - Automatic `Drop` and `teardown()` lifecycle that terminates registered child process trees, clears read-only file attributes, and retries `remove_dir_all` with bounded backoff (`10ms`–`200ms`) to defeat Windows file locks (`os error 5` / `os error 32`).
+  - Automatic `Drop` and `teardown()` lifecycle that terminates registered child process trees, clears read-only file attributes, and retries `remove_dir_all` with bounded backoff (`10ms`â€“`200ms`) to defeat Windows file locks (`os error 5` / `os error 32`).
 - **Dynamic Ephemeral Port Allocation (`replayfix_core::platform::EphemeralPort`)**:
   - Binds `TcpListener::bind("127.0.0.1:0")` to allocate a guaranteed non-zero OS ephemeral port (`NonZeroU16`) per run, preventing `EADDRINUSE` collisions across concurrent sessions.
 - **Cross-Platform Process Tree Termination (`Platform::terminate_process_tree`)**:
