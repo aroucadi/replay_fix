@@ -22,6 +22,9 @@ pub enum CoreError {
 
     #[error("Verification failed: {0}")]
     Verification(String),
+
+    #[error("Patch error: {0}")]
+    Patch(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

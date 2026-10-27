@@ -1,183 +1,168 @@
 # ReplayFix
 
-ReplayFix is a deterministic Rust-based verification harness designed to reproduce, isolate, and repair visual defects in web applications directly from video recordings and bug reports. Every run is bound by strict causal verification, repository isolation ($\Delta\text{repo} = 0$), and tamper-proof cryptographic audit receipts.
+ReplayFix is a deterministic Rust harness for reproducing, verifying and repairing visual bugs in web applications. The long-term design is simple: a bug is only "fixed" when the same behavioral check goes from RED to GREEN, in isolation, with a receipt you can audit.
+
+> **Where the project stands (v0.2.0).** ReplayFix is built in small, verified slices. Today it can check your environment, validate bug-reproduction tasks, and run the full two-gate loop (Gate 1 RED → repair → Gate 2 GREEN) against a **simulated oracle**. It does **not** yet drive a browser, read video, call a model or isolate your repository. Those arrive in later releases (see the roadmap).
 
 ---
 
-## Current Status: v0.1.1 (Walking Skeleton & Security Hardened)
+## Workspace
 
-ReplayFix is engineered from the ground up under a strict clean-room protocol and an incremental vertical micro-slice methodology. Every release compiles cleanly, passes automated test suites, and provides verifiable empirical evidence.
-
-- **Current Verified Deliverable**: **v0.1.1** (Environment diagnostics, canonical task manifest validation, and CSO security hardening).
-- **Target v1.0.0 Milestone**: Complete autonomous pipeline featuring SAM 3.1 visual grounding, dual-worktree isolation, Meta Muse Wonder AST repair, 2-run anti-cheat stability passes, and RFC 6962 Merkle audit receipts.
+- **`crates/replayfix-core`** — the engine: platform helpers, environment diagnostics, task manifest validation, the phase state machine, the in-memory patcher, the simulated oracle and the receipt writers.
+- **`crates/replayfix-cli`** — the `replayfix` command-line tool.
 
 ---
 
-## Workspace Architecture
+## Prerequisites
 
-ReplayFix maintains a clean, separated 2-crate workspace:
+ReplayFix builds and runs on Windows (MSVC), macOS and Linux.
 
-- **`crates/replayfix-core`**: The verification engine containing platform abstractions, multi-dependency diagnostics (`Doctor`), domain schemas (`TaskManifest`), security path validators, and future FSM state machines.
-- **`crates/replayfix-cli`**: The user-facing command-line interface (`replayfix`) providing formatted terminal diagnostics, JSON output for CI pipelines, task ingestion, and headed replay visualization.
+**To build:** Rust 1.80 or newer (tested on 1.99.1) and a C/C++ toolchain (Visual Studio Build Tools on Windows, GCC or Clang elsewhere).
 
----
+**To run `doctor` successfully** you need these tools on your `PATH`. `doctor` tells you exactly what is missing and how to install it for your platform:
 
-## Prerequisites & System Requirements
+| Tool | Minimum | Used for (current or planned) |
+| :--- | :--- | :--- |
+| Git | 2.30 | worktrees and diffs |
+| Node.js | 18 | target apps and Playwright |
+| Playwright | 1.40 | browser replay |
+| FFmpeg | 4.4 | video keyframes |
 
-ReplayFix runs natively on Windows (MSVC), macOS, and Linux.
-
-### Build Requirements
-- **Rust Toolchain**: `1.80+` (tested and verified on `1.99.1`)
-- **C/C++ Compiler**:
-  - Windows: Visual Studio C++ Build Tools (`x86_64-pc-windows-msvc`)
-  - Linux/macOS: GCC or Clang
-
-### Runtime Dependencies
-ReplayFix integrates with standard industry tools to perform browser automation and media analysis:
-- **Git** ($\ge 2.30.0$): For worktree branching and diff calculation.
-- **Node.js** ($\ge 18.0.0$): Runtime for modern web applications and Playwright drivers.
-- **Playwright** ($\ge 1.40.0$): Headless and headed browser execution and CDP telemetry.
-- **FFmpeg** ($\ge 4.4.0$): Video frame extraction and audio track processing.
+The v0.2 mock-heal loop itself needs none of these tools.
 
 ---
 
-## Quickstart & CLI Commands
-
-### 1. Check System Health (`replayfix doctor`)
-
-Before running reproduction tasks, verify that all host tools and required versions are available:
+## Quickstart
 
 ```bash
-# Pretty-printed terminal status table
-cargo run --release -p replayfix-cli -- doctor
-
-# Machine-readable JSON output for automated CI/CD runners
-cargo run --release -p replayfix-cli -- doctor --json
+cargo build --release
+# binary: target/release/replayfix (replayfix.exe on Windows)
 ```
 
-**Sample Output:**
+### Check your environment: `replayfix doctor`
+
+```bash
+replayfix doctor          # readable table, exit code 1 if something is missing
+replayfix doctor --json   # machine-readable report for CI
+```
+
 ```text
-=========================================================================================
-                              ReplayFix Doctor Diagnostics                               
-=========================================================================================
-Host OS    : Windows
-Checked At : 2026-10-26T17:19:14+00:00
------------------------------------------------------------------------------------------
-Dependency   Executable   Found Version    Required         Status    
------------------------------------------------------------------------------------------
+Dependency   Executable   Found Version    Required         Status
 Git          git          2.55.0           2.30.0           [OK]
 Node.js      node         24.19.0          18.0.0           [OK]
-Playwright   playwright   1.54.1           1.40.0           [OK]
+Playwright   playwright   none             1.40.0           [MISSING]
+   >> Remedy: Install Playwright via 'npm install -D playwright' and install browsers via 'npx playwright install chromium'
 FFmpeg       ffmpeg       7.1.1            4.4.0            [OK]
------------------------------------------------------------------------------------------
-Result: ALL SYSTEM DEPENDENCIES SATISFIED (System Ready for Reproduction)
 ```
 
-If any dependency is missing or outdated, ReplayFix prints exact, actionable commands to install or upgrade it, exiting with code `1`.
+### Describe a bug: `replayfix repro`
 
----
+`repro` accepts either flags or a manifest that follows `task_manifest.schema.json`.
 
-### 2. Ingest Reproduction Tasks (`replayfix repro`)
-
-ReplayFix accepts defect reproduction tasks defined by the canonical `task_manifest.schema.json` format.
-
-#### Option A: Direct Command-Line Flags
 ```bash
-cargo run --release -p replayfix-cli -- repro \
-  --task-id RF-01 \
-  --title "Shopping Cart Null Pointer Dereference" \
-  --repo ./target-app \
-  --bug-ref bug/RF-01 \
-  --clean-ref main \
-  --video recordings/RF-01.mp4 \
-  --headed \
-  --trace
+# Flags
+replayfix repro --task-id RF-01 --bug-ref bug/RF-01 --video recordings/RF-01.mp4 \
+  --title "Cart count crash" --repo ./target-app --clean-ref main
+
+# Manifest file
+replayfix repro --manifest task.json
 ```
 
-#### Option B: Manifest File
+| Flag | Meaning | Default |
+| :--- | :--- | :--- |
+| `--manifest <FILE>` | JSON task manifest (alternative to the flags below) | — |
+| `--task-id`, `--bug-ref`, `--video` | Required unless `--manifest` is given | — |
+| `--title`, `--repo`, `--clean-ref`, `--audio` | Optional task metadata | `--repo .` |
+| `--server-cmd`, `--port-env-var`, `--healthcheck-path`, `--startup-timeout-ms` | How to launch the target app | `PORT`, `/api/health`, `10000` |
+| `--headed`, `--trace` | Visible browser / trace export (used once browser replay exists) | off |
+| `--mock-heal` | Run the simulated two-gate loop (below) | off |
+| `--mock-patch <builtin\|noop\|FILE>` | Candidate patch for `--mock-heal` (needs `--mock-heal`) | `builtin` |
+| `--output-dir <DIR>` | Where results are written (needs `--mock-heal`) | `.replayfix` |
+
+Without `--mock-heal`, `repro` validates the task and stops.
+
+### Try the two-gate loop: `--mock-heal`
+
 ```bash
-cargo run --release -p replayfix-cli -- repro --manifest task_manifest.json
+replayfix repro --task-id RF-01 --bug-ref bug/RF-01 --video recordings/RF-01.mp4 --mock-heal
 ```
 
-**Verification Output:**
 ```text
-=========================================================================================
-                           ReplayFix Task Ingestion Verified                             
-=========================================================================================
-Task ID       : RF-01
-Title         : Shopping Cart Null Pointer Dereference
-Target Repo   : ./target-app
-Bug Ref       : bug/RF-01
-Clean Ref     : main
-Video Source  : recordings/RF-01.mp4
-Headed Mode   : true
-Trace Export  : true
-Manifest State: VALIDATED (Schema compliant with task_manifest.schema.json)
------------------------------------------------------------------------------------------
-Status: Ready for Gate 1 Baseline Execution (Slice 010 Walking Skeleton)
+Gate 1   : RED   (defect reproduced; contract 400bc991f224)
+Repair   : patch applied in memory to src/cart-summary.js (+1 -1)
+Gate 2   : GREEN (same contract 400bc991f224)
+Result   : VERIFIED_REPAIRED (simulated oracle; no browser was run)
+Receipt  : .replayfix/audit_receipt.json
 ```
 
+What it does:
+
+1. Gate 1 runs a built-in scenario (`RF-01`, an unguarded `cart.items.length`) and must come back **RED**.
+2. The candidate patch is applied **in memory** by a strict unified-diff patcher (exact context, no fuzzy matching).
+3. Gate 2 evaluates the **same contract** (compared by SHA-256 of its canonical JSON) and must come back **GREEN**.
+4. The run ends with exactly one artifact: `audit_receipt.json` on success, or `triage_report.json` on rejection. A rejected run deletes any older receipt in the same folder, so a stale success is never left behind.
+
+Try breaking it on purpose:
+
+```bash
+replayfix repro --task-id RF-01 --bug-ref bug/RF-01 --video v.mp4 --mock-heal --mock-patch noop
+# Result   : repair rejected (REPAIR_NOOP_REJECTED), exit code 30
+```
+
+Exit codes: `0` verified, `2` bad input or usage, `10` Gate 1 was not RED or the contract changed, `11` security violation, `30` repair rejected (empty patch, no-op, patch did not apply, or Gate 2 not green).
+
+**Limits to know about**
+
+- Only task `RF-01` has a built-in scenario; other task ids exit with a clear message.
+- The "oracle" inspects a bundled source snippet. It proves the state machine, contract check and receipt format, not real browser behavior. Every receipt says so.
+- `--mock-patch FILE` accepts a single-file unified diff up to 1 MiB.
+
 ---
 
-## Built-in Security Guarantees
+## Safety checks on inputs
 
-Following a comprehensive Chief Security Officer (CSO) audit, ReplayFix enforces strict defensive validation on all user inputs:
+Paths from flags, manifests, patch headers and `--output-dir` go through the same checks and fail with `SECURITY_VIOLATION` (exit 11):
 
-1. **Path Traversal Protection**: Inputs containing directory traversal sequences (`../`) that escape root boundaries are rejected with `SECURITY_VIOLATION` (exit code 11).
-2. **UNC Path Injection Defense**: UNC paths (`\\server\share` or `//server/share`) are disallowed across all CLI arguments, manifests, and file inputs to prevent Windows SMB credential reflection attacks (NTLM theft).
-3. **Multi-Component DOS Device Filtering**: Reserved Windows device names (such as `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) are rejected across all path segments (including intermediate directories) to prevent OS process hangs or descriptor hijacking.
-4. **NTFS Alternate Data Stream (ADS) Defense**: Colons in paths outside valid Windows drive prefixes are strictly blocked to prevent hidden payload execution or stream tampering.
-5. **Environment & HTTP Parameter Sanitization**: Environment variable names are validated against `^[a-zA-Z_][a-zA-Z0-9_]*$`, and healthcheck paths are checked for CRLF and whitespace to prevent HTTP header injection.
-6. **Regex DoS Mitigation**: Regex evaluation across diagnostics and manifests uses thread-safe `std::sync::OnceLock` singletons, preventing repeated recompilation churn.
+- directory traversal that escapes the working directory (`../..`)
+- UNC network paths (`\\server\share`, `//server/share`)
+- Windows reserved device names (`CON`, `NUL`, `COM1`…) in any path segment
+- NTFS alternate data streams (`file:stream`)
+
+Windows backslashes are normalized, so a manifest written on Windows is checked the same way on macOS and Linux. Environment variable names and healthcheck paths in the manifest are validated too.
 
 ---
 
-## Development & Automated Tests
-
-Run the full workspace unit and integration test suite:
+## Development
 
 ```bash
 cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --check
 ```
 
-All test suites execute natively and rapidly across Windows, macOS, and Linux without external wrappers.
+Tests run natively on every platform with no custom runner.
 
-### Windows Developer Code Signing (Smart App Control)
-For developers compiling on Windows 11 with Smart App Control (SAC) or WDAC active, ReplayFix includes non-intrusive PowerShell bootstrap scripts to safely manage a local developer certificate:
-
-```powershell
-# Verify certificate status
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-cert.ps1 -Check
-
-# Generate local developer certificate (no admin rights required)
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-cert.ps1
-
-# Sign a standalone release binary
-powershell -ExecutionPolicy Bypass -File .\scripts\sign-binary.ps1 target\release\replayfix.exe
-```
-
-See the [Windows Code Signing Guide](docs/windows-code-signing.md) for architectural details, Smart App Control behavior, and troubleshooting.
+**Windows 11 with Smart App Control?** Newly built DLLs and executables can be blocked. The repo ships opt-in helper scripts (including `scripts/sign-build-outputs.ps1`, which signs whatever is still unsigned after a build) and a troubleshooting guide: [docs/windows-code-signing.md](docs/windows-code-signing.md).
 
 ---
 
-## Roadmap to v1.0.0
+## Roadmap
 
-| Milestone | Scope & Deliverable | Status |
+| Release | Scope | Status |
 | :--- | :--- | :--- |
-| **v0.0.0** | Clean-room Cargo workspace genesis & platform abstractions | **Delivered** |
-| **v0.1.0** | Walking skeleton: `doctor` diagnostics & canonical manifest ingestion | **Delivered** |
-| **v0.1.1** | CSO security hardening: UNC defense, DOS device checks, regex singletons | **Delivered** |
-| **v0.2.0** | Dual-gate FSM state machine (`Init` $\rightarrow$ `Gate1Red` $\rightarrow$ `Repair` $\rightarrow$ `Gate2Green`) | Next Up |
-| **v0.3.0** | Ephemeral dual-worktree repository isolation ($\Delta\text{repo}=0$) & dynamic port binding | Planned |
-| **v0.4.0** | Playwright CDP spatial grounding, `ariaSnapshot`, and coordinate snapping | Planned |
-| **v0.5.0** | Video telemetry ingestion, FFmpeg keyframe extraction & SAM 3.1 centroids | Planned |
-| **v0.6.0** | Meta Muse Wonder bounded AST repair & patch application | Planned |
-| **v0.7.0** | Differential diagnosis, SHA-256 test freezing & 2-run stability pass | Planned |
-| **v0.8.0** | Full observability suite, headed replay mode & Playwright trace export | Planned |
-| **v0.9.0 / v1.0.0** | RFC 6962 Merkle tree audit receipt generation, Ed25519 signing & 5-bug benchmark sweep | Planned |
+| v0.0.0 | Workspace genesis | Delivered |
+| v0.1.0 / v0.1.1 | `doctor`, manifest ingestion, input hardening | Delivered |
+| **v0.2.0** | Dual-gate state machine, in-memory patcher, no-op guard, receipts (simulated oracle) | **Delivered** |
+| v0.3.0 | Isolated scratch repositories, ephemeral ports | Planned |
+| v0.4.0 | Playwright grounding with real browser gates | Planned |
+| v0.5.0 | Video keyframes and SAM 3.1 perception | Planned |
+| v0.6.0 | Model-driven bounded repair | Planned |
+| v0.7.0 | Test freezing, two-run stability, regression parity | Planned |
+| v0.8.0 | Headed replay, traces, evidence matrix | Planned |
+| v0.9.0 / v1.0.0 | Merkle-tree signed receipts, five-bug benchmark | Planned |
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE.md). See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+MIT. See [LICENSE.md](LICENSE.md). Release history: [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes](docs/release-notes/).

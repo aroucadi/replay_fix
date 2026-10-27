@@ -14,7 +14,7 @@ When you compile Rust code locally:
 1. **Newly Compiled Binaries**: Binaries created on your local drive (`target\debug\replayfix.exe`, test runners) have zero cloud reputation because they were just created.
 2. **Procedural Macro DLLs**: Crates such as `clap_derive` compile dynamically loaded libraries (`clap_derive-*.dll`) that `rustc.exe` loads in-memory during compilation.
 3. **PowerShell Execution Wrappers**: If a build system wraps test execution inside `powershell.exe -ExecutionPolicy Bypass`, Smart App Control treats PowerShell as an untrusted script host executing unrecognized code, triggering toast notifications:
-   > *"Part of this app has been blocked — Some features of Windows PowerShell may not work because we can't confirm who published..."*
+   > *"Part of this app has been blocked: Some features of Windows PowerShell may not work because we can't confirm who published..."*
 
 ---
 
@@ -107,3 +107,25 @@ Microsoft officially recommends the following configurations for developers comp
 
 ### Q: Does running without a Cargo runner break anything?
 **A**: No. Native Cargo execution is the standard, official way Rust software is built and tested across Windows, macOS, and Linux. Removing the forced runner eliminates unnecessary overhead and prevents PowerShell SAC warnings.
+
+
+---
+
+## 8. Blocked Build Outputs: Proc-Macro DLLs and Test Executables
+
+Smart App Control can block any newly built binary, not just the final executable. Two symptoms are common:
+
+| Symptom | Cause |
+| :--- | :--- |
+| `error[E0463]: can't find crate for 'thiserror_impl'` (or another `*_impl` / `*_derive` crate) | A freshly built proc-macro DLL was blocked while `rustc` tried to load it. This usually follows a dependency or feature change. |
+| `An Application Control policy has blocked this file` (os error 4551) when running `cargo test` | The integration tests launch the freshly built `target\debug\replayfix.exe`. |
+
+**Fix:** sign what is still unsigned, then re-run the same cargo command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sign-build-outputs.ps1            # target\debug
+powershell -ExecutionPolicy Bypass -File .\scripts\sign-build-outputs.ps1 -Profile release
+cargo test --workspace
+```
+
+The script only uses the local developer certificate from `setup-dev-cert.ps1`. It never creates or trusts certificates on its own. If a build fails halfway on a proc-macro DLL, run the script and build again; the second attempt normally succeeds. Rebuilding changes a file's hash, so you may need to repeat this after a dependency update. It is not needed on machines without Smart App Control.

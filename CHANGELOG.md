@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Roadmap to v1.0.0
 
 The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
-- **Spec 020 (v0.2.0)**: Dual-gate FSM state machine (`Init` $\rightarrow$ `Gate1Red` $\rightarrow$ `Repair` $\rightarrow$ `Gate2Green`).
 - **Spec 030 (v0.3.0)**: Ephemeral dual-worktree repository isolation ($\Delta\text{repo} = 0$) and dynamic port allocation (`:0`).
 - **Spec 040 (v0.4.0)**: Playwright CDP spatial grounding, `ariaSnapshot` inspection, and coordinate snapping.
 - **Spec 050 (v0.5.0)**: Video telemetry ingestion, FFmpeg keyframe extraction, and SAM 3.1 centroid alignment.
@@ -18,6 +17,49 @@ The full production release **v1.0.0** requires completing and verifying the fol
 - **Spec 070 (v0.7.0)**: Differential diagnosis, SHA-256 test freezing, and 2-run stability pass.
 - **Spec 080 (v0.8.0)**: Observability suite, headed replay mode (`--headed`), and trace visualization.
 - **Spec 090 (v0.9.0 & v1.0.0)**: RFC 6962 Merkle tree audit receipt generation, Ed25519 signing, and 5-bug benchmark sweep on `MetaPulse`.
+
+---
+
+## [0.2.0] - 2026-10-27
+
+First release of the dual-gate loop. It runs against a **simulated oracle**: no browser, video, model or repository access is involved yet. Full notes: [docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md).
+
+### Added
+- **Dual-gate state machine** (`replayfix_core::fsm`): `Init` → `Gate1Red` → `Repair` → `Gate2Green`, plus a terminal `Rejected`. Illegal transitions fail closed.
+- **Mock healer engine** (`replayfix_core::engine`): Gate 1 must be RED before repair; Gate 2 re-evaluates the same behavioral contract, compared by SHA-256 of its canonical JSON. RED is valid only when setup, target and action pass before a failed assertion.
+- **In-memory unified-diff patcher** (`replayfix_core::patch`): single file, exact offsets and context, no fuzz; rejects bad headers, mismatched hunk counts, overlaps, multi-file patches, creation and rename headers, and unsafe header paths.
+- **Anti-no-op guard**: empty, whitespace-only and net-zero patches end as `REPAIR_NOOP_REJECTED`.
+- **Receipts**: `audit_receipt.json` (`VERIFIED_REPAIRED`) or `triage_report.json`. A rejected run removes any stale receipt in the same folder.
+- **CLI**: `replayfix repro --mock-heal`, with `--mock-patch <builtin|noop|FILE>` and `--output-dir <DIR>`. Exit codes: `0` verified, `2` usage or input error, `10` Gate 1 not RED or contract mismatch, `11` security violation, `30` repair rejected.
+- Built-in scenario for task `RF-01` (unguarded `cart.items.length`).
+- `scripts/sign-build-outputs.ps1` and a troubleshooting section for Smart App Control blocks on proc-macro DLLs and test executables.
+- Spec Kit artifacts for Spec 020 (`specs/020-v0.2-mock-healer-two-gates/`).
+- 66 core unit tests and 15 CLI integration tests.
+
+### Changed
+- `replayfix --version` and the banner now read the crate version instead of a hardcoded string.
+- The `repro` success line without `--mock-heal` now says what to do next instead of promising Gate 1 execution.
+- `doctor` result lines were reworded in plain language (exit codes unchanged).
+- README rewritten around what is implemented and verified, with the simulated-oracle limit stated up front.
+
+### Removed
+- `scripts/cargo-runner.ps1`: orphaned since v0.1.1 removed the Cargo runner.
+- Unused dependencies: `tokio`, `tracing`, `walkdir` and `async-trait` from `replayfix-core`; `serde` and `tracing` from `replayfix-cli`; `tokio` now enables only the features the CLI uses.
+- Mojibake in `docs/windows-code-signing.md`.
+
+### Security
+- Patch header paths, `--mock-patch` and `--output-dir` go through the same path checks as manifests (traversal, UNC, DOS device, ADS), exit code 11.
+- Patch errors truncate echoed content so a wrong `--mock-patch` file cannot leak its contents into logs or reports.
+- `--mock-patch` files are limited to 1 MiB.
+
+### Breaking changes
+- None. Without `--mock-heal`, `repro` behaves as in v0.1.1 apart from the reworded status line. Library users who match `CoreError` exhaustively must handle the new `CoreError::Patch` variant.
+
+### Known limitations
+- Only `RF-01` has a built-in scenario; the oracle inspects a bundled snippet, so receipts prove the state machine and receipt format, not real browser behavior (real gates: v0.4).
+- No repository isolation yet (v0.3), no rejection of patches that touch test files and no two-run stability pass (v0.7).
+- Receipts are not signed or Merkle-bound (v0.9).
+- On Windows with Smart App Control, new builds may need `scripts/sign-build-outputs.ps1` before tests can launch the CLI.
 
 ---
 
