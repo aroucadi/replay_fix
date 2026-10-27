@@ -4,13 +4,14 @@ use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::Phase;
 use crate::locator::GroundingTelemetry;
+use crate::perception::VideoTelemetry;
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.4";
+pub const SCHEMA_VERSION: &str = "0.5";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
@@ -59,6 +60,8 @@ pub struct AuditReceipt {
     pub ephemeral_port: u16,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grounding_telemetry: Option<GroundingTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_telemetry: Option<VideoTelemetry>,
     pub created_at: String,
 }
 

@@ -11,6 +11,7 @@ use crate::fixtures::Fixture;
 use crate::fsm::{Phase, PhaseMachine};
 use crate::locator::{DomCandidate, GroundedTarget, LocatorResolver};
 use crate::patch::UnifiedPatcher;
+use crate::perception::VideoTelemetry;
 use crate::platform::EphemeralPort;
 use crate::receipt::{
     timestamp_now, AuditReceipt, GateRecord, PatchRecord, TriageReport, TriageStatus, DISCLAIMER,
@@ -135,6 +136,8 @@ fn describe_invalid(events: &[OracleEvent]) -> String {
 pub struct LiveBrowserOptions {
     pub headed: bool,
     pub candidate_override: Option<Vec<DomCandidate>>,
+    pub video_path: Option<PathBuf>,
+    pub keyframe_dir: Option<PathBuf>,
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -238,7 +241,41 @@ impl MockHealer {
         }
         let initial_source = sandbox.read_file(fixture.target_path)?;
 
-        // 4. Start embedded localhost HTTP server on an OS-assigned ephemeral port (127.0.0.1:0).
+        // 4. Optional Spec 050 Multimodal Video Telemetry, SAM 3.1 & ASR Ingestion.
+        let (video_telemetry, target_click_x, target_click_y) =
+            if let Some(ref vpath) = options.video_path {
+                if vpath.exists() {
+                    let kf_dir = options
+                        .keyframe_dir
+                        .clone()
+                        .unwrap_or_else(|| sandbox.root().join("keyframes"));
+                    match VideoTelemetry::ingest(
+                        vpath,
+                        &kf_dir,
+                        (fixture.viewport_width, fixture.viewport_height),
+                        task_id,
+                    ) {
+                        Ok(tel) => {
+                            let (cx, cy) =
+                                (tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css);
+                            (Some(tel), cx, cy)
+                        }
+                        Err(CoreError::Grounding(msg)) => {
+                            reject_live!(TriageStatus::AmbiguousGrounding, msg)
+                        }
+                        Err(CoreError::SecurityViolation(msg)) => {
+                            reject_live!(TriageStatus::SecurityViolation, msg)
+                        }
+                        Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
+                    }
+                } else {
+                    (None, fixture.click_x, fixture.click_y)
+                }
+            } else {
+                (None, fixture.click_x, fixture.click_y)
+            };
+
+        // 5. Start embedded localhost HTTP server on an OS-assigned ephemeral port (127.0.0.1:0).
         let mut server = match SandboxServer::start(sandbox.root(), None) {
             Ok(s) => s,
             Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
@@ -267,6 +304,7 @@ impl MockHealer {
             &mut bridge,
             fixture,
             &page_url,
+            (target_click_x, target_click_y),
             options.candidate_override.as_deref(),
         ) {
             Ok(pair) => pair,
@@ -362,6 +400,7 @@ impl MockHealer {
             &mut bridge,
             fixture,
             &page_url,
+            (target_click_x, target_click_y),
             options.candidate_override.as_deref(),
         ) {
             Ok(pair) => pair,
@@ -453,6 +492,7 @@ impl MockHealer {
             base_repo_unmodified_verified: true,
             ephemeral_port,
             grounding_telemetry: Some(gate1_grounded.telemetry),
+            video_telemetry,
             created_at: timestamp_now(),
         })))
     }
@@ -461,12 +501,14 @@ impl MockHealer {
         bridge: &mut PlaywrightBridge,
         fixture: &Fixture,
         page_url: &str,
+        click_coords: (i32, i32),
         candidate_override: Option<&[DomCandidate]>,
     ) -> Result<(GroundedTarget, Vec<OracleEvent>)> {
+        let (click_x, click_y) = click_coords;
         let probe_resp = bridge.send_command(&BridgeCommand::ProbePage {
             url: page_url.to_string(),
-            click_x: fixture.click_x,
-            click_y: fixture.click_y,
+            click_x,
+            click_y,
         })?;
 
         let (navigated, aria_snapshot, live_candidates, probe_errors) = match probe_resp {
@@ -502,8 +544,8 @@ impl MockHealer {
                     },
                     selector: String::new(),
                     telemetry: crate::locator::GroundingTelemetry {
-                        click_x: fixture.click_x,
-                        click_y: fixture.click_y,
+                        click_x,
+                        click_y,
                         viewport_normalized: false,
                         element_from_point_match: false,
                         accessible_name_match: false,
@@ -523,8 +565,8 @@ impl MockHealer {
 
         let effective_candidates = candidate_override.unwrap_or(&live_candidates);
         let grounded = LocatorResolver::resolve(
-            fixture.click_x,
-            fixture.click_y,
+            click_x,
+            click_y,
             fixture.viewport_width,
             fixture.viewport_height,
             &aria_snapshot,
@@ -755,6 +797,7 @@ impl MockHealer {
             base_repo_unmodified_verified: true,
             ephemeral_port,
             grounding_telemetry: None,
+            video_telemetry: None,
             created_at: timestamp_now(),
         })))
     }
@@ -807,7 +850,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.4");
+        assert_eq!(receipt.schema_version, "0.5");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -846,7 +889,7 @@ mod tests {
         else {
             panic!("expected live browser verification");
         };
-        assert_eq!(receipt.schema_version, "0.4");
+        assert_eq!(receipt.schema_version, "0.5");
         assert_eq!(receipt.substrate, "playwright-cdp");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -906,6 +949,7 @@ mod tests {
                     is_element_from_point: true,
                 },
             ]),
+            ..Default::default()
         };
         let outcome =
             MockHealer::run_live_browser_in_repo(&f, f.builtin_diff, &repo, &[], &ambiguous_opts)
