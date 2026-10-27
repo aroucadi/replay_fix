@@ -25,6 +25,9 @@ pub enum CoreError {
 
     #[error("Patch error: {0}")]
     Patch(String),
+
+    #[error("Worktree isolation error: {0}")]
+    Worktree(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

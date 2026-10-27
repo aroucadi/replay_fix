@@ -1,6 +1,7 @@
-//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN), driven by a simulated oracle.
+//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN), driven by a simulated oracle
+//! inside an isolated ephemeral scratch sandbox ($\Delta \text{repo} = 0$).
 //!
-//! The oracle statically inspects a fixture for the `cart.items.length`
+//! The oracle statically inspects the sandbox file for the `cart.items.length`
 //! defect signature. It stands in for browser execution until real gates exist.
 
 use crate::digest::{canonical_json, sha256_hex};
@@ -8,11 +9,18 @@ use crate::error::{CoreError, Result};
 use crate::fixtures::Fixture;
 use crate::fsm::{Phase, PhaseMachine};
 use crate::patch::UnifiedPatcher;
+use crate::platform::EphemeralPort;
 use crate::receipt::{
     timestamp_now, AuditReceipt, GateRecord, PatchRecord, TriageReport, TriageStatus, DISCLAIMER,
     SCHEMA_VERSION, SUBSTRATE,
 };
+use crate::worktree::{ScratchSandbox, WorktreeManifest};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static EPHEMERAL_REPO_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Immutable description of what both gates must evaluate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,7 +139,8 @@ pub enum HealOutcome {
 pub struct MockHealer;
 
 impl MockHealer {
-    /// Run the full loop against `fixture` using `diff` as the candidate repair.
+    /// Run the full loop against `fixture` using `diff` as the candidate repair
+    /// inside an isolated ephemeral base directory.
     pub fn run(fixture: &Fixture, diff: &str) -> Result<HealOutcome> {
         Self::run_with_gate2_contract(fixture, diff, &fixture.contract)
     }
@@ -143,11 +152,58 @@ impl MockHealer {
         diff: &str,
         gate2_contract: &BehavioralContract,
     ) -> Result<HealOutcome> {
+        let seq = EPHEMERAL_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp_repo = std::env::temp_dir().join(format!(
+            "replayfix-ephemeral-repo-{}-{}",
+            std::process::id(),
+            seq
+        ));
+        fs::create_dir_all(&temp_repo)?;
+        let res =
+            Self::run_in_repo_with_options(fixture, diff, &temp_repo, &[], gate2_contract, None);
+        let _ = fs::remove_dir_all(&temp_repo);
+        res
+    }
+
+    /// Run the full two-gate loop against `repo_path` in an isolated [`ScratchSandbox`],
+    /// enforcing dual-layer $\Delta \text{repo} = 0$ on `repo_path` and allocating an [`EphemeralPort`].
+    pub fn run_in_repo(
+        fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+    ) -> Result<HealOutcome> {
+        Self::run_in_repo_with_options(
+            fixture,
+            diff,
+            repo_path,
+            extra_excludes,
+            &fixture.contract,
+            None,
+        )
+    }
+
+    fn run_in_repo_with_options(
+        fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        gate2_contract: &BehavioralContract,
+        on_before_post_check: Option<&dyn Fn(&Path)>,
+    ) -> Result<HealOutcome> {
         let task_id = fixture.task_id;
         let mut fsm = PhaseMachine::new();
 
+        // 1. Capture pre-run dual-layer workspace manifest on the base repository.
+        let pre_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
+
+        // 2. Create isolated scratch sandbox and allocate ephemeral port.
+        let mut sandbox = ScratchSandbox::create_with_excludes(repo_path, task_id, extra_excludes)?;
+        let ephemeral_port = EphemeralPort::allocate()?.get();
+
         macro_rules! reject {
             ($status:expr, $reason:expr) => {{
+                let _ = sandbox.teardown();
                 fsm.advance(Phase::Rejected)?;
                 return Ok(HealOutcome::Rejected(Box::new(TriageReport::new(
                     $status,
@@ -158,9 +214,17 @@ impl MockHealer {
             }};
         }
 
-        // Gate 1: the defect must reproduce before any repair is considered.
+        // 3. Materialize target file inside the scratch sandbox if the base repository
+        // does not already supply it; otherwise inspect the copied file in the sandbox.
+        let sandbox_target_file = sandbox.resolve_safe_path(fixture.target_path)?;
+        if !sandbox_target_file.exists() {
+            sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
+        }
+        let initial_source = sandbox.read_file(fixture.target_path)?;
+
+        // Gate 1: the defect must reproduce inside the scratch sandbox before any repair is considered.
         let contract_sha256 = fixture.contract.digest()?;
-        let gate1_events = run_oracle(&fixture.contract, fixture.buggy_source);
+        let gate1_events = run_oracle(&fixture.contract, &initial_source);
         let gate1_verdict = classify(&gate1_events);
         if gate1_verdict != GateVerdict::Red {
             reject!(
@@ -175,7 +239,7 @@ impl MockHealer {
         fsm.advance(Phase::Gate1Red)?;
         let gate1_at = timestamp_now();
 
-        // Repair: validate and apply the candidate patch in memory.
+        // Repair: validate and apply the candidate patch to the file inside the scratch sandbox.
         fsm.advance(Phase::Repair)?;
         if diff.trim().is_empty() {
             reject!(
@@ -183,7 +247,7 @@ impl MockHealer {
                 "The candidate patch is empty; a repair must change the source"
             );
         }
-        let outcome = match UnifiedPatcher::apply_diff(fixture.buggy_source, diff) {
+        let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
             Ok(o) => o,
             Err(CoreError::SecurityViolation(msg)) => {
                 reject!(TriageStatus::SecurityViolation, msg)
@@ -199,14 +263,22 @@ impl MockHealer {
                 )
             );
         }
-        if outcome.is_noop(fixture.buggy_source) {
+        if outcome.is_noop(&initial_source) {
             reject!(
                 TriageStatus::RepairNoopRejected,
                 "The patch applies cleanly but leaves the source unchanged"
             );
         }
 
-        // Gate 2: same contract, patched source.
+        // Write patched file to disk inside the scratch sandbox and capture sandbox tree digest.
+        sandbox.write_file(&outcome.target_path, &outcome.patched)?;
+        let sandbox_manifest = WorktreeManifest::capture(sandbox.root())?;
+        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
+
+        // Read back the patched file from the sandbox filesystem to evaluate Gate 2.
+        let gate2_source = sandbox.read_file(&outcome.target_path)?;
+
+        // Gate 2: same contract, patched source on disk in the sandbox.
         let gate2_sha256 = gate2_contract.digest()?;
         if gate2_sha256 != contract_sha256 {
             reject!(
@@ -214,7 +286,7 @@ impl MockHealer {
                 "Gate 2 contract digest differs from Gate 1; refusing to compare results"
             );
         }
-        let gate2_events = run_oracle(gate2_contract, &outcome.patched);
+        let gate2_events = run_oracle(gate2_contract, &gate2_source);
         let gate2_verdict = classify(&gate2_events);
         match gate2_verdict {
             GateVerdict::Green => {}
@@ -230,6 +302,21 @@ impl MockHealer {
                 )
             ),
         }
+
+        // Optional fault injection hook for testing base repository mutation detection.
+        if let Some(hook) = on_before_post_check {
+            hook(repo_path);
+        }
+
+        // 4. Verify dual-layer base repository integrity (\Delta repo = 0) before accepting Gate 2.
+        let post_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
+        if let Err(err) = pre_manifest.verify_unchanged(&post_manifest) {
+            reject!(TriageStatus::BaseRepoDirtyMutationDetected, err.to_string());
+        }
+
+        // 5. Teardown the scratch sandbox cleanly.
+        sandbox.teardown()?;
+
         fsm.advance(Phase::Gate2Green)?;
         let gate2_at = timestamp_now();
 
@@ -261,6 +348,10 @@ impl MockHealer {
                 events: gate2_events,
             },
             phase_trace: fsm.trace().to_vec(),
+            base_tree_sha256: pre_manifest.tree_sha256,
+            sandbox_tree_sha256,
+            base_repo_unmodified_verified: true,
+            ephemeral_port,
             created_at: timestamp_now(),
         })))
     }
@@ -281,6 +372,19 @@ mod tests {
         }
     }
 
+    fn temp_repo_dir(label: &str) -> PathBuf {
+        let seq = EPHEMERAL_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "replayfix-engine-test-{}-{}-{}",
+            label,
+            std::process::id(),
+            seq
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn test_gate1_oracle_is_red_on_buggy_source() {
         let f = rf01();
@@ -299,6 +403,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
+        assert_eq!(receipt.schema_version, "0.3");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -313,11 +418,67 @@ mod tests {
         );
         assert_eq!(receipt.gate1.contract_sha256, receipt.gate2.contract_sha256);
         assert_eq!(receipt.contract_sha256.len(), 64);
+        assert_eq!(receipt.base_tree_sha256.len(), 64);
+        assert_eq!(receipt.sandbox_tree_sha256.len(), 64);
+        assert_ne!(receipt.base_tree_sha256, receipt.sandbox_tree_sha256);
+        assert!(receipt.base_repo_unmodified_verified);
+        assert!(receipt.ephemeral_port > 0);
         assert!(receipt.gate1.observed_at <= receipt.gate2.observed_at);
         assert_eq!(receipt.patch.sha256, sha256_hex(f.builtin_diff.as_bytes()));
         assert_eq!((receipt.patch.insertions, receipt.patch.deletions), (1, 1));
         assert_eq!(receipt.gate2.events.len(), 4);
         assert!(receipt.gate2.events.iter().all(|e| e.passed));
+    }
+
+    #[test]
+    fn test_run_in_repo_preserves_existing_base_repo_files() {
+        let f = rf01();
+        let repo = temp_repo_dir("preserve");
+        fs::create_dir_all(repo.join("src")).unwrap();
+        fs::write(repo.join("src/cart-summary.js"), f.buggy_source).unwrap();
+
+        let pre_content = fs::read_to_string(repo.join("src/cart-summary.js")).unwrap();
+        let HealOutcome::Verified(receipt) =
+            MockHealer::run_in_repo(&f, f.builtin_diff, &repo, &[]).unwrap()
+        else {
+            panic!("expected verification");
+        };
+
+        // Base repo file must still have the original buggy content (Delta repo = 0)
+        let post_content = fs::read_to_string(repo.join("src/cart-summary.js")).unwrap();
+        assert_eq!(pre_content, post_content);
+        assert!(receipt.base_repo_unmodified_verified);
+        assert_ne!(receipt.base_tree_sha256, receipt.sandbox_tree_sha256);
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn test_base_repo_mutation_during_run_is_rejected_with_exit_11() {
+        let f = rf01();
+        let repo = temp_repo_dir("dirty-mutation");
+        fs::create_dir_all(repo.join("src")).unwrap();
+        fs::write(repo.join("src/cart-summary.js"), f.buggy_source).unwrap();
+
+        let hook = |base: &Path| {
+            let _ = fs::write(base.join("src/rogue.js"), "// unauthorized mutation\n");
+        };
+        let outcome = MockHealer::run_in_repo_with_options(
+            &f,
+            f.builtin_diff,
+            &repo,
+            &[],
+            &f.contract,
+            Some(&hook),
+        )
+        .unwrap();
+
+        let t = rejected(outcome);
+        assert_eq!(t.status, TriageStatus::BaseRepoDirtyMutationDetected);
+        assert_eq!(t.exit_code, 11);
+        assert!(t.reason.contains("src/rogue.js"));
+
+        let _ = fs::remove_dir_all(&repo);
     }
 
     #[test]
