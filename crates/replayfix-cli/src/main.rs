@@ -3,8 +3,8 @@ pub mod ui;
 use clap::{Args, Parser, Subcommand};
 use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
 use replayfix_core::{
-    CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Fixture, HealOutcome, MockHealer,
-    Platform, TaskManifest,
+    BoundingBox, CoreError, DependencyStatus, Doctor, DomCandidate, EnvironmentAdapter, Fixture,
+    HealOutcome, LiveBrowserOptions, MockHealer, Platform, TaskManifest,
 };
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -20,6 +20,8 @@ pub mod exit_codes {
     pub const USAGE_OR_INPUT_ERROR: i32 = 2;
     pub const INTERNAL_OR_SYSTEM_ERROR: i32 = 10;
     pub const SECURITY_VIOLATION: i32 = 11;
+    pub const BRIDGE_EXECUTION_FAILED: i32 = 20;
+    pub const AMBIGUOUS_GROUNDING: i32 = 22;
     pub const REPAIR_REJECTED: i32 = 30;
 }
 
@@ -107,12 +109,20 @@ pub struct ReproArgs {
     #[arg(long)]
     pub mock_heal: bool,
 
-    /// Candidate patch for --mock-heal: 'builtin', 'noop' (empty patch), or a path to a unified diff
-    #[arg(long, default_value = "builtin", requires = "mock_heal")]
+    /// Run the two-gate loop (Gate 1 RED, repair, Gate 2 GREEN) in a live Chromium browser via Playwright CDP grounding
+    #[arg(long)]
+    pub live_browser: bool,
+
+    /// Simulate an ambiguous DOM candidate tie (|ΔS| < 0.25) in --live-browser mode to verify fail-closed AMBIGUOUS_GROUNDING abstention
+    #[arg(long, requires = "live_browser")]
+    pub mock_ambiguous: bool,
+
+    /// Candidate patch for --mock-heal or --live-browser: 'builtin', 'noop' (empty patch), or a path to a unified diff
+    #[arg(long, default_value = "builtin")]
     pub mock_patch: String,
 
-    /// Directory where --mock-heal writes audit_receipt.json or triage_report.json
-    #[arg(long, default_value = ".replayfix", requires = "mock_heal")]
+    /// Directory where audit_receipt.json or triage_report.json is written
+    #[arg(long, default_value = ".replayfix")]
     pub output_dir: String,
 
     /// Dry-run mode: validate environment, manifests, patch, and invariants without execution
@@ -239,6 +249,8 @@ fn run_doctor(json: bool, theme: &Theme) -> Result<(), Box<dyn std::error::Error
 struct ReproExtras {
     trace: bool,
     mock_heal: bool,
+    live_browser: bool,
+    mock_ambiguous: bool,
     mock_patch: String,
     output_dir: String,
     dry_run: bool,
@@ -261,14 +273,25 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         headed,
         trace,
         mock_heal,
+        live_browser,
+        mock_ambiguous,
         mock_patch,
         output_dir,
         dry_run,
     } = args;
 
+    if !mock_heal && !live_browser && (mock_patch != "builtin" || output_dir != ".replayfix") {
+        usage_error(
+            "'--mock-patch' and '--output-dir' require either '--mock-heal' or '--live-browser'",
+            theme,
+        );
+    }
+
     let extras = ReproExtras {
         trace,
         mock_heal,
+        live_browser,
+        mock_ambiguous,
         mock_patch,
         output_dir,
         dry_run,
@@ -391,14 +414,8 @@ fn short(digest: &str) -> &str {
     digest.get(..12).unwrap_or(digest)
 }
 
-fn run_mock_heal(
-    m: &TaskManifest,
-    mock_patch: &str,
-    output_dir: &str,
-    dry_run: bool,
-    theme: &Theme,
-) -> ! {
-    let out_dir = TaskManifest::assert_safe_path(output_dir, "output-dir")
+fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> ! {
+    let out_dir = TaskManifest::assert_safe_path(&extras.output_dir, "output-dir")
         .unwrap_or_else(|e| fail(e, "Invalid --output-dir", theme));
     let repo_dir = TaskManifest::assert_safe_path(&m.repo_path, "repo_path")
         .unwrap_or_else(|e| fail(e, "Invalid --repo path", theme));
@@ -412,31 +429,83 @@ fn run_mock_heal(
         );
     }
 
+    let mode_flag = if extras.live_browser {
+        "--live-browser"
+    } else {
+        "--mock-heal"
+    };
     let fixture = Fixture::for_task(&m.task_id).unwrap_or_else(|| {
         usage_error(
             &format!(
-                "--mock-heal has no built-in fixture for task '{}'. Supported tasks: {}",
+                "{mode_flag} has no built-in fixture for task '{}'. Supported tasks: {}",
                 m.task_id,
                 Fixture::supported_tasks().join(", ")
             ),
             theme,
         )
     });
-    let diff = load_patch(&fixture, mock_patch, theme);
+    let diff = load_patch(&fixture, &extras.mock_patch, theme);
 
     print_security_boundary(theme, &m.repo_path, true, true);
 
-    if dry_run {
-        println!("  {} [DRY RUN] Invariants verified. Candidate patch loaded ({} bytes). Exiting without execution.", theme.brand(Symbols::SHIELD), diff.len());
+    if extras.dry_run {
+        println!(
+            "  {} [DRY RUN] Invariants verified. Candidate patch loaded ({} bytes). Exiting without execution.",
+            theme.brand(Symbols::SHIELD),
+            diff.len()
+        );
         exit(exit_codes::SUCCESS);
     }
 
-    let outcome =
+    let outcome = if extras.live_browser {
+        let candidate_override = extras.mock_ambiguous.then(|| {
+            vec![
+                DomCandidate {
+                    tag: "button".into(),
+                    role: "button".into(),
+                    accessible_name: "Refresh Cart".into(),
+                    test_id: Some("cart-refresh-btn".into()),
+                    bbox: BoundingBox {
+                        x: 100,
+                        y: 100,
+                        width: 120,
+                        height: 40,
+                    },
+                    is_element_from_point: true,
+                },
+                DomCandidate {
+                    tag: "button".into(),
+                    role: "button".into(),
+                    accessible_name: "Shopping Cart".into(),
+                    test_id: Some("duplicate-cart-btn".into()),
+                    bbox: BoundingBox {
+                        x: 100,
+                        y: 100,
+                        width: 120,
+                        height: 40,
+                    },
+                    is_element_from_point: true,
+                },
+            ]
+        });
+        let opts = LiveBrowserOptions {
+            headed: m.headed,
+            candidate_override,
+        };
+        MockHealer::run_live_browser_in_repo(
+            &fixture,
+            &diff,
+            &repo_dir,
+            std::slice::from_ref(&out_dir),
+            &opts,
+        )
+    } else {
         MockHealer::run_in_repo(&fixture, &diff, &repo_dir, std::slice::from_ref(&out_dir))
-            .unwrap_or_else(|e| {
-                eprintln!("Internal error while running the two-gate loop: {e}");
-                exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
-            });
+    }
+    .unwrap_or_else(|e| {
+        eprintln!("Internal error while running the two-gate loop: {e}");
+        exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
+    });
 
     match outcome {
         HealOutcome::Verified(receipt) => {
@@ -452,6 +521,20 @@ fn run_mock_heal(
                     short(&receipt.base_tree_sha256)
                 )),
             );
+            if let Some(tel) = &receipt.grounding_telemetry {
+                print_step(
+                    theme,
+                    "CDP Grounding",
+                    StepStatus::Done,
+                    "Grounded target via elementFromPoint + ariaSnapshot",
+                    Some(&format!(
+                        "{} (score: {:.2}, margin: {:.2})",
+                        tel.matched_selector,
+                        tel.candidate_score_f64(),
+                        tel.score_margin_f64()
+                    )),
+                );
+            }
             print_step(
                 theme,
                 "Gate 1 (RED)",
@@ -503,9 +586,15 @@ fn run_mock_heal(
                 theme.muted(Symbols::STEP),
                 theme.bold("Base repository untouched (Δrepo = 0 verified)")
             );
+            let oracle_desc = if extras.live_browser {
+                "Live Playwright CDP browser (playwright-cdp)"
+            } else {
+                "Simulated static oracle (no browser was launched)"
+            };
             println!(
-                "    {} Oracle    : Simulated static oracle (no browser was launched)",
-                theme.muted(Symbols::STEP)
+                "    {} Oracle    : {}",
+                theme.muted(Symbols::STEP),
+                oracle_desc
             );
             println!(
                 "    {} Receipt   : {}",
@@ -514,7 +603,7 @@ fn run_mock_heal(
             );
             println!();
             println!(
-                "  {} Next: inspect audit receipt or use --headed in v0.4 for browser replay.",
+                "  {} Next: inspect audit receipt or pass --live-browser --headed to watch Chromium replay.",
                 theme.info(Symbols::ARROW_RIGHT)
             );
             println!();
@@ -579,17 +668,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             print_ingestion(&manifest, extras.trace, &stdout_theme);
-            if extras.mock_heal {
-                run_mock_heal(
-                    &manifest,
-                    &extras.mock_patch,
-                    &extras.output_dir,
-                    extras.dry_run,
-                    &stdout_theme,
-                );
+            if extras.mock_heal || extras.live_browser {
+                run_two_gate_loop(&manifest, &extras, &stdout_theme);
             }
             println!(
-                "  {} Status: manifest is valid. Add --mock-heal to run the simulated two-gate loop (real browser gates arrive in v0.4).",
+                "  {} Status: manifest is valid. Add --live-browser (or --mock-heal) to run the two-gate verification loop.",
                 stdout_theme.info(Symbols::BULLET)
             );
         }

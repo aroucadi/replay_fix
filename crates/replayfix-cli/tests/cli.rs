@@ -52,7 +52,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.3");
+    assert_eq!(receipt["schema_version"], "0.4");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -77,13 +77,65 @@ fn mock_heal_verifies_and_writes_receipt() {
 }
 
 #[test]
+fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
+    let dir = scratch("live-browser");
+    let out = run(&dir, &["--live-browser"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["schema_version"], "0.4");
+    assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(receipt["substrate"], "playwright-cdp");
+    assert_eq!(receipt["gate1"]["verdict"], "RED");
+    assert_eq!(receipt["gate2"]["verdict"], "GREEN");
+    assert_eq!(receipt["base_repo_unmodified_verified"], true);
+    assert_eq!(
+        receipt["grounding_telemetry"]["matched_selector"],
+        "page.getByRole('button', { name: 'Refresh Cart', exact: true })"
+    );
+    assert_eq!(
+        receipt["grounding_telemetry"]["element_from_point_match"],
+        true
+    );
+    assert_eq!(
+        receipt["grounding_telemetry"]["accessible_name_match"],
+        true
+    );
+    assert_eq!(receipt["grounding_telemetry"]["candidate_score_bps"], 10000);
+}
+
+#[test]
+fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
+    let dir = scratch("live-ambiguous");
+    let out = run(&dir, &["--live-browser", "--mock-ambiguous"]);
+    assert_eq!(
+        code(&out),
+        22,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let triage = json(&dir.join(".replayfix/triage_report.json"));
+    assert_eq!(triage["schema_version"], "0.4");
+    assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
+    assert_eq!(triage["exit_code"], 22);
+    assert_eq!(triage["substrate"], "playwright-cdp");
+    assert!(!dir.join(".replayfix/audit_receipt.json").exists());
+}
+
+#[test]
 fn noop_patch_is_rejected_with_triage_report() {
     let dir = scratch("noop");
     let out = run(&dir, &["--mock-heal", "--mock-patch", "noop"]);
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.3");
+    assert_eq!(triage["schema_version"], "0.4");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());

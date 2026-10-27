@@ -3,15 +3,18 @@
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::Phase;
+use crate::locator::GroundingTelemetry;
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.3";
+pub const SCHEMA_VERSION: &str = "0.4";
 pub const SUBSTRATE: &str = "mock-static-oracle";
+pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
+pub const DISCLAIMER_LIVE_BROWSER: &str = "Live Playwright CDP oracle: gates executed in Chromium against an isolated ephemeral sandbox server.";
 pub const AUDIT_RECEIPT_FILE: &str = "audit_receipt.json";
 pub const TRIAGE_REPORT_FILE: &str = "triage_report.json";
 
@@ -54,6 +57,8 @@ pub struct AuditReceipt {
     pub sandbox_tree_sha256: String,
     pub base_repo_unmodified_verified: bool,
     pub ephemeral_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grounding_telemetry: Option<GroundingTelemetry>,
     pub created_at: String,
 }
 
@@ -67,6 +72,8 @@ pub enum TriageStatus {
     ContractMismatch,
     SecurityViolation,
     BaseRepoDirtyMutationDetected,
+    AmbiguousGrounding,
+    BridgeExecutionFailed,
 }
 
 impl TriageStatus {
@@ -81,6 +88,8 @@ impl TriageStatus {
             Self::ContractMismatch => "CONTRACT_MISMATCH",
             Self::SecurityViolation => "SECURITY_VIOLATION",
             Self::BaseRepoDirtyMutationDetected => "BASE_REPO_DIRTY_MUTATION_DETECTED",
+            Self::AmbiguousGrounding => "AMBIGUOUS_GROUNDING",
+            Self::BridgeExecutionFailed => "BRIDGE_EXECUTION_FAILED",
         }
     }
 
@@ -90,6 +99,8 @@ impl TriageStatus {
         match self {
             Self::Gate1NotRed | Self::ContractMismatch => 10,
             Self::SecurityViolation | Self::BaseRepoDirtyMutationDetected => 11,
+            Self::BridgeExecutionFailed => 20,
+            Self::AmbiguousGrounding => 22,
             Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
         }
     }
@@ -120,13 +131,23 @@ impl TriageReport {
         task_id: &str,
         phase_trace: &[Phase],
     ) -> Self {
+        Self::with_substrate(status, reason, task_id, SUBSTRATE, phase_trace)
+    }
+
+    pub fn with_substrate(
+        status: TriageStatus,
+        reason: impl Into<String>,
+        task_id: &str,
+        substrate: &str,
+        phase_trace: &[Phase],
+    ) -> Self {
         Self {
             schema_version: SCHEMA_VERSION.to_string(),
             status,
             exit_code: status.exit_code(),
             reason: reason.into(),
             task_id: task_id.to_string(),
-            substrate: SUBSTRATE.to_string(),
+            substrate: substrate.to_string(),
             phase_trace: phase_trace.to_vec(),
             created_at: timestamp_now(),
         }
@@ -188,6 +209,8 @@ mod tests {
         assert_eq!(TriageStatus::ContractMismatch.exit_code(), 10);
         assert_eq!(TriageStatus::SecurityViolation.exit_code(), 11);
         assert_eq!(TriageStatus::BaseRepoDirtyMutationDetected.exit_code(), 11);
+        assert_eq!(TriageStatus::BridgeExecutionFailed.exit_code(), 20);
+        assert_eq!(TriageStatus::AmbiguousGrounding.exit_code(), 22);
         assert_eq!(TriageStatus::RepairNoopRejected.exit_code(), 30);
         assert_eq!(TriageStatus::PatchApplyFailed.exit_code(), 30);
         assert_eq!(TriageStatus::Gate2NotGreen.exit_code(), 30);
@@ -245,6 +268,14 @@ mod tests {
             TriageStatus::BaseRepoDirtyMutationDetected.as_str(),
             "BASE_REPO_DIRTY_MUTATION_DETECTED"
         );
+        assert_eq!(
+            TriageStatus::AmbiguousGrounding.as_str(),
+            "AMBIGUOUS_GROUNDING"
+        );
+        assert_eq!(
+            TriageStatus::BridgeExecutionFailed.as_str(),
+            "BRIDGE_EXECUTION_FAILED"
+        );
     }
 
     #[test]
@@ -257,6 +288,8 @@ mod tests {
             TriageStatus::ContractMismatch,
             TriageStatus::SecurityViolation,
             TriageStatus::BaseRepoDirtyMutationDetected,
+            TriageStatus::AmbiguousGrounding,
+            TriageStatus::BridgeExecutionFailed,
         ] {
             let serialized = serde_json::to_string(&status).unwrap();
             assert_eq!(serialized, format!("\"{}\"", status.as_str()));
