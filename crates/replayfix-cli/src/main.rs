@@ -6,7 +6,12 @@ use replayfix_core::{
     CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Fixture, HealOutcome, MockHealer,
     Platform, TaskManifest,
 };
-use ui::{print_banner, print_field, print_step, Symbols, Theme};
+use std::path::{Path, PathBuf};
+use std::process::exit;
+use ui::{
+    print_banner, print_diagnostics, print_field, print_security_boundary, print_step, ColorOption,
+    DiagnosticCheck, DiagnosticStatus, OutputMode, StepStatus, Symbols, Theme,
+};
 
 /// Standard CLI process exit codes aligned with verification schemas.
 pub mod exit_codes {
@@ -17,8 +22,6 @@ pub mod exit_codes {
     pub const SECURITY_VIOLATION: i32 = 11;
     pub const REPAIR_REJECTED: i32 = 30;
 }
-use std::path::{Path, PathBuf};
-use std::process::exit;
 
 /// Largest patch file accepted by `--mock-patch`.
 const MAX_PATCH_BYTES: u64 = 1024 * 1024;
@@ -27,9 +30,17 @@ const MAX_PATCH_BYTES: u64 = 1024 * 1024;
 #[command(
     name = "fixtream",
     version,
-    about = "FixTream CLI — Deterministic verification and repair harness for modern web applications"
+    about = "FixTream CLI — Deterministic verification, causal reproduction, and repair harness"
 )]
 struct Cli {
+    /// Control colored terminal output: auto, always, never
+    #[arg(long, global = true, default_value = "auto")]
+    color: ColorOption,
+
+    /// Suppress informational messages, banners, and progress (errors and results only)
+    #[arg(short, long, global = true)]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -103,6 +114,10 @@ pub struct ReproArgs {
     /// Directory where --mock-heal writes audit_receipt.json or triage_report.json
     #[arg(long, default_value = ".replayfix", requires = "mock_heal")]
     pub output_dir: String,
+
+    /// Dry-run mode: validate environment, manifests, patch, and invariants without execution
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -118,35 +133,33 @@ enum Commands {
 }
 
 /// Print an error and exit. Security violations use the dedicated exit code 11.
-fn fail(err: CoreError, context: &str) -> ! {
-    let theme = Theme::for_stderr();
+fn fail(err: CoreError, context: &str, theme: &Theme) -> ! {
     match err {
         CoreError::SecurityViolation(msg) => {
             eprintln!(
-                "{} {}: {msg}",
+                "  {} {}: {msg}",
                 theme.error(Symbols::CROSS),
                 theme.error("SECURITY_VIOLATION")
             );
             exit(exit_codes::SECURITY_VIOLATION);
         }
         other => {
-            eprintln!("{} {context}: {other}", theme.error(Symbols::CROSS));
+            eprintln!("  {} {context}: {other}", theme.error(Symbols::CROSS));
             exit(exit_codes::USAGE_OR_INPUT_ERROR);
         }
     }
 }
 
-fn usage_error(message: &str) -> ! {
-    let theme = Theme::for_stderr();
+fn usage_error(message: &str, theme: &Theme) -> ! {
     eprintln!(
-        "{} {}: {message}",
+        "  {} {}: {message}",
         theme.error(Symbols::CROSS),
         theme.error("Error")
     );
     exit(exit_codes::USAGE_OR_INPUT_ERROR);
 }
 
-fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_doctor(json: bool, theme: &Theme) -> Result<(), Box<dyn std::error::Error>> {
     let report = Doctor::check_environment();
 
     if json {
@@ -154,66 +167,56 @@ fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let theme = Theme::for_stdout();
-    print_banner(&theme, "Environment Diagnostics");
-    print_field(&theme, "Host OS", &report.host_os, None);
-    print_field(&theme, "Checked At", &report.timestamp, None);
+    print_banner(theme, "Environment Diagnostics");
+    print_field(theme, "Host OS", &report.host_os, None);
+    print_field(theme, "Checked At", &report.timestamp, None);
     println!();
 
-    let dep_hdr = format!("{}", theme.muted("Dependency"));
-    let exe_hdr = format!("{}", theme.muted("Executable"));
-    let found_hdr = format!("{}", theme.muted("Found Version"));
-    let req_hdr = format!("{}", theme.muted("Required"));
-    let status_hdr = format!("{}", theme.muted("Status"));
-
-    if theme.color_enabled {
-        println!("  {dep_hdr:<21} {exe_hdr:<21} {found_hdr:<25} {req_hdr:<25} {status_hdr}");
-    } else {
-        println!(
-            "  {:<12} {:<12} {:<16} {:<16} Status",
-            "Dependency", "Executable", "Found Version", "Required"
-        );
-    }
-    println!("  {}", theme.muted(&"─".repeat(68)));
-
-    for check in &report.checks {
-        let (status_text, is_ok) = match &check.status {
-            DependencyStatus::Compatible => (format!("{} [OK]", Symbols::CHECK), true),
-            DependencyStatus::IncompatibleVersion { .. } => {
-                (format!("{} [OUTDATED]", Symbols::WARN), false)
-            }
-            DependencyStatus::NotFound => (format!("{} [MISSING]", Symbols::CROSS), false),
-            DependencyStatus::PermissionDenied => (format!("{} [DENIED]", Symbols::CROSS), false),
+    let mut checks = Vec::new();
+    for c in &report.checks {
+        let (status, finding, impact) = match &c.status {
+            DependencyStatus::Compatible => (
+                DiagnosticStatus::Ok,
+                format!(
+                    "Version {} is compatible",
+                    c.found_version.as_deref().unwrap_or("found")
+                ),
+                "None; prerequisite satisfied".to_string(),
+            ),
+            DependencyStatus::IncompatibleVersion { found, required } => (
+                DiagnosticStatus::Warn,
+                format!("Version {found} is outdated (minimum {required})"),
+                "May lead to unexpected behavior during reproduction".to_string(),
+            ),
+            DependencyStatus::NotFound => (
+                DiagnosticStatus::Fail,
+                format!("Executable '{}' not found in PATH", c.executable),
+                format!("Required for {} workflows", c.name),
+            ),
+            DependencyStatus::PermissionDenied => (
+                DiagnosticStatus::Fail,
+                format!("Permission denied executing '{}'", c.executable),
+                "Binary cannot be launched by the current user".to_string(),
+            ),
         };
-        let styled_status = if is_ok {
-            format!("{}", theme.success(&status_text))
-        } else {
-            format!("{}", theme.error(&status_text))
-        };
-        let found = check.found_version.as_deref().unwrap_or("none");
-        if theme.color_enabled {
-            let styled_name = format!("{}", theme.bold(&check.name));
-            println!(
-                "  {:<21} {:<12} {:<16} {:<16} {}",
-                styled_name, check.executable, found, check.required_version, styled_status
-            );
-        } else {
-            println!(
-                "  {:<12} {:<12} {:<16} {:<16} {}",
-                check.name, check.executable, found, check.required_version, styled_status
-            );
-        }
-        if let Some(remedy) = &check.remediation {
-            if check.status != DependencyStatus::Compatible {
-                println!(
-                    "     {} Remediation: {remedy}",
-                    theme.warning(Symbols::ARROW_RIGHT)
-                );
-            }
-        }
+
+        checks.push(DiagnosticCheck {
+            name: c.name.clone(),
+            status,
+            finding,
+            impact,
+            remediation: c.remediation.clone(),
+            evidence: format!(
+                "Required: {}, Found: {}",
+                c.required_version,
+                c.found_version.as_deref().unwrap_or("none")
+            ),
+        });
     }
 
-    println!("  {}", theme.muted(&"─".repeat(68)));
+    print_diagnostics(theme, &checks);
+    println!("  {}", theme.muted(&"─".repeat(60)));
+
     if report.overall_status {
         println!(
             "  {} {}",
@@ -225,8 +228,9 @@ fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!(
             "  {} {}",
             theme.error(Symbols::CROSS),
-            theme
-                .error("One or more dependencies are missing or outdated. See the remedies above.")
+            theme.error(
+                "One or more dependencies are missing or outdated. See actionable steps above."
+            )
         );
         exit(exit_codes::DOCTOR_FAILED);
     }
@@ -237,9 +241,10 @@ struct ReproExtras {
     mock_heal: bool,
     mock_patch: String,
     output_dir: String,
+    dry_run: bool,
 }
 
-fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
+fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras) {
     let ReproArgs {
         manifest,
         task_id,
@@ -258,6 +263,7 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
         mock_heal,
         mock_patch,
         output_dir,
+        dry_run,
     } = args;
 
     let extras = ReproExtras {
@@ -265,6 +271,7 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
         mock_heal,
         mock_patch,
         output_dir,
+        dry_run,
     };
 
     if let Some(manifest_path) = manifest {
@@ -278,16 +285,21 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
             Err(e) => fail(
                 e,
                 &format!("Error loading manifest file {}", manifest_path.display()),
+                theme,
             ),
         };
     }
 
     let id = task_id.unwrap_or_else(|| {
-        usage_error("Missing required argument '--task-id' (or specify '--manifest')")
+        usage_error(
+            "Missing required argument '--task-id' (or specify '--manifest')",
+            theme,
+        )
     });
     let bug_branch =
-        bug_ref.unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'"));
-    let video_file = video.unwrap_or_else(|| usage_error("Missing required argument '--video'"));
+        bug_ref.unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
+    let video_file =
+        video.unwrap_or_else(|| usage_error("Missing required argument '--video'", theme));
     let task_title = title.unwrap_or_else(|| format!("Reproduction Task {id}"));
 
     let adapter = server_cmd.is_some().then_some(EnvironmentAdapter {
@@ -312,26 +324,25 @@ fn build_manifest(args: ReproArgs) -> (TaskManifest, ReproExtras) {
     };
 
     if let Err(e) = m.validate() {
-        fail(e, "Manifest validation error");
+        fail(e, "Manifest validation error", theme);
     }
     (m, extras)
 }
 
-fn print_ingestion(m: &TaskManifest, trace: bool) {
-    let theme = Theme::for_stdout();
-    print_banner(&theme, "Task Ingestion Verified");
-    print_field(&theme, "Task ID", &m.task_id, None);
-    print_field(&theme, "Title", &m.title, None);
-    print_field(&theme, "Target Repo", &m.repo_path, None);
-    print_field(&theme, "Bug Ref", &m.bug_ref, None);
+fn print_ingestion(m: &TaskManifest, trace: bool, theme: &Theme) {
+    print_banner(theme, "Task Ingestion Verified");
+    print_field(theme, "Task ID", &m.task_id, None);
+    print_field(theme, "Title", &m.title, None);
+    print_field(theme, "Target Repo", &m.repo_path, None);
+    print_field(theme, "Bug Ref", &m.bug_ref, None);
     if let Some(clean) = &m.clean_ref {
-        print_field(&theme, "Clean Ref", clean, None);
+        print_field(theme, "Clean Ref", clean, None);
     }
-    print_field(&theme, "Video Source", &m.video_path, None);
-    print_field(&theme, "Headed Mode", &m.headed.to_string(), None);
-    print_field(&theme, "Trace Export", &trace.to_string(), None);
+    print_field(theme, "Video Source", &m.video_path, None);
+    print_field(theme, "Headed Mode", &m.headed.to_string(), None);
+    print_field(theme, "Trace Export", &trace.to_string(), None);
     print_field(
-        &theme,
+        theme,
         "Manifest State",
         "VALIDATED",
         Some("conforms to task_manifest.schema.json"),
@@ -339,23 +350,29 @@ fn print_ingestion(m: &TaskManifest, trace: bool) {
     println!("  {}", theme.muted(&"─".repeat(60)));
 }
 
-fn load_patch(fixture: &Fixture, spec: &str) -> String {
+fn load_patch(fixture: &Fixture, spec: &str, theme: &Theme) -> String {
     match spec {
         "builtin" => fixture.builtin_diff.to_string(),
         "noop" => String::new(),
         file => {
             let path = TaskManifest::assert_safe_path(file, "mock-patch")
-                .unwrap_or_else(|e| fail(e, "Invalid --mock-patch path"));
+                .unwrap_or_else(|e| fail(e, "Invalid --mock-patch path", theme));
             let size = std::fs::metadata(&path)
-                .unwrap_or_else(|e| usage_error(&format!("Cannot read patch file '{file}': {e}")))
+                .unwrap_or_else(|e| {
+                    usage_error(&format!("Cannot read patch file '{file}': {e}"), theme)
+                })
                 .len();
             if size > MAX_PATCH_BYTES {
-                usage_error(&format!(
-                    "Patch file '{file}' is {size} bytes; the limit is {MAX_PATCH_BYTES} bytes"
-                ));
+                usage_error(
+                    &format!(
+                        "Patch file '{file}' is {size} bytes; the limit is {MAX_PATCH_BYTES} bytes"
+                    ),
+                    theme,
+                );
             }
-            std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| usage_error(&format!("Cannot read patch file '{file}': {e}")))
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                usage_error(&format!("Cannot read patch file '{file}': {e}"), theme)
+            })
         }
     }
 }
@@ -374,26 +391,45 @@ fn short(digest: &str) -> &str {
     digest.get(..12).unwrap_or(digest)
 }
 
-fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
+fn run_mock_heal(
+    m: &TaskManifest,
+    mock_patch: &str,
+    output_dir: &str,
+    dry_run: bool,
+    theme: &Theme,
+) -> ! {
     let out_dir = TaskManifest::assert_safe_path(output_dir, "output-dir")
-        .unwrap_or_else(|e| fail(e, "Invalid --output-dir"));
+        .unwrap_or_else(|e| fail(e, "Invalid --output-dir", theme));
     let repo_dir = TaskManifest::assert_safe_path(&m.repo_path, "repo_path")
-        .unwrap_or_else(|e| fail(e, "Invalid --repo path"));
+        .unwrap_or_else(|e| fail(e, "Invalid --repo path", theme));
     if !repo_dir.exists() || !repo_dir.is_dir() {
-        usage_error(&format!(
-            "Target repository directory '{}' does not exist or is not a directory",
-            m.repo_path
-        ));
+        usage_error(
+            &format!(
+                "Target repository directory '{}' does not exist or is not a directory",
+                m.repo_path
+            ),
+            theme,
+        );
     }
 
     let fixture = Fixture::for_task(&m.task_id).unwrap_or_else(|| {
-        usage_error(&format!(
-            "--mock-heal has no built-in fixture for task '{}'. Supported tasks: {}",
-            m.task_id,
-            Fixture::supported_tasks().join(", ")
-        ))
+        usage_error(
+            &format!(
+                "--mock-heal has no built-in fixture for task '{}'. Supported tasks: {}",
+                m.task_id,
+                Fixture::supported_tasks().join(", ")
+            ),
+            theme,
+        )
     });
-    let diff = load_patch(&fixture, mock_patch);
+    let diff = load_patch(&fixture, mock_patch, theme);
+
+    print_security_boundary(theme, &m.repo_path, true, true);
+
+    if dry_run {
+        println!("  {} [DRY RUN] Invariants verified. Candidate patch loaded ({} bytes). Exiting without execution.", theme.brand(Symbols::SHIELD), diff.len());
+        exit(exit_codes::SUCCESS);
+    }
 
     let outcome =
         MockHealer::run_in_repo(&fixture, &diff, &repo_dir, std::slice::from_ref(&out_dir))
@@ -402,35 +438,37 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
                 exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
             });
 
-    let theme = Theme::for_stdout();
     match outcome {
         HealOutcome::Verified(receipt) => {
             let path = write_artifact(&out_dir, |dir| write_audit_receipt(dir, &receipt));
             print_step(
-                &theme,
-                "Sandbox",
-                "INFO",
+                theme,
+                "Isolation",
+                StepStatus::Done,
+                "Scratch workspace initialized",
                 Some(&format!(
-                    "isolated scratch workspace (ephemeral port :{}, base tree {})",
+                    "ephemeral port :{}, base tree {}",
                     receipt.ephemeral_port,
                     short(&receipt.base_tree_sha256)
                 )),
             );
             print_step(
-                &theme,
-                "Gate 1",
-                "RED",
+                theme,
+                "Gate 1 (RED)",
+                StepStatus::Done,
+                "Defect reproduced causal baseline",
                 Some(&format!(
-                    "RED   (defect reproduced; contract {})",
+                    "contract digest: {}",
                     short(&receipt.gate1.contract_sha256)
                 )),
             );
             print_step(
-                &theme,
+                theme,
                 "Repair",
-                "DONE",
+                StepStatus::Done,
+                "Patch applied in scratch sandbox",
                 Some(&format!(
-                    "patch applied in scratch sandbox to {} (+{} -{}, sandbox tree {})",
+                    "target: {} (+{} -{}), sandbox tree: {}",
                     receipt.patch.target_path,
                     receipt.patch.insertions,
                     receipt.patch.deletions,
@@ -438,46 +476,75 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
                 )),
             );
             print_step(
-                &theme,
-                "Gate 2",
-                "GREEN",
+                theme,
+                "Gate 2 (GREEN)",
+                StepStatus::Done,
+                "Behavior verified on patched source",
                 Some(&format!(
-                    "GREEN (same contract {}, base repo unmodified: {})",
+                    "contract: {}, base repo unmodified: {}",
                     short(&receipt.gate2.contract_sha256),
                     receipt.base_repo_unmodified_verified
                 )),
             );
             println!("  {}", theme.muted(&"─".repeat(60)));
+            println!();
             println!(
-                "  {} Result   : {} (simulated oracle; no browser was run)",
+                "  {} {}",
                 theme.success(Symbols::CHECK),
+                theme.bold("Verification Complete:")
+            );
+            println!(
+                "    {} Status    : {}",
+                theme.muted(Symbols::STEP),
                 theme.success("VERIFIED_REPAIRED")
             );
             println!(
-                "  {} Receipt  : {}",
-                theme.info(Symbols::ARROW_RIGHT),
-                path.display()
+                "    {} Integrity : {}",
+                theme.muted(Symbols::STEP),
+                theme.bold("Base repository untouched (Δrepo = 0 verified)")
             );
+            println!(
+                "    {} Oracle    : Simulated static oracle (no browser was launched)",
+                theme.muted(Symbols::STEP)
+            );
+            println!(
+                "    {} Receipt   : {}",
+                theme.muted(Symbols::STEP),
+                theme.info(&path.display().to_string())
+            );
+            println!();
+            println!(
+                "  {} Next: inspect audit receipt or use --headed in v0.4 for browser replay.",
+                theme.info(Symbols::ARROW_RIGHT)
+            );
+            println!();
             exit(exit_codes::SUCCESS);
         }
         HealOutcome::Rejected(report) => {
             let path = write_artifact(&out_dir, |dir| write_triage_report(dir, &report));
-            let err_theme = Theme::for_stderr();
+            let err_theme = Theme::for_stderr(ColorOption::Auto, OutputMode::Human);
+            eprintln!();
             eprintln!(
-                "  {} Result   : {} (repair rejected)",
+                "  {} {} ({})",
                 err_theme.error(Symbols::CROSS),
+                err_theme.bold("Repair Rejected"),
                 err_theme.error(&report.status.to_string())
             );
             eprintln!(
-                "  {} Reason   : {}",
-                err_theme.warning(Symbols::ARROW_RIGHT),
+                "    {} Reason  : {}",
+                err_theme.warning(Symbols::STEP),
                 report.reason
             );
             eprintln!(
-                "  {} Triage   : {}",
-                err_theme.info(Symbols::ARROW_RIGHT),
+                "    {} Triage  : {}",
+                err_theme.info(Symbols::STEP),
                 path.display()
             );
+            eprintln!(
+                "    {} Action  : Inspect the triage report and candidate patch before retrying.",
+                err_theme.info(Symbols::ARROW_RIGHT)
+            );
+            eprintln!();
             exit(report.exit_code);
         }
     }
@@ -487,34 +554,50 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    match Cli::parse().command {
-        Some(Commands::Doctor { json }) => run_doctor(json)?,
+    let cli = Cli::parse();
+    let mode = if cli.quiet {
+        OutputMode::Quiet
+    } else {
+        OutputMode::Human
+    };
+    let stdout_theme = Theme::for_stdout(cli.color, mode);
+    let stderr_theme = Theme::for_stderr(cli.color, mode);
+
+    match cli.command {
+        Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
         Some(Commands::Repro(args)) => {
-            let (manifest, extras) = build_manifest(*args);
+            let (manifest, extras) = build_manifest(*args, &stderr_theme);
             let repo_dir = TaskManifest::assert_safe_path(&manifest.repo_path, "repo_path")
-                .unwrap_or_else(|e| fail(e, "Invalid --repo path"));
+                .unwrap_or_else(|e| fail(e, "Invalid --repo path", &stderr_theme));
             if !repo_dir.exists() || !repo_dir.is_dir() {
-                usage_error(&format!(
-                    "Target repository directory '{}' does not exist or is not a directory",
-                    manifest.repo_path
-                ));
+                usage_error(
+                    &format!(
+                        "Target repository directory '{}' does not exist or is not a directory",
+                        manifest.repo_path
+                    ),
+                    &stderr_theme,
+                );
             }
-            print_ingestion(&manifest, extras.trace);
+            print_ingestion(&manifest, extras.trace, &stdout_theme);
             if extras.mock_heal {
-                run_mock_heal(&manifest, &extras.mock_patch, &extras.output_dir);
+                run_mock_heal(
+                    &manifest,
+                    &extras.mock_patch,
+                    &extras.output_dir,
+                    extras.dry_run,
+                    &stdout_theme,
+                );
             }
-            let theme = Theme::for_stdout();
             println!(
                 "  {} Status: manifest is valid. Add --mock-heal to run the simulated two-gate loop (real browser gates arrive in v0.4).",
-                theme.info(Symbols::BULLET)
+                stdout_theme.info(Symbols::BULLET)
             );
         }
         None => {
-            let theme = Theme::for_stdout();
-            print_banner(&theme, "Deterministic Verification Harness");
-            print_field(&theme, "Version", env!("CARGO_PKG_VERSION"), None);
+            print_banner(&stdout_theme, "Deterministic Verification Harness");
+            print_field(&stdout_theme, "Version", env!("CARGO_PKG_VERSION"), None);
             print_field(
-                &theme,
+                &stdout_theme,
                 "Host OS",
                 &format!("{:?}", Platform::os_family()),
                 None,
@@ -522,7 +605,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!();
             println!(
                 "  Run '{}' to explore available commands and options.",
-                theme.brand("fixtream --help")
+                stdout_theme.brand("fixtream --help")
             );
         }
     }

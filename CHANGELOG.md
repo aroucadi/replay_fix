@@ -19,6 +19,19 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.3.2] - 2026-10-27
+
+Production-grade terminal UX and interaction engineering milestone.
+
+### Added
+- **Output Modes & Capability Precedence**: Added --color <auto|always|never> and --quiet (OutputMode::Human, OutputMode::Quiet, OutputMode::Machine).
+- **Security & Trust Boundaries**: User-visible verification boundary cards declaring repository immutability ($\\Delta\\text{repo} = 0$), scratch isolation status, and SHA-256 test freeze.
+- **Actionable Diagnostic Architecture**: Overhauled replayfix doctor with structured findings, impacts, concrete remediation, and evidence.
+- **Dry-Run & Preview**: Added --dry-run flag to replayfix repro.
+- **Deterministic Operational Steps**: Labeled phase indicators ([RUN], [PASS], [FAIL], [SKIP]) with contextual metadata and audit summaries.
+
+---
+
 ## [0.3.1] - 2026-10-27
 
 Terminal UX and Interaction Engineering patch. Full notes: [docs/release-notes/v0.3.1.md](docs/release-notes/v0.3.1.md).
