@@ -20,12 +20,36 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.2.1] - 2026-10-27
+
+Maintenance and clean-architecture refactoring release following the comprehensive engineering confidence audit. Full notes: [docs/release-notes/v0.2.1.md](docs/release-notes/v0.2.1.md).
+
+### Added
+- **SSOT String Representation for TriageStatus**: Added s_str() and Display implementation directly on TriageStatus in
+eplayfix_core::receipt, eliminating runtime serde string extraction overhead.
+- **SSOT CLI Exit Codes**: Introduced
+eplayfix_cli::exit_codes (SUCCESS = 0, DOCTOR_FAILED = 1, USAGE_OR_INPUT_ERROR = 2, INTERNAL_OR_SYSTEM_ERROR = 10, SECURITY_VIOLATION = 11, REPAIR_REJECTED = 30) centralizing all CLI termination pathways.
+- **Root Crate Re-exports**: Re-exported TriageStatus, AUDIT_RECEIPT_FILE, and TRIAGE_REPORT_FILE from
+eplayfix_core crate root.
+- **Automated Property Tests**: Added 	est_triage_status_as_str_and_display and 	est_triage_status_serde_parity ensuring exact equivalence between serde serialization and string representation.
+
+### Changed
+- Refactored CLI triage report output to use native Display formatting directly on
+eport.status.
+- Replaced magic exit code numbers across CLI handlers with named exit_codes constants.
+
+### Removed
+- Debloated redundant status_name helper in
+eplayfix-cli.
+
+---
+
 ## [0.2.0] - 2026-10-27
 
 First release of the dual-gate loop. It runs against a **simulated oracle**: no browser, video, model or repository access is involved yet. Full notes: [docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md).
 
 ### Added
-- **Dual-gate state machine** (`replayfix_core::fsm`): `Init` → `Gate1Red` → `Repair` → `Gate2Green`, plus a terminal `Rejected`. Illegal transitions fail closed.
+- **Dual-gate state machine** (`replayfix_core::fsm`): `Init` Ã¢â€ â€™ `Gate1Red` Ã¢â€ â€™ `Repair` Ã¢â€ â€™ `Gate2Green`, plus a terminal `Rejected`. Illegal transitions fail closed.
 - **Mock healer engine** (`replayfix_core::engine`): Gate 1 must be RED before repair; Gate 2 re-evaluates the same behavioral contract, compared by SHA-256 of its canonical JSON. RED is valid only when setup, target and action pass before a failed assertion.
 - **In-memory unified-diff patcher** (`replayfix_core::patch`): single file, exact offsets and context, no fuzz; rejects bad headers, mismatched hunk counts, overlaps, multi-file patches, creation and rename headers, and unsafe header paths.
 - **Anti-no-op guard**: empty, whitespace-only and net-zero patches end as `REPAIR_NOOP_REJECTED`.

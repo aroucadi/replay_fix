@@ -4,6 +4,16 @@ use replayfix_core::{
     CoreError, DependencyStatus, Doctor, EnvironmentAdapter, Fixture, HealOutcome, MockHealer,
     Platform, TaskManifest,
 };
+
+/// Standard CLI process exit codes aligned with verification schemas.
+pub mod exit_codes {
+    pub const SUCCESS: i32 = 0;
+    pub const DOCTOR_FAILED: i32 = 1;
+    pub const USAGE_OR_INPUT_ERROR: i32 = 2;
+    pub const INTERNAL_OR_SYSTEM_ERROR: i32 = 10;
+    pub const SECURITY_VIOLATION: i32 = 11;
+    pub const REPAIR_REJECTED: i32 = 30;
+}
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
@@ -114,18 +124,18 @@ fn fail(err: CoreError, context: &str) -> ! {
     match err {
         CoreError::SecurityViolation(msg) => {
             eprintln!("SECURITY_VIOLATION: {msg}");
-            exit(11);
+            exit(exit_codes::SECURITY_VIOLATION);
         }
         other => {
             eprintln!("{context}: {other}");
-            exit(2);
+            exit(exit_codes::USAGE_OR_INPUT_ERROR);
         }
     }
 }
 
 fn usage_error(message: &str) -> ! {
     eprintln!("Error: {message}");
-    exit(2);
+    exit(exit_codes::USAGE_OR_INPUT_ERROR);
 }
 
 fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -175,7 +185,7 @@ fn run_doctor(json: bool) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!(
             "Result: one or more dependencies are missing or outdated. See the remedies above."
         );
-        exit(1);
+        exit(exit_codes::DOCTOR_FAILED);
     }
 }
 
@@ -305,20 +315,13 @@ fn load_patch(fixture: &Fixture, spec: &str) -> String {
     }
 }
 
-fn status_name(status: replayfix_core::receipt::TriageStatus) -> String {
-    serde_json::to_value(status)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_else(|| format!("{status:?}"))
-}
-
 fn write_artifact(
     dir: &Path,
     write: impl FnOnce(&Path) -> replayfix_core::Result<PathBuf>,
 ) -> PathBuf {
     write(dir).unwrap_or_else(|e| {
         eprintln!("Could not write results to '{}': {e}", dir.display());
-        exit(10);
+        exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
     })
 }
 
@@ -341,7 +344,7 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
 
     let outcome = MockHealer::run(&fixture, &diff).unwrap_or_else(|e| {
         eprintln!("Internal error while running the two-gate loop: {e}");
-        exit(10);
+        exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
     });
 
     match outcome {
@@ -362,14 +365,11 @@ fn run_mock_heal(m: &TaskManifest, mock_patch: &str, output_dir: &str) -> ! {
             println!("{THIN_RULE}");
             println!("Result   : VERIFIED_REPAIRED (simulated oracle; no browser was run)");
             println!("Receipt  : {}", path.display());
-            exit(0);
+            exit(exit_codes::SUCCESS);
         }
         HealOutcome::Rejected(report) => {
             let path = write_artifact(&out_dir, |dir| write_triage_report(dir, &report));
-            eprintln!(
-                "Result   : {} (repair rejected)",
-                status_name(report.status)
-            );
+            eprintln!("Result   : {} (repair rejected)", report.status);
             eprintln!("Reason   : {}", report.reason);
             eprintln!("Triage   : {}", path.display());
             exit(report.exit_code);

@@ -20,4 +20,6 @@ pub use fsm::{Phase, PhaseMachine};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use patch::{PatchOutcome, UnifiedPatcher};
 pub use platform::{OsFamily, Platform};
-pub use receipt::{AuditReceipt, TriageReport};
+pub use receipt::{
+    AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
+};

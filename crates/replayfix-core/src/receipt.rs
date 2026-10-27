@@ -65,15 +65,33 @@ pub enum TriageStatus {
 }
 
 impl TriageStatus {
+    /// Canonical SCREAMING_SNAKE_CASE string representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RepairNoopRejected => "REPAIR_NOOP_REJECTED",
+            Self::PatchApplyFailed => "PATCH_APPLY_FAILED",
+            Self::Gate1NotRed => "GATE1_NOT_RED",
+            Self::Gate2NotGreen => "GATE2_NOT_GREEN",
+            Self::ContractMismatch => "CONTRACT_MISMATCH",
+            Self::SecurityViolation => "SECURITY_VIOLATION",
+        }
+    }
+
     /// Process exit code aligned with the canonical result schemas.
+    #[must_use]
     pub const fn exit_code(self) -> i32 {
         match self {
-            TriageStatus::Gate1NotRed | TriageStatus::ContractMismatch => 10,
-            TriageStatus::SecurityViolation => 11,
-            TriageStatus::RepairNoopRejected
-            | TriageStatus::PatchApplyFailed
-            | TriageStatus::Gate2NotGreen => 30,
+            Self::Gate1NotRed | Self::ContractMismatch => 10,
+            Self::SecurityViolation => 11,
+            Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
         }
+    }
+}
+
+impl std::fmt::Display for TriageStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -197,5 +215,39 @@ mod tests {
         assert!(!dir.join(AUDIT_RECEIPT_FILE).exists());
         assert!(dir.join(TRIAGE_REPORT_FILE).exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_triage_status_as_str_and_display() {
+        assert_eq!(
+            TriageStatus::RepairNoopRejected.as_str(),
+            "REPAIR_NOOP_REJECTED"
+        );
+        assert_eq!(
+            TriageStatus::PatchApplyFailed.to_string(),
+            "PATCH_APPLY_FAILED"
+        );
+        assert_eq!(TriageStatus::Gate1NotRed.as_str(), "GATE1_NOT_RED");
+        assert_eq!(TriageStatus::Gate2NotGreen.to_string(), "GATE2_NOT_GREEN");
+        assert_eq!(TriageStatus::ContractMismatch.as_str(), "CONTRACT_MISMATCH");
+        assert_eq!(
+            TriageStatus::SecurityViolation.to_string(),
+            "SECURITY_VIOLATION"
+        );
+    }
+
+    #[test]
+    fn test_triage_status_serde_parity() {
+        for status in [
+            TriageStatus::RepairNoopRejected,
+            TriageStatus::PatchApplyFailed,
+            TriageStatus::Gate1NotRed,
+            TriageStatus::Gate2NotGreen,
+            TriageStatus::ContractMismatch,
+            TriageStatus::SecurityViolation,
+        ] {
+            let serialized = serde_json::to_string(&status).unwrap();
+            assert_eq!(serialized, format!("\"{}\"", status.as_str()));
+        }
     }
 }
