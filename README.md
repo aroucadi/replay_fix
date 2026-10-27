@@ -2,7 +2,7 @@
 
 ReplayFix is a deterministic Rust harness for reproducing, verifying and repairing visual bugs in web applications. The long-term design is simple: a bug is only "fixed" when the same behavioral check goes from RED to GREEN, inside an isolated scratch workspace, with a receipt you can audit.
 
-> **Where the project stands (v0.3.0).** ReplayFix is built in small, verified slices. Today it checks your environment, validates bug-reproduction tasks, clones your target repository into an **isolated ephemeral scratch sandbox**, verifies **dual-layer repository immutability ($\Delta \text{repo} = 0$)**, allocates **dynamic ephemeral ports (`127.0.0.1:0`)**, and runs the full two-gate loop (Gate 1 RED → repair → Gate 2 GREEN) against a **simulated oracle**. It does **not** yet drive a browser, read video, or call a model. Those arrive in later releases (see the roadmap).
+> **Where the project stands (v0.3.3).** ReplayFix is built in small, verified slices. Today it checks your environment, validates bug-reproduction tasks, clones your target repository into an **isolated ephemeral scratch sandbox**, verifies **dual-layer repository immutability ($\Delta \text{repo} = 0$)**, allocates **dynamic ephemeral ports (`127.0.0.1:0`)**, and runs the full two-gate loop (Gate 1 RED → repair → Gate 2 GREEN) against a **simulated oracle**. It does **not** yet drive a browser, read video, or call a model. Those arrive in later releases (see the roadmap).
 
 ---
 
@@ -50,9 +50,9 @@ replayfix doctor --json   # machine-readable report for CI
 Dependency   Executable   Found Version    Required         Status
 Git          git          2.55.0           2.30.0           [OK]
 Node.js      node         24.19.0          18.0.0           [OK]
-Playwright   playwright   none             1.40.0           [MISSING]
-   >> Remedy: Install Playwright via 'npm install -D playwright' and install browsers via 'npx playwright install chromium'
-FFmpeg       ffmpeg       7.1.1            4.4.0            [OK]
+Playwright   playwright   1.64.1           1.40.0           [OK]
+
+FFmpeg       ffmpeg       15.2             4.4.0            [OK]
 ```
 
 ### Describe a bug: `replayfix repro`
@@ -78,6 +78,8 @@ replayfix repro --manifest task.json
 | `--mock-heal` | Run the simulated two-gate loop inside an isolated scratch sandbox (below) | off |
 | `--mock-patch <builtin\|noop\|FILE>` | Candidate patch for `--mock-heal` (needs `--mock-heal`) | `builtin` |
 | `--output-dir <DIR>` | Where results are written (needs `--mock-heal`) | `.replayfix` |
+| `--dry-run` | Validate environment, manifests, and patch invariants without execution | off |
+| `--color <auto\|always\|never>` | Control colored output formatting | `auto` |
 
 Without `--mock-heal`, `repro` validates the task and stops.
 
@@ -160,7 +162,7 @@ Tests run natively on every platform with no custom runner.
 | v0.0.0 | Workspace genesis | Delivered |
 | v0.1.0 / v0.1.1 | `doctor`, manifest ingestion, input hardening | Delivered |
 | v0.2.0 / v0.2.1 | Dual-gate state machine, unified patcher, no-op guard, receipts (simulated oracle) | Delivered |
-| **v0.3.0** | **Isolated scratch sandboxes, $\Delta \text{repo} = 0$ verification, ephemeral ports, process tree cleanup** | **Delivered** |
+| **v0.3.0 – v0.3.3** | **Isolated scratch sandboxes, $\Delta \text{repo} = 0$ verification, ephemeral ports, process tree cleanup, terminal UX & release quality gate** | **Delivered** |
 | v0.4.0 | Playwright grounding with real browser gates | Planned |
 | v0.5.0 | Video keyframes and SAM 3.1 perception | Planned |
 | v0.6.0 | Model-driven bounded repair | Planned |

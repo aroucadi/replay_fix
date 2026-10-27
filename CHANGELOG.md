@@ -19,6 +19,22 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.3.3] - 2026-10-27
+
+v0.3 Release Quality Gate qualification, workspace version harmonization, and BeautifulRust verification. Full notes: [docs/release-notes/v0.3.3.md](docs/release-notes/v0.3.3.md).
+
+### Changed
+- **Workspace Version Harmonization**: Synchronized crate versions to `v0.3.3` across `replayfix-core` and `replayfix-cli`.
+- **Windows Command Resolution in `doctor`**: Resolved Windows batch wrapper probes (`.cmd`) for npm/npx-managed tools (`npx`, `playwright`), ensuring 100% accurate environment compatibility reporting.
+
+### Verified
+- **Full Test Parity**: 96 passing automated tests (77 core unit tests, 17 CLI integration tests, 2 UI painter tests) with 0 failures.
+- **BeautifulRust Invariants**: Zero `.unwrap()` and zero `.expect()` across all production source files; `unsafe_code = "forbid"` and `missing_debug_implementations = "warn"` enforced.
+- **Strict Clippy Cleanliness**: `cargo clippy --workspace --all-targets --all-features -- -D warnings` passing with zero warnings.
+- **Interactive & Non-Interactive UX**: Verified `--dry-run`, deterministic color precedence (`--color auto|always|never`), structured diagnostic cards, and quiet mode.
+
+---
+
 ## [0.3.2] - 2026-10-27
 
 Production-grade terminal UX and interaction engineering milestone.
