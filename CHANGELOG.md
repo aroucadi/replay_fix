@@ -17,6 +17,23 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.6.2] - 2026-10-28
+
+Surgical packaging, test runner resiliency, and sandbox seeding patch for Spec 060 (`060-v0.6-meta-model-bounded-repair`). Full notes: [docs/release-notes/v0.6.2.md](docs/release-notes/v0.6.2.md).
+
+### Packaging & Hardening
+- **Git Packaging & CI Tracking (`.gitignore`, `scripts/check-panics.ps1`)**:
+  - Un-ignored `.specify/scripts/` in `.gitignore` and added root `scripts/check-panics.ps1` for clean CI reproducibility.
+  - Dynamically detects the workspace root by walking parent directories looking for `Cargo.toml`.
+- **Windows Test Runner Resiliency (`crates/replayfix-cli/tests/cli.rs`)**:
+  - Replaced `.expect()` in test process exit code helper with `out.status.code().unwrap_or(-1)` to eliminate false runner panics on Windows.
+- **NTFS Directory Junction Exclusion in Sandbox Seeding (`replayfix_core::worktree`)**:
+  - In `collect_entries` and `copy_tree`, evaluated `is_symlink_or_reparse_point` to guarantee directory junctions (`mklink /J`) are excluded during initial workspace cloning.
+- **Comment & String Literal Stripping in Scope Parser (`replayfix_core::repair::BlockPatcher`)**:
+  - Implemented `strip_comments_and_strings` in `BlockPatcher::open_enclosing_declarations` to blank out comments and string literals, preventing false enclosing scope detection.
+
+---
+
 ## [0.6.1] - 2026-10-28
 
 Adversarial security hardening and preflight reliability patch for Spec 060 (`060-v0.6-meta-model-bounded-repair`). Full notes: [docs/release-notes/v0.6.1.md](docs/release-notes/v0.6.1.md).

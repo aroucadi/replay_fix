@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.6.1` (`v0.6.1-patch-adversarial-hardening` — Preflight Reliability, Windows Reparse Point Security, Enclosing Scope Verification, and Lexical AST Panic Defense)
-- **Status**: Qualified & ready for release tag `v0.6.1`; baseline locked for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`)
+- **Active Milestone**: `v0.6.2` (`v0.6.2-patch-packaging-resiliency` — Git Packaging, Windows Test Resiliency, Sandbox Seeding Junction Hardening, and Lexical Scope Hygiene)
+- **Status**: Qualified & ready for release tag `v0.6.2`; baseline locked for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`)
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -38,6 +38,11 @@
   - Dynamic `syntax_preflight_passed` state reflection and exhaustive error matching in `engine.rs`.
   - CLI validation rejecting `--reasoning-effort max` with exit code `2`.
   - Lexical tokenizer for `check-panics.ps1` with self-test suite and crate-level AST denial lints.
+- [x] **v0.6.2 Packaging Integrity, Test Resiliency & Sandbox Seeding Hardening**:
+  - Git packaging: un-ignored `.specify/scripts/` in `.gitignore` and added root `scripts/check-panics.ps1` with dynamic repo root discovery.
+  - Windows test runner: replaced fragile `.expect()` in `tests/cli.rs::code()` with `unwrap_or(-1)`.
+  - Sandbox seeding: `collect_entries` and `copy_tree` in `worktree.rs` inspect `is_symlink_or_reparse_point(&symlink_meta)` to skip NTFS directory junctions (`mklink /J`).
+  - Block patcher hygiene: `strip_comments_and_strings` in `repair.rs` blanks comments (`//`, `/* */`) and string literals before scope extraction.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
