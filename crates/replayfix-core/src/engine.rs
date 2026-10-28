@@ -1,6 +1,7 @@
-//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN), supporting both the
-//! deterministic simulated oracle and live Playwright CDP browser execution inside an
-//! isolated ephemeral scratch sandbox ($\Delta \text{repo} = 0$).
+//! Dual-gate engine: Gate 1 (RED) -> Repair -> Gate 2 (GREEN, 2-run stability), supporting both
+//! the deterministic simulated oracle and live Playwright CDP browser execution inside an
+//! isolated ephemeral scratch sandbox ($\Delta \text{repo} = 0$), with Spec 060 bounded
+//! autonomous Meta Muse repair, anti-cheating test freeze, and syntax preflight.
 
 use crate::browser::{
     BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer, BRIDGE_SCRIPT_FILENAME,
@@ -10,20 +11,29 @@ use crate::error::{CoreError, Result};
 use crate::fixtures::Fixture;
 use crate::fsm::{Phase, PhaseMachine};
 use crate::locator::{DomCandidate, GroundedTarget, LocatorResolver};
-use crate::patch::UnifiedPatcher;
+use crate::patch::{PatchOutcome, UnifiedPatcher};
 use crate::perception::VideoTelemetry;
 use crate::platform::EphemeralPort;
 use crate::receipt::{
     timestamp_now, AuditReceipt, GateRecord, PatchRecord, TriageReport, TriageStatus, DISCLAIMER,
     DISCLAIMER_LIVE_BROWSER, SCHEMA_VERSION, SUBSTRATE, SUBSTRATE_LIVE_BROWSER,
 };
+use crate::repair::{
+    check_repair_deadline, AttemptLineage, BlockPatcher, BoundedRepairClient, MuseModelConfig,
+    PromptBuilder, RepairClientMode, RepairRequest, RepairTelemetry, StructuredRepairPatch,
+    SyntaxPreflight, TestFreezeGuard, TokenAccounting, MAX_REPAIR_ATTEMPTS,
+};
 use crate::worktree::{ScratchSandbox, WorktreeManifest};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 static EPHEMERAL_REPO_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Required consecutive GREEN runs at Gate 2 to confirm deterministic non-flaky repair.
+pub const GATE2_REQUIRED_CONSECUTIVE_RUNS: u32 = 2;
 
 /// Immutable description of what both gates must evaluate.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,13 +141,15 @@ fn describe_invalid(events: &[OracleEvent]) -> String {
     }
 }
 
-/// Options for live Playwright CDP browser execution.
+/// Options for live Playwright CDP browser execution and Spec 060 autonomous model repair.
 #[derive(Debug, Clone, Default)]
 pub struct LiveBrowserOptions {
     pub headed: bool,
     pub candidate_override: Option<Vec<DomCandidate>>,
     pub video_path: Option<PathBuf>,
     pub keyframe_dir: Option<PathBuf>,
+    pub model_slug: Option<String>,
+    pub repair_mode: Option<RepairClientMode>,
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -145,6 +157,23 @@ pub struct LiveBrowserOptions {
 pub enum HealOutcome {
     Verified(Box<AuditReceipt>),
     Rejected(Box<TriageReport>),
+}
+
+/// Internal result of running the bounded autonomous repair loop.
+enum AutonomousRepairResult {
+    Verified {
+        outcome: PatchOutcome,
+        diff_text: String,
+        gate2_events: Vec<OracleEvent>,
+        repair_telemetry: RepairTelemetry,
+        token_accounting: TokenAccounting,
+    },
+    Rejected {
+        status: TriageStatus,
+        reason: String,
+        repair_telemetry: Option<RepairTelemetry>,
+        token_accounting: Option<TokenAccounting>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -171,8 +200,15 @@ impl MockHealer {
             seq
         ));
         fs::create_dir_all(&temp_repo)?;
-        let res =
-            Self::run_in_repo_with_options(fixture, diff, &temp_repo, &[], gate2_contract, None);
+        let res = Self::run_in_repo_with_options(
+            fixture,
+            diff,
+            &temp_repo,
+            &[],
+            gate2_contract,
+            None,
+            None,
+        );
         let _ = fs::remove_dir_all(&temp_repo);
         res
     }
@@ -192,6 +228,27 @@ impl MockHealer {
             extra_excludes,
             &fixture.contract,
             None,
+            None,
+        )
+    }
+
+    /// Run the two-gate loop in simulated oracle mode using the Spec 060 bounded autonomous
+    /// repair engine (`--model`, `--mock-failing-repair`, or `--mock-syntax-retry`).
+    pub fn run_autonomous_in_repo(
+        fixture: &Fixture,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        model_slug: &str,
+        repair_mode: RepairClientMode,
+    ) -> Result<HealOutcome> {
+        Self::run_in_repo_with_options(
+            fixture,
+            "",
+            repo_path,
+            extra_excludes,
+            &fixture.contract,
+            None,
+            Some((model_slug, repair_mode)),
         )
     }
 
@@ -207,6 +264,18 @@ impl MockHealer {
     ) -> Result<HealOutcome> {
         let task_id = fixture.task_id;
         let mut fsm = PhaseMachine::new();
+
+        // Validate model configuration upfront if autonomous model repair is requested.
+        let autonomous_config = match (options.model_slug.as_deref(), options.repair_mode) {
+            (Some(slug), mode) => {
+                Some((MuseModelConfig::new(slug, None)?, mode.unwrap_or_default()))
+            }
+            (None, Some(mode)) => Some((
+                MuseModelConfig::new(crate::repair::MUSE_SPARK_13_SLUG, None)?,
+                mode,
+            )),
+            (None, None) => None,
+        };
 
         // 1. Capture pre-run dual-layer workspace manifest on the base repository.
         let pre_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
@@ -228,6 +297,20 @@ impl MockHealer {
                     ),
                 )));
             }};
+            ($status:expr, $reason:expr, $rtel:expr, $tokens:expr) => {{
+                let _ = sandbox.teardown();
+                fsm.advance(Phase::Rejected)?;
+                return Ok(HealOutcome::Rejected(Box::new(
+                    TriageReport::with_substrate(
+                        $status,
+                        $reason,
+                        task_id,
+                        SUBSTRATE_LIVE_BROWSER,
+                        fsm.trace(),
+                    )
+                    .with_repair_telemetry($rtel, $tokens),
+                )));
+            }};
         }
 
         // 3. Materialize target source file and HTML host shell inside the scratch sandbox.
@@ -240,6 +323,9 @@ impl MockHealer {
             sandbox.write_file("index.html", fixture.index_html)?;
         }
         let initial_source = sandbox.read_file(fixture.target_path)?;
+
+        // Capture anti-cheating SHA-256 test freeze guard before Gate 1 / Repair.
+        let freeze_guard = TestFreezeGuard::capture(sandbox.root())?;
 
         // 4. Optional Spec 050 Multimodal Video Telemetry, SAM 3.1 & ASR Ingestion.
         let (video_telemetry, target_click_x, target_click_y) =
@@ -283,7 +369,7 @@ impl MockHealer {
         let ephemeral_port = server.port();
         let page_url = format!("{}/index.html", server.base_url());
 
-        // 5. Start Playwright Node.js stdio bridge.
+        // 6. Start Playwright Node.js stdio bridge.
         let mut bridge = match PlaywrightBridge::start(
             sandbox.root(),
             options.headed,
@@ -298,7 +384,7 @@ impl MockHealer {
         };
         sandbox.register_child_pid(bridge.pid());
 
-        // 6. Gate 1 (Live Browser RED): Probe, ground locator, click, and observe runtime TypeError.
+        // 7. Gate 1 (Live Browser RED): Probe, ground locator, click, and observe runtime TypeError.
         let contract_sha256 = fixture.contract.digest()?;
         let (gate1_grounded, gate1_events) = match Self::execute_browser_gate(
             &mut bridge,
@@ -336,56 +422,8 @@ impl MockHealer {
         fsm.advance(Phase::Gate1Red)?;
         let gate1_at = timestamp_now();
 
-        // 7. Repair: validate and apply candidate patch on disk inside the scratch sandbox.
+        // 8. Repair + Gate 2 (2-run stability verification).
         fsm.advance(Phase::Repair)?;
-        if diff.trim().is_empty() {
-            bridge.shutdown();
-            server.shutdown();
-            reject_live!(
-                TriageStatus::RepairNoopRejected,
-                "The candidate patch is empty; a repair must change the source"
-            );
-        }
-        let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
-            Ok(o) => o,
-            Err(CoreError::SecurityViolation(msg)) => {
-                bridge.shutdown();
-                server.shutdown();
-                reject_live!(TriageStatus::SecurityViolation, msg);
-            }
-            Err(e) => {
-                bridge.shutdown();
-                server.shutdown();
-                reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
-            }
-        };
-        if outcome.target_path != fixture.target_path {
-            bridge.shutdown();
-            server.shutdown();
-            reject_live!(
-                TriageStatus::PatchApplyFailed,
-                format!(
-                    "Patch targets '{}' but the repair scope is '{}'",
-                    outcome.target_path, fixture.target_path
-                )
-            );
-        }
-        if outcome.is_noop(&initial_source) {
-            bridge.shutdown();
-            server.shutdown();
-            reject_live!(
-                TriageStatus::RepairNoopRejected,
-                "The patch applies cleanly but leaves the source unchanged"
-            );
-        }
-
-        sandbox.write_file(&outcome.target_path, &outcome.patched)?;
-        let bridge_script_exclude = vec![PathBuf::from(BRIDGE_SCRIPT_FILENAME)];
-        let sandbox_manifest =
-            WorktreeManifest::capture_with_excludes(sandbox.root(), &bridge_script_exclude)?;
-        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
-
-        // 8. Gate 2 (Live Browser GREEN): Reload page from sandbox server, verify same grounded target, click, and assert clean output.
         let gate2_sha256 = fixture.contract.digest()?;
         if gate2_sha256 != contract_sha256 {
             bridge.shutdown();
@@ -396,56 +434,227 @@ impl MockHealer {
             );
         }
 
-        let (gate2_grounded, gate2_events) = match Self::execute_browser_gate(
-            &mut bridge,
-            fixture,
-            &page_url,
-            (target_click_x, target_click_y),
-            options.candidate_override.as_deref(),
-        ) {
-            Ok(pair) => pair,
-            Err(CoreError::Grounding(msg)) => {
-                bridge.shutdown();
-                server.shutdown();
-                reject_live!(TriageStatus::AmbiguousGrounding, msg);
-            }
-            Err(e) => {
-                bridge.shutdown();
-                server.shutdown();
-                reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string());
-            }
-        };
+        let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
+            if let Some((model_config, client_mode)) = autonomous_config {
+                let mut eval_error: Option<(TriageStatus, String)> = None;
+                let auto_res = Self::execute_autonomous_repair_loop(
+                    fixture,
+                    &mut sandbox,
+                    &initial_source,
+                    &freeze_guard,
+                    model_config,
+                    client_mode,
+                    &mut |_sandbox_ref| {
+                        // Run 2 consecutive live-browser Gate 2 verifications.
+                        let mut last_events = Vec::new();
+                        for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                            match Self::execute_browser_gate(
+                                &mut bridge,
+                                fixture,
+                                &page_url,
+                                (target_click_x, target_click_y),
+                                options.candidate_override.as_deref(),
+                            ) {
+                                Ok((g2_grounded, g2_events)) => {
+                                    if g2_grounded.selector != gate1_grounded.selector {
+                                        eval_error = Some((
+                                            TriageStatus::ContractMismatch,
+                                            format!(
+                                                "Gate 2 grounded selector '{}' differs from Gate 1 selector '{}'",
+                                                g2_grounded.selector, gate1_grounded.selector
+                                            ),
+                                        ));
+                                        return Err(CoreError::Verification(
+                                            "Gate 2 selector mismatch".to_string(),
+                                        ));
+                                    }
+                                    let v = classify(&g2_events);
+                                    last_events = g2_events;
+                                    if v != GateVerdict::Green {
+                                        return Ok((false, last_events));
+                                    }
+                                }
+                                Err(CoreError::Grounding(msg)) => {
+                                    eval_error =
+                                        Some((TriageStatus::AmbiguousGrounding, msg.clone()));
+                                    return Err(CoreError::Grounding(msg));
+                                }
+                                Err(e) => {
+                                    eval_error =
+                                        Some((TriageStatus::BridgeExecutionFailed, e.to_string()));
+                                    return Err(e);
+                                }
+                            }
+                        }
+                        Ok((true, last_events))
+                    },
+                )?;
 
-        if gate2_grounded.selector != gate1_grounded.selector {
-            bridge.shutdown();
-            server.shutdown();
-            reject_live!(
-                TriageStatus::ContractMismatch,
-                format!(
-                    "Gate 2 grounded selector '{}' differs from Gate 1 selector '{}'",
-                    gate2_grounded.selector, gate1_grounded.selector
-                )
-            );
-        }
+                if let Some((st, msg)) = eval_error {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(st, msg);
+                }
+
+                match auto_res {
+                    AutonomousRepairResult::Verified {
+                        outcome,
+                        diff_text,
+                        gate2_events,
+                        repair_telemetry,
+                        token_accounting,
+                    } => (
+                        outcome,
+                        diff_text,
+                        gate2_events,
+                        Some(repair_telemetry),
+                        Some(token_accounting),
+                    ),
+                    AutonomousRepairResult::Rejected {
+                        status,
+                        reason,
+                        repair_telemetry,
+                        token_accounting,
+                    } => {
+                        bridge.shutdown();
+                        server.shutdown();
+                        reject_live!(status, reason, repair_telemetry, token_accounting);
+                    }
+                }
+            } else {
+                if diff.trim().is_empty() {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(
+                        TriageStatus::RepairNoopRejected,
+                        "The candidate patch is empty; a repair must change the source"
+                    );
+                }
+                let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
+                    Ok(o) => o,
+                    Err(CoreError::SecurityViolation(msg)) => {
+                        bridge.shutdown();
+                        server.shutdown();
+                        reject_live!(TriageStatus::SecurityViolation, msg);
+                    }
+                    Err(e) => {
+                        bridge.shutdown();
+                        server.shutdown();
+                        reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
+                    }
+                };
+                if let Err(CoreError::SecurityViolation(msg)) =
+                    freeze_guard.validate_target_path(&outcome.target_path)
+                {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(TriageStatus::SecurityViolation, msg);
+                }
+                if outcome.target_path != fixture.target_path {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(
+                        TriageStatus::PatchApplyFailed,
+                        format!(
+                            "Patch targets '{}' but the repair scope is '{}'",
+                            outcome.target_path, fixture.target_path
+                        )
+                    );
+                }
+                if outcome.is_noop(&initial_source) {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(
+                        TriageStatus::RepairNoopRejected,
+                        "The patch applies cleanly but leaves the source unchanged"
+                    );
+                }
+
+                sandbox.write_file(&outcome.target_path, &outcome.patched)?;
+                if let Err(CoreError::SecurityViolation(msg)) =
+                    freeze_guard.verify_integrity(sandbox.root())
+                {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(TriageStatus::SecurityViolation, msg);
+                }
+                if let Err(e) = SyntaxPreflight::check_file(sandbox.root(), &outcome.target_path) {
+                    bridge.shutdown();
+                    server.shutdown();
+                    reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
+                }
+
+                let mut final_events = Vec::new();
+                for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                    let (gate2_grounded, gate2_events) = match Self::execute_browser_gate(
+                        &mut bridge,
+                        fixture,
+                        &page_url,
+                        (target_click_x, target_click_y),
+                        options.candidate_override.as_deref(),
+                    ) {
+                        Ok(pair) => pair,
+                        Err(CoreError::Grounding(msg)) => {
+                            bridge.shutdown();
+                            server.shutdown();
+                            reject_live!(TriageStatus::AmbiguousGrounding, msg);
+                        }
+                        Err(e) => {
+                            bridge.shutdown();
+                            server.shutdown();
+                            reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string());
+                        }
+                    };
+
+                    if gate2_grounded.selector != gate1_grounded.selector {
+                        bridge.shutdown();
+                        server.shutdown();
+                        reject_live!(
+                            TriageStatus::ContractMismatch,
+                            format!(
+                                "Gate 2 grounded selector '{}' differs from Gate 1 selector '{}'",
+                                gate2_grounded.selector, gate1_grounded.selector
+                            )
+                        );
+                    }
+
+                    let gate2_verdict = classify(&gate2_events);
+                    match gate2_verdict {
+                        GateVerdict::Green => {
+                            final_events = gate2_events;
+                        }
+                        GateVerdict::Red => {
+                            bridge.shutdown();
+                            server.shutdown();
+                            reject_live!(
+                                TriageStatus::Gate2NotGreen,
+                                "The defect still reproduces in live browser after the patch"
+                            );
+                        }
+                        GateVerdict::Invalid => {
+                            bridge.shutdown();
+                            server.shutdown();
+                            reject_live!(
+                                TriageStatus::Gate2NotGreen,
+                                format!(
+                                    "Gate 2 produced no valid verdict in live browser: {}",
+                                    describe_invalid(&gate2_events)
+                                )
+                            );
+                        }
+                    }
+                }
+
+                (outcome, diff.to_string(), final_events, None, None)
+            };
+
+        let bridge_script_exclude = vec![PathBuf::from(BRIDGE_SCRIPT_FILENAME)];
+        let sandbox_manifest =
+            WorktreeManifest::capture_with_excludes(sandbox.root(), &bridge_script_exclude)?;
+        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
 
         bridge.shutdown();
         server.shutdown();
-
-        let gate2_verdict = classify(&gate2_events);
-        match gate2_verdict {
-            GateVerdict::Green => {}
-            GateVerdict::Red => reject_live!(
-                TriageStatus::Gate2NotGreen,
-                "The defect still reproduces in live browser after the patch"
-            ),
-            GateVerdict::Invalid => reject_live!(
-                TriageStatus::Gate2NotGreen,
-                format!(
-                    "Gate 2 produced no valid verdict in live browser: {}",
-                    describe_invalid(&gate2_events)
-                )
-            ),
-        }
 
         // 9. Verify dual-layer base repository integrity (\Delta repo = 0) before accepting Gate 2.
         let post_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
@@ -475,14 +684,14 @@ impl MockHealer {
             },
             patch: PatchRecord {
                 target_path: outcome.target_path.clone(),
-                sha256: sha256_hex(diff.as_bytes()),
+                sha256: sha256_hex(effective_diff.as_bytes()),
                 insertions: outcome.insertions,
                 deletions: outcome.deletions,
                 files_changed: outcome.files_changed,
             },
             gate2: GateRecord {
                 observed_at: gate2_at,
-                verdict: gate2_verdict,
+                verdict: GateVerdict::Green,
                 contract_sha256: gate2_sha256,
                 events: gate2_events,
             },
@@ -493,8 +702,301 @@ impl MockHealer {
             ephemeral_port,
             grounding_telemetry: Some(gate1_grounded.telemetry),
             video_telemetry,
+            repair_telemetry,
+            token_accounting,
             created_at: timestamp_now(),
         })))
+    }
+
+    /// Execute the Spec 060 bounded autonomous repair loop (up to `MAX_REPAIR_ATTEMPTS` = 3,
+    /// 180s wall-clock budget), enforcing `TestFreezeGuard`, `StructuredRepairPatch::decode_strict`,
+    /// `BlockPatcher::apply`, `SyntaxPreflight::check_file`, and 2-run Gate 2 stability.
+    fn execute_autonomous_repair_loop<F>(
+        fixture: &Fixture,
+        sandbox: &mut ScratchSandbox,
+        initial_source: &str,
+        freeze_guard: &TestFreezeGuard,
+        mut model_config: MuseModelConfig,
+        client_mode: RepairClientMode,
+        run_gate2_twice: &mut F,
+    ) -> Result<AutonomousRepairResult>
+    where
+        F: FnMut(&ScratchSandbox) -> Result<(bool, Vec<OracleEvent>)>,
+    {
+        let client = BoundedRepairClient::new(client_mode);
+        let loop_started = Instant::now();
+        let mut previous_response_id: Option<String> = None;
+        let mut encrypted_content: Option<String> = None;
+        let mut retry_feedback: Option<String> = None;
+        let mut previous_response_ids: Vec<String> = Vec::new();
+        let mut attempt_lineage: Vec<AttemptLineage> = Vec::new();
+        let mut cumulative_tokens = TokenAccounting::default();
+        let mut any_fallback_used = false;
+        let gate1_diagnostic = format!(
+            "Gate 1 RED on contract '{}': target '{}' threw TypeError when reading undefined property",
+            fixture.contract.contract_id, fixture.contract.target
+        );
+
+        for attempt in 1..=MAX_REPAIR_ATTEMPTS {
+            if let Err(err) = check_repair_deadline(loop_started) {
+                let rtel = RepairTelemetry {
+                    requested_model: model_config.requested_model.as_str().to_string(),
+                    serving_model: model_config.serving_model.as_str().to_string(),
+                    provider_mode: client_mode.provider_mode_str().to_string(),
+                    reasoning_effort: model_config.reasoning_effort.as_str().to_string(),
+                    fallback_used: any_fallback_used,
+                    prompt_cache_key: model_config.prompt_cache_key.clone(),
+                    prompt_cache_retention: model_config.prompt_cache_retention.clone(),
+                    attempts_used: attempt.saturating_sub(1),
+                    max_attempts: MAX_REPAIR_ATTEMPTS,
+                    previous_response_ids,
+                    encrypted_deliberation_preserved: true,
+                    syntax_preflight_passed: false,
+                    test_freeze_verified: true,
+                    test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
+                    gate2_runs_completed: 0,
+                    gate2_stability_passed: false,
+                    attempt_lineage,
+                };
+                return Ok(AutonomousRepairResult::Rejected {
+                    status: TriageStatus::QuarantineRepairFailed,
+                    reason: err.to_string(),
+                    repair_telemetry: Some(rtel),
+                    token_accounting: Some(cumulative_tokens),
+                });
+            }
+
+            let user_prompt = PromptBuilder::build_user_prompt(
+                fixture.task_id,
+                fixture.target_path,
+                initial_source,
+                &gate1_diagnostic,
+                retry_feedback.as_deref(),
+            );
+            let req = RepairRequest::new(
+                attempt,
+                &model_config,
+                user_prompt,
+                previous_response_id.clone(),
+                encrypted_content.clone(),
+            );
+            let resp = client.generate(&req, &mut model_config)?;
+            if resp.fallback_used {
+                any_fallback_used = true;
+            }
+            cumulative_tokens.accumulate(&resp.usage, resp.serving_model);
+
+            let prev_id_for_lineage = previous_response_id.clone();
+            let encrypted_hash = sha256_hex(resp.encrypted_content.as_bytes());
+            previous_response_id = Some(resp.response_id.clone());
+            encrypted_content = Some(resp.encrypted_content.clone());
+            previous_response_ids.push(resp.response_id.clone());
+
+            // 1. Decode strict 5-field JSON schema.
+            let structured = match StructuredRepairPatch::decode_strict(&resp.raw_json_output) {
+                Ok(p) => p,
+                Err(e) => {
+                    let msg = e.to_string();
+                    attempt_lineage.push(AttemptLineage {
+                        attempt,
+                        response_id: resp.response_id,
+                        previous_response_id: prev_id_for_lineage,
+                        encrypted_content_present: true,
+                        encrypted_content_sha256: encrypted_hash,
+                        syntax_check_passed: false,
+                        patch_applied: false,
+                        failure_reason: Some(msg.clone()),
+                    });
+                    retry_feedback = Some(msg);
+                    sandbox.write_file(fixture.target_path, initial_source)?;
+                    continue;
+                }
+            };
+
+            // 2. Apply ambiguity-safe source block patch (checking TestFreezeGuard first).
+            let patch_outcome = match BlockPatcher::apply(
+                initial_source,
+                fixture.target_path,
+                &structured,
+                freeze_guard,
+            ) {
+                Ok(out) => out,
+                Err(CoreError::SecurityViolation(msg)) => {
+                    // Anti-cheating violations fail closed immediately without retry.
+                    attempt_lineage.push(AttemptLineage {
+                        attempt,
+                        response_id: resp.response_id,
+                        previous_response_id: prev_id_for_lineage,
+                        encrypted_content_present: true,
+                        encrypted_content_sha256: encrypted_hash,
+                        syntax_check_passed: false,
+                        patch_applied: false,
+                        failure_reason: Some(msg.clone()),
+                    });
+                    let rtel = RepairTelemetry {
+                        requested_model: model_config.requested_model.as_str().to_string(),
+                        serving_model: model_config.serving_model.as_str().to_string(),
+                        provider_mode: client_mode.provider_mode_str().to_string(),
+                        reasoning_effort: model_config.reasoning_effort.as_str().to_string(),
+                        fallback_used: any_fallback_used,
+                        prompt_cache_key: model_config.prompt_cache_key.clone(),
+                        prompt_cache_retention: model_config.prompt_cache_retention.clone(),
+                        attempts_used: attempt,
+                        max_attempts: MAX_REPAIR_ATTEMPTS,
+                        previous_response_ids,
+                        encrypted_deliberation_preserved: true,
+                        syntax_preflight_passed: false,
+                        test_freeze_verified: false,
+                        test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
+                        gate2_runs_completed: 0,
+                        gate2_stability_passed: false,
+                        attempt_lineage,
+                    };
+                    return Ok(AutonomousRepairResult::Rejected {
+                        status: TriageStatus::SecurityViolation,
+                        reason: msg,
+                        repair_telemetry: Some(rtel),
+                        token_accounting: Some(cumulative_tokens),
+                    });
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    attempt_lineage.push(AttemptLineage {
+                        attempt,
+                        response_id: resp.response_id,
+                        previous_response_id: prev_id_for_lineage,
+                        encrypted_content_present: true,
+                        encrypted_content_sha256: encrypted_hash,
+                        syntax_check_passed: false,
+                        patch_applied: false,
+                        failure_reason: Some(msg.clone()),
+                    });
+                    retry_feedback = Some(msg);
+                    sandbox.write_file(fixture.target_path, initial_source)?;
+                    continue;
+                }
+            };
+
+            // 3. Write candidate patch to scratch sandbox and verify frozen test SHA-256 parity.
+            sandbox.write_file(&patch_outcome.target_path, &patch_outcome.patched)?;
+            if let Err(CoreError::SecurityViolation(msg)) =
+                freeze_guard.verify_integrity(sandbox.root())
+            {
+                return Ok(AutonomousRepairResult::Rejected {
+                    status: TriageStatus::SecurityViolation,
+                    reason: msg,
+                    repair_telemetry: None,
+                    token_accounting: Some(cumulative_tokens),
+                });
+            }
+
+            // 4. Syntax preflight (`node --check`) before Gate 2 execution.
+            if let Err(e) = SyntaxPreflight::check_file(sandbox.root(), &patch_outcome.target_path)
+            {
+                let msg = e.to_string();
+                attempt_lineage.push(AttemptLineage {
+                    attempt,
+                    response_id: resp.response_id,
+                    previous_response_id: prev_id_for_lineage,
+                    encrypted_content_present: true,
+                    encrypted_content_sha256: encrypted_hash,
+                    syntax_check_passed: false,
+                    patch_applied: true,
+                    failure_reason: Some(msg.clone()),
+                });
+                retry_feedback = Some(msg);
+                sandbox.write_file(fixture.target_path, initial_source)?;
+                continue;
+            }
+
+            // 5. Run 2 consecutive Gate 2 evaluations to prove stability.
+            let (passed_twice, gate2_events) = run_gate2_twice(sandbox)?;
+            if passed_twice {
+                attempt_lineage.push(AttemptLineage {
+                    attempt,
+                    response_id: resp.response_id,
+                    previous_response_id: prev_id_for_lineage,
+                    encrypted_content_present: true,
+                    encrypted_content_sha256: encrypted_hash,
+                    syntax_check_passed: true,
+                    patch_applied: true,
+                    failure_reason: None,
+                });
+                let diff_text = BlockPatcher::to_unified_diff(&structured);
+                let rtel = RepairTelemetry {
+                    requested_model: model_config.requested_model.as_str().to_string(),
+                    serving_model: model_config.serving_model.as_str().to_string(),
+                    provider_mode: client_mode.provider_mode_str().to_string(),
+                    reasoning_effort: model_config.reasoning_effort.as_str().to_string(),
+                    fallback_used: any_fallback_used,
+                    prompt_cache_key: model_config.prompt_cache_key.clone(),
+                    prompt_cache_retention: model_config.prompt_cache_retention.clone(),
+                    attempts_used: attempt,
+                    max_attempts: MAX_REPAIR_ATTEMPTS,
+                    previous_response_ids,
+                    encrypted_deliberation_preserved: true,
+                    syntax_preflight_passed: true,
+                    test_freeze_verified: true,
+                    test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
+                    gate2_runs_completed: GATE2_REQUIRED_CONSECUTIVE_RUNS,
+                    gate2_stability_passed: true,
+                    attempt_lineage,
+                };
+                return Ok(AutonomousRepairResult::Verified {
+                    outcome: patch_outcome,
+                    diff_text,
+                    gate2_events,
+                    repair_telemetry: rtel,
+                    token_accounting: cumulative_tokens,
+                });
+            }
+
+            let fail_msg = format!(
+                "Attempt {attempt} patch compiled cleanly but failed Gate 2 verification (defect still reproduced)"
+            );
+            attempt_lineage.push(AttemptLineage {
+                attempt,
+                response_id: resp.response_id,
+                previous_response_id: prev_id_for_lineage,
+                encrypted_content_present: true,
+                encrypted_content_sha256: encrypted_hash,
+                syntax_check_passed: true,
+                patch_applied: true,
+                failure_reason: Some(fail_msg.clone()),
+            });
+            retry_feedback = Some(fail_msg);
+            sandbox.write_file(fixture.target_path, initial_source)?;
+        }
+
+        let rtel = RepairTelemetry {
+            requested_model: model_config.requested_model.as_str().to_string(),
+            serving_model: model_config.serving_model.as_str().to_string(),
+            provider_mode: client_mode.provider_mode_str().to_string(),
+            reasoning_effort: model_config.reasoning_effort.as_str().to_string(),
+            fallback_used: any_fallback_used,
+            prompt_cache_key: model_config.prompt_cache_key,
+            prompt_cache_retention: model_config.prompt_cache_retention,
+            attempts_used: MAX_REPAIR_ATTEMPTS,
+            max_attempts: MAX_REPAIR_ATTEMPTS,
+            previous_response_ids,
+            encrypted_deliberation_preserved: true,
+            syntax_preflight_passed: false,
+            test_freeze_verified: true,
+            test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
+            gate2_runs_completed: 0,
+            gate2_stability_passed: false,
+            attempt_lineage,
+        };
+
+        Ok(AutonomousRepairResult::Rejected {
+            status: TriageStatus::QuarantineRepairFailed,
+            reason: format!(
+                "QUARANTINE_REPAIR_FAILED: exhausted all {MAX_REPAIR_ATTEMPTS} bounded repair \
+                 attempts without achieving 2 consecutive Gate 2 GREEN runs"
+            ),
+            repair_telemetry: Some(rtel),
+            token_accounting: Some(cumulative_tokens),
+        })
     }
 
     fn execute_browser_gate(
@@ -634,9 +1136,15 @@ impl MockHealer {
         extra_excludes: &[PathBuf],
         gate2_contract: &BehavioralContract,
         on_before_post_check: Option<&dyn Fn(&Path)>,
+        autonomous_opts: Option<(&str, RepairClientMode)>,
     ) -> Result<HealOutcome> {
         let task_id = fixture.task_id;
         let mut fsm = PhaseMachine::new();
+
+        let autonomous_config = match autonomous_opts {
+            Some((slug, mode)) => Some((MuseModelConfig::new(slug, None)?, mode)),
+            None => None,
+        };
 
         // 1. Capture pre-run dual-layer workspace manifest on the base repository.
         let pre_manifest = WorktreeManifest::capture_with_excludes(repo_path, extra_excludes)?;
@@ -656,6 +1164,14 @@ impl MockHealer {
                     fsm.trace(),
                 ))));
             }};
+            ($status:expr, $reason:expr, $rtel:expr, $tokens:expr) => {{
+                let _ = sandbox.teardown();
+                fsm.advance(Phase::Rejected)?;
+                return Ok(HealOutcome::Rejected(Box::new(
+                    TriageReport::new($status, $reason, task_id, fsm.trace())
+                        .with_repair_telemetry($rtel, $tokens),
+                )));
+            }};
         }
 
         // 3. Materialize target file inside the scratch sandbox if the base repository
@@ -665,6 +1181,9 @@ impl MockHealer {
             sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
         }
         let initial_source = sandbox.read_file(fixture.target_path)?;
+
+        // Capture anti-cheating SHA-256 test freeze guard before Gate 1 / Repair.
+        let freeze_guard = TestFreezeGuard::capture(sandbox.root())?;
 
         // Gate 1: the defect must reproduce inside the scratch sandbox before any repair is considered.
         let contract_sha256 = fixture.contract.digest()?;
@@ -685,44 +1204,6 @@ impl MockHealer {
 
         // Repair: validate and apply the candidate patch to the file inside the scratch sandbox.
         fsm.advance(Phase::Repair)?;
-        if diff.trim().is_empty() {
-            reject!(
-                TriageStatus::RepairNoopRejected,
-                "The candidate patch is empty; a repair must change the source"
-            );
-        }
-        let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
-            Ok(o) => o,
-            Err(CoreError::SecurityViolation(msg)) => {
-                reject!(TriageStatus::SecurityViolation, msg)
-            }
-            Err(e) => reject!(TriageStatus::PatchApplyFailed, e.to_string()),
-        };
-        if outcome.target_path != fixture.target_path {
-            reject!(
-                TriageStatus::PatchApplyFailed,
-                format!(
-                    "Patch targets '{}' but the repair scope is '{}'",
-                    outcome.target_path, fixture.target_path
-                )
-            );
-        }
-        if outcome.is_noop(&initial_source) {
-            reject!(
-                TriageStatus::RepairNoopRejected,
-                "The patch applies cleanly but leaves the source unchanged"
-            );
-        }
-
-        // Write patched file to disk inside the scratch sandbox and capture sandbox tree digest.
-        sandbox.write_file(&outcome.target_path, &outcome.patched)?;
-        let sandbox_manifest = WorktreeManifest::capture(sandbox.root())?;
-        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
-
-        // Read back the patched file from the sandbox filesystem to evaluate Gate 2.
-        let gate2_source = sandbox.read_file(&outcome.target_path)?;
-
-        // Gate 2: same contract, patched source on disk in the sandbox.
         let gate2_sha256 = gate2_contract.digest()?;
         if gate2_sha256 != contract_sha256 {
             reject!(
@@ -730,22 +1211,125 @@ impl MockHealer {
                 "Gate 2 contract digest differs from Gate 1; refusing to compare results"
             );
         }
-        let gate2_events = run_oracle(gate2_contract, &gate2_source);
-        let gate2_verdict = classify(&gate2_events);
-        match gate2_verdict {
-            GateVerdict::Green => {}
-            GateVerdict::Red => reject!(
-                TriageStatus::Gate2NotGreen,
-                "The defect still reproduces after the patch"
-            ),
-            GateVerdict::Invalid => reject!(
-                TriageStatus::Gate2NotGreen,
-                format!(
-                    "Gate 2 produced no valid verdict: {}",
-                    describe_invalid(&gate2_events)
-                )
-            ),
-        }
+
+        let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
+            if let Some((model_config, client_mode)) = autonomous_config {
+                let auto_res = Self::execute_autonomous_repair_loop(
+                    fixture,
+                    &mut sandbox,
+                    &initial_source,
+                    &freeze_guard,
+                    model_config,
+                    client_mode,
+                    &mut |sb| {
+                        let mut last_events = Vec::new();
+                        for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                            let src = sb.read_file(fixture.target_path)?;
+                            let ev = run_oracle(gate2_contract, &src);
+                            let verdict = classify(&ev);
+                            last_events = ev;
+                            if verdict != GateVerdict::Green {
+                                return Ok((false, last_events));
+                            }
+                        }
+                        Ok((true, last_events))
+                    },
+                )?;
+
+                match auto_res {
+                    AutonomousRepairResult::Verified {
+                        outcome,
+                        diff_text,
+                        gate2_events,
+                        repair_telemetry,
+                        token_accounting,
+                    } => (
+                        outcome,
+                        diff_text,
+                        gate2_events,
+                        Some(repair_telemetry),
+                        Some(token_accounting),
+                    ),
+                    AutonomousRepairResult::Rejected {
+                        status,
+                        reason,
+                        repair_telemetry,
+                        token_accounting,
+                    } => {
+                        reject!(status, reason, repair_telemetry, token_accounting);
+                    }
+                }
+            } else {
+                if diff.trim().is_empty() {
+                    reject!(
+                        TriageStatus::RepairNoopRejected,
+                        "The candidate patch is empty; a repair must change the source"
+                    );
+                }
+                let outcome = match UnifiedPatcher::apply_diff(&initial_source, diff) {
+                    Ok(o) => o,
+                    Err(CoreError::SecurityViolation(msg)) => {
+                        reject!(TriageStatus::SecurityViolation, msg)
+                    }
+                    Err(e) => reject!(TriageStatus::PatchApplyFailed, e.to_string()),
+                };
+                if let Err(CoreError::SecurityViolation(msg)) =
+                    freeze_guard.validate_target_path(&outcome.target_path)
+                {
+                    reject!(TriageStatus::SecurityViolation, msg);
+                }
+                if outcome.target_path != fixture.target_path {
+                    reject!(
+                        TriageStatus::PatchApplyFailed,
+                        format!(
+                            "Patch targets '{}' but the repair scope is '{}'",
+                            outcome.target_path, fixture.target_path
+                        )
+                    );
+                }
+                if outcome.is_noop(&initial_source) {
+                    reject!(
+                        TriageStatus::RepairNoopRejected,
+                        "The patch applies cleanly but leaves the source unchanged"
+                    );
+                }
+
+                sandbox.write_file(&outcome.target_path, &outcome.patched)?;
+                if let Err(CoreError::SecurityViolation(msg)) =
+                    freeze_guard.verify_integrity(sandbox.root())
+                {
+                    reject!(TriageStatus::SecurityViolation, msg);
+                }
+
+                // Evaluate Gate 2 across 2 consecutive runs.
+                let mut final_events = Vec::new();
+                for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                    let gate2_source = sandbox.read_file(&outcome.target_path)?;
+                    let gate2_events = run_oracle(gate2_contract, &gate2_source);
+                    let gate2_verdict = classify(&gate2_events);
+                    match gate2_verdict {
+                        GateVerdict::Green => {
+                            final_events = gate2_events;
+                        }
+                        GateVerdict::Red => reject!(
+                            TriageStatus::Gate2NotGreen,
+                            "The defect still reproduces after the patch"
+                        ),
+                        GateVerdict::Invalid => reject!(
+                            TriageStatus::Gate2NotGreen,
+                            format!(
+                                "Gate 2 produced no valid verdict: {}",
+                                describe_invalid(&gate2_events)
+                            )
+                        ),
+                    }
+                }
+
+                (outcome, diff.to_string(), final_events, None, None)
+            };
+
+        let sandbox_manifest = WorktreeManifest::capture(sandbox.root())?;
+        let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
 
         // Optional fault injection hook for testing base repository mutation detection.
         if let Some(hook) = on_before_post_check {
@@ -780,14 +1364,14 @@ impl MockHealer {
             },
             patch: PatchRecord {
                 target_path: outcome.target_path.clone(),
-                sha256: sha256_hex(diff.as_bytes()),
+                sha256: sha256_hex(effective_diff.as_bytes()),
                 insertions: outcome.insertions,
                 deletions: outcome.deletions,
                 files_changed: outcome.files_changed,
             },
             gate2: GateRecord {
                 observed_at: gate2_at,
-                verdict: gate2_verdict,
+                verdict: GateVerdict::Green,
                 contract_sha256: gate2_sha256,
                 events: gate2_events,
             },
@@ -798,6 +1382,8 @@ impl MockHealer {
             ephemeral_port,
             grounding_telemetry: None,
             video_telemetry: None,
+            repair_telemetry,
+            token_accounting,
             created_at: timestamp_now(),
         })))
     }
@@ -850,7 +1436,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.5");
+        assert_eq!(receipt.schema_version, "0.6");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -878,6 +1464,111 @@ mod tests {
     }
 
     #[test]
+    fn test_autonomous_model_repair_first_attempt_and_syntax_retry() {
+        let f = rf01();
+        let repo = temp_repo_dir("autonomous-repair");
+
+        // 1. First-attempt success with muse-spark-1.3
+        let HealOutcome::Verified(receipt) = MockHealer::run_autonomous_in_repo(
+            &f,
+            &repo,
+            &[],
+            "muse-spark-1.3",
+            RepairClientMode::OfflineSuccessFirstAttempt,
+        )
+        .unwrap() else {
+            panic!("expected autonomous repair verification");
+        };
+        assert_eq!(receipt.schema_version, "0.6");
+        let rtel = receipt.repair_telemetry.expect("expected repair_telemetry");
+        assert_eq!(rtel.requested_model, "muse-spark-1.3");
+        assert_eq!(rtel.serving_model, "muse-spark-1.3");
+        assert_eq!(rtel.reasoning_effort, "xhigh");
+        assert_eq!(rtel.attempts_used, 1);
+        assert_eq!(rtel.gate2_runs_completed, 2);
+        assert!(rtel.gate2_stability_passed);
+        assert!(rtel.syntax_preflight_passed);
+        assert!(rtel.test_freeze_verified);
+        let tokens = receipt.token_accounting.expect("expected token_accounting");
+        assert!(tokens.prompt_tokens > 0);
+        assert!(tokens.total_cost_micros_usd > 0 && tokens.total_cost_micros_usd < 20_000);
+
+        // 2. Attempt 1 fails node --check syntax preflight, Attempt 2 recovers with encrypted_content
+        let HealOutcome::Verified(retry_receipt) = MockHealer::run_autonomous_in_repo(
+            &f,
+            &repo,
+            &[],
+            "muse-spark-1.3",
+            RepairClientMode::OfflineSyntaxRetryThenSuccess,
+        )
+        .unwrap() else {
+            panic!("expected syntax retry recovery");
+        };
+        let retry_tel = retry_receipt.repair_telemetry.unwrap();
+        assert_eq!(retry_tel.attempts_used, 2);
+        assert_eq!(retry_tel.attempt_lineage.len(), 2);
+        assert!(!retry_tel.attempt_lineage[0].syntax_check_passed);
+        assert!(retry_tel.attempt_lineage[1].syntax_check_passed);
+        assert_eq!(
+            retry_tel.attempt_lineage[1].previous_response_id.as_deref(),
+            Some("resp_rf06_attempt_1")
+        );
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn test_autonomous_repair_quarantines_after_three_failed_attempts() {
+        let f = rf01();
+        let repo = temp_repo_dir("autonomous-quarantine");
+
+        let outcome = MockHealer::run_autonomous_in_repo(
+            &f,
+            &repo,
+            &[],
+            "muse-spark-1.3",
+            RepairClientMode::OfflineFailAllAttempts,
+        )
+        .unwrap();
+        let report = rejected(outcome);
+        assert_eq!(report.status, TriageStatus::QuarantineRepairFailed);
+        assert_eq!(report.exit_code, 21);
+        let rtel = report
+            .repair_telemetry
+            .expect("expected repair_telemetry on quarantine");
+        assert_eq!(rtel.attempts_used, 3);
+        assert_eq!(rtel.attempt_lineage.len(), 3);
+        assert!(!rtel.gate2_stability_passed);
+        let tokens = report
+            .token_accounting
+            .expect("expected token_accounting on quarantine");
+        assert!(tokens.prompt_tokens > 0);
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn test_autonomous_repair_rejects_test_file_mutation_with_exit_11() {
+        let f = rf01();
+        let repo = temp_repo_dir("autonomous-test-mutation");
+
+        let outcome = MockHealer::run_autonomous_in_repo(
+            &f,
+            &repo,
+            &[],
+            "muse-spark-1.3",
+            RepairClientMode::OfflineAttemptTestMutation,
+        )
+        .unwrap();
+        let report = rejected(outcome);
+        assert_eq!(report.status, TriageStatus::SecurityViolation);
+        assert_eq!(report.exit_code, 11);
+        assert!(report.reason.contains("TEST_MUTATION_PROHIBITED"));
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
     fn test_live_browser_two_gate_verification_and_ambiguity_abstention() {
         let f = rf01();
         let repo = temp_repo_dir("live-browser");
@@ -889,7 +1580,7 @@ mod tests {
         else {
             panic!("expected live browser verification");
         };
-        assert_eq!(receipt.schema_version, "0.5");
+        assert_eq!(receipt.schema_version, "0.6");
         assert_eq!(receipt.substrate, "playwright-cdp");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -1002,6 +1693,7 @@ mod tests {
             &[],
             &f.contract,
             Some(&hook),
+            None,
         )
         .unwrap();
 

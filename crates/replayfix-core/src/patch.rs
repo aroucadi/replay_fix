@@ -157,6 +157,11 @@ impl UnifiedPatcher {
                 "Renames are not supported: '---' and '+++' paths differ".to_string(),
             ));
         }
+        if crate::repair::TestFreezeGuard::is_protected_test_or_config_path(&new_path) {
+            return Err(CoreError::SecurityViolation(format!(
+                "TEST_MUTATION_PROHIBITED: unified diff targets protected test or configuration path '{new_path}'"
+            )));
+        }
         TaskManifest::assert_safe_path(&new_path, "patch header")?;
 
         let mut hunks = Vec::new();

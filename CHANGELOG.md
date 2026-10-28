@@ -17,6 +17,30 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.6.0] - 2026-10-28
+
+Delivers **Spec 060 (`060-v0.6-meta-model-bounded-repair`)**: Bounded autonomous Meta Muse repair (`muse-spark-1.3`, `muse-wonder-1.0`, `muse-spark-1.3-contributor`, and open-weights fallback `meta-models/muse-spark-open-1026`), anti-cheating SHA-256 test freeze (`TestFreezeGuard`), `<UNTRUSTED_CONTEXT>` prompt-injection data fencing with 24-hour static prefix caching (`replayfix-v0.6-harness-prefix-v1`), Meta Superpower #3 encrypted deliberation continuity (`reasoning.encrypted_content` + `previous_response_id`), strict 5-field JSON Schema output validation (`StructuredRepairPatch`), ambiguity-safe source-block patching (`BlockPatcher`), `node --input-type=module --check` syntax preflight (`SyntaxPreflight`), 2-run consecutive Gate 2 stability verification, bounded 3-attempt quarantine (`QUARANTINE_REPAIR_FAILED`, exit code `21`), and integer micro-dollar token accounting (`TokenAccounting`). Full notes: [docs/release-notes/v0.6.0.md](docs/release-notes/v0.6.0.md).
+
+### Added
+- **Anti-Cheating Test Freeze Guard (`replayfix_core::repair::TestFreezeGuard`)**:
+  - Pre-repair SHA-256 capture of all protected test and runner config files (`tests/**`, `__tests__/**`, `*.spec.*`, `*.test.*`, `playwright.config.*`, `jest.config.*`, `vitest.config.*`, `tsconfig*.json`, `package.json`).
+  - Rejects any patch targeting protected paths across case variants (`TESTS\Foo.SPEC.ts`) or path traversal (`src/../../tests/foo.spec.ts`) with `CoreError::SecurityViolation("TEST_MUTATION_PROHIBITED")` (exit code `11`), and re-verifies SHA-256 parity on disk after every patch.
+- **Meta Muse Model Routing, Prompt Isolation & Deliberation Continuity (`replayfix_core::repair`)**:
+  - `MuseModelSlug`, `ReasoningEffort`, and `MuseModelConfig` supporting `muse-spark-1.3` (`effort: "xhigh"`), `muse-wonder-1.0` (`effort: "high"`), `muse-spark-1.3-contributor` (`effort: "xhigh"`), and `meta-models/muse-spark-open-1026`, while explicitly rejecting `muse-wonder-full-1.0` and `effort: "max"`.
+  - `PromptBuilder`: Static system prefix (`replayfix-v0.6-harness-prefix-v1`, `24h` retention) and `<UNTRUSTED_CONTEXT>` escaping.
+  - `RepairRequest` & `BoundedRepairClient`: Requests `include: ["reasoning.encrypted_content"]` and threads `previous_response_id` + `encrypted_content` across attempts 1..=3.
+- **Strict JSON Schema, Ambiguity-Safe Block Patcher & Syntax Preflight**:
+  - `StructuredRepairPatch::decode_strict` (`#[serde(deny_unknown_fields)]`, rejecting markdown code fences).
+  - `BlockPatcher::apply`: Exact single-match uniqueness check (`0` matches -> `PATCH_TARGET_NOT_FOUND`, $\ge 2$ matches -> `AMBIGUOUS_PATCH`) and `touched_symbols` verification.
+  - `SyntaxPreflight::check_file`: Pipes patched target source to `node --input-type=module --check` via `run_bounded` inside `ScratchSandbox`.
+- **2-Run Gate 2 Stability, Quarantine Exit Code `21` & Receipt Schema `"0.6"`**:
+  - Bumped `SCHEMA_VERSION` to `"0.6"`, added `TriageStatus::QuarantineRepairFailed` (`"QUARANTINE_REPAIR_FAILED"`, exit code `21`), and added `repair_telemetry: Option<RepairTelemetry>` and `token_accounting: Option<TokenAccounting>` to `AuditReceipt` and `TriageReport`.
+  - Added `--model <MODEL>`, `--mock-failing-repair`, and `--mock-syntax-retry` flags to `replayfix repro` / `replayfix run`.
+  - Remediated SpecKit workflow artifacts for `050` and generated full SpecKit suite for `060` (`spec.md`, `plan.md`, `tasks.md`, `research.md`, `data-model.md`, `quickstart.md`, `checklists/requirements.md`, `contracts/repair_response.schema.json`).
+  - Expanded automated test suite to 151 tests (125 core unit tests + 24 CLI integration tests + 2 CLI UI unit tests).
+
+---
+
 ## [0.5.0] - 2026-10-27
 
 Delivers **Spec 050 (`050-v0.5-video-telemetry-ingestion`)**: Multimodal video telemetry ingestion, bounded FFmpeg/FFprobe subprocess execution, cursor-bounded $120 \times 120\text{px}$ ROI $L_1$ optical-flow frame differencing, geometric calibration across resolution/letterbox/DPR, Meta Superpower #1 (`sam-3.1`) wire-token centroid snapping, Meta Superpower #2 (`muse-voice-transcribe-1.0`) 24 kHz mono PCM `audioProcessedMs` narration alignment with strict Zero-Audio enforcement on `muse-spark-1.3`, and end-to-end CDP grounding integration. Full notes: [docs/release-notes/v0.5.0.md](docs/release-notes/v0.5.0.md).

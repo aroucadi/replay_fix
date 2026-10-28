@@ -37,6 +37,18 @@ pub enum CoreError {
 
     #[error("Ambiguous or ungrounded locator: {0}")]
     Grounding(String),
+
+    #[error("Model API error: {0}")]
+    ModelApiError(String),
+
+    #[error("Patch application error: {0}")]
+    PatchApplicationError(String),
+
+    #[error("Repair budget exceeded: {0}")]
+    RepairBudgetExceeded(String),
+
+    #[error("Syntax validation failed: {0}")]
+    SyntaxValidationError(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
