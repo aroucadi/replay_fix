@@ -1,5 +1,6 @@
 # Spec Kit & AI Agent Workflows
-.specify/
+.specify/*
+!.specify/scripts/
 .spec/
 .agents/
 .agent/

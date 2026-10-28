@@ -31,9 +31,7 @@ fn run(dir: &Path, extra: &[&str]) -> Output {
 }
 
 fn code(out: &Output) -> i32 {
-    out.status
-        .code()
-        .expect("process was terminated by a signal")
+    out.status.code().unwrap_or(-1)
 }
 
 fn json(path: &Path) -> serde_json::Value {

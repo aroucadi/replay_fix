@@ -748,16 +748,104 @@ impl BlockPatcher {
         false
     }
 
+    /// Replace comments (`//`, `/* */`) and string literals (`"`, `'`, `` ` ``) with whitespace
+    /// so they do not introduce false braces or declaration keywords into lexical scope tracking.
+    fn strip_comments_and_strings(raw: &str) -> String {
+        let mut out = String::with_capacity(raw.len());
+        let bytes = raw.as_bytes();
+        let mut i = 0usize;
+        let mut in_single_comment = false;
+        let mut in_block_comment = false;
+        let mut in_quote: Option<u8> = None;
+        let mut escaped = false;
+
+        while i < bytes.len() {
+            let b = bytes[i];
+            if in_single_comment {
+                if b == b'\n' {
+                    in_single_comment = false;
+                    out.push('\n');
+                } else if b == b'\r' {
+                    out.push('\r');
+                } else {
+                    out.push(' ');
+                }
+                i += 1;
+            } else if in_block_comment {
+                if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    in_block_comment = false;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else {
+                    if b == b'\n' {
+                        out.push('\n');
+                    } else if b == b'\r' {
+                        out.push('\r');
+                    } else {
+                        out.push(' ');
+                    }
+                    i += 1;
+                }
+            } else if let Some(q) = in_quote {
+                if escaped {
+                    escaped = false;
+                    out.push(' ');
+                    i += 1;
+                } else if b == b'\\' {
+                    escaped = true;
+                    out.push(' ');
+                    i += 1;
+                } else if b == q {
+                    in_quote = None;
+                    out.push(' ');
+                    i += 1;
+                } else {
+                    if b == b'\n' {
+                        out.push('\n');
+                    } else if b == b'\r' {
+                        out.push('\r');
+                    } else {
+                        out.push(' ');
+                    }
+                    i += 1;
+                }
+            } else {
+                if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    in_single_comment = true;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    in_block_comment = true;
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else if b == b'"' || b == b'\'' || b == b'`' {
+                    in_quote = Some(b);
+                    escaped = false;
+                    out.push(' ');
+                    i += 1;
+                } else {
+                    out.push(b as char);
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+
     /// Extract the names of declarations (`function <Name>`, `class <Name>`, `const/let/var <Name>`)
     /// whose `{ ... }` lexical block is still open at the end of `prefix_before_match`.
     /// Declarations whose block already closed (`}`) before the match offset are popped and excluded.
     fn open_enclosing_declarations(prefix_before_match: &str) -> Vec<String> {
+        let sanitized = Self::strip_comments_and_strings(prefix_before_match);
         let mut scope_stack: Vec<Option<String>> = Vec::new();
         let mut pending_decl: Option<String> = None;
         let mut tokens: Vec<&str> = Vec::new();
 
-        // Collect word and brace/semicolon tokens from `prefix_before_match`.
-        let bytes = prefix_before_match.as_bytes();
+        // Collect word and brace/semicolon tokens from `sanitized`.
+        let bytes = sanitized.as_bytes();
         let mut i = 0usize;
         while i < bytes.len() {
             let b = bytes[i];
@@ -1564,6 +1652,43 @@ mod tests {
                 "expected SYMBOL_VERIFICATION_FAILED for '{bad_sym}', got {sym_err:?}"
             );
         }
+
+        // Commented-out or in-string declaration keywords and braces must be stripped
+        // and cannot grant touched_symbols legitimacy.
+        let commented_src = "// function fakeHelper() {\n/* const ignoredScope = true; */\nconst s = \"function inString() {\";\nexport function realHelper() {\n  return 42;\n}\n";
+        let bad_fake_patch = StructuredRepairPatch {
+            explanation: "Fix referencing commented fake".into(),
+            target_file: "src/cart-summary.js".into(),
+            search_block: "  return 42;".into(),
+            replace_block: "  return 43;".into(),
+            touched_symbols: vec!["fakeHelper".into()],
+        };
+        let fake_err = BlockPatcher::apply(
+            commented_src,
+            "src/cart-summary.js",
+            &bad_fake_patch,
+            &guard,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            fake_err,
+            CoreError::PatchApplicationError(ref m) if m.contains("SYMBOL_VERIFICATION_FAILED")
+        ));
+
+        let good_real_patch = StructuredRepairPatch {
+            explanation: "Fix referencing real enclosing function".into(),
+            target_file: "src/cart-summary.js".into(),
+            search_block: "  return 42;".into(),
+            replace_block: "  return 43;".into(),
+            touched_symbols: vec!["realHelper".into()],
+        };
+        assert!(BlockPatcher::apply(
+            commented_src,
+            "src/cart-summary.js",
+            &good_real_patch,
+            &guard
+        )
+        .is_ok());
     }
 
     #[test]

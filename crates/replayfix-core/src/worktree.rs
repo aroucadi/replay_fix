@@ -370,12 +370,12 @@ fn collect_entries(
             continue;
         }
 
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
+        let symlink_meta = fs::symlink_metadata(&path)?;
+        if is_symlink_or_reparse_point(&symlink_meta) {
             continue;
-        } else if file_type.is_dir() {
+        } else if symlink_meta.is_dir() {
             collect_entries(root, &path, excluded_rel, out)?;
-        } else if file_type.is_file() {
+        } else if symlink_meta.is_file() {
             let size = entry.metadata()?.len();
             if size > MAX_WORKSPACE_FILE_BYTES {
                 return Err(CoreError::Worktree(format!(
@@ -415,15 +415,15 @@ fn copy_tree(
             continue;
         }
 
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
+        let symlink_meta = fs::symlink_metadata(&src_path)?;
+        if is_symlink_or_reparse_point(&symlink_meta) {
             continue;
         }
         let dst_path = sandbox_root.join(rel);
-        if file_type.is_dir() {
+        if symlink_meta.is_dir() {
             fs::create_dir_all(&dst_path)?;
             copy_tree(base_root, &src_path, sandbox_root, excluded_rel)?;
-        } else if file_type.is_file() {
+        } else if symlink_meta.is_file() {
             let size = entry.metadata()?.len();
             if size > MAX_WORKSPACE_FILE_BYTES {
                 return Err(CoreError::Worktree(format!(
