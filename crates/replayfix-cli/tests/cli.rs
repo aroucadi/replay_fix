@@ -505,7 +505,24 @@ fn disallowed_model_slug_and_test_file_patch_are_rejected() {
     assert_eq!(code(&bad_model), 2);
     assert!(String::from_utf8_lossy(&bad_model.stderr).contains("MODEL_DISALLOWED"));
 
-    // 2. Patch targeting tests/cart.spec.ts is rejected with SECURITY_VIOLATION (exit code 11)
+    // 2. reasoning effort 'max' is rejected at CLI validation with exit code 2
+    let bad_effort = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args([
+            "run",
+            "--bug",
+            "RF-01",
+            "--model",
+            "muse-spark-1.3",
+            "--reasoning-effort",
+            "max",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(code(&bad_effort), 2);
+    assert!(String::from_utf8_lossy(&bad_effort.stderr).contains("EFFORT_MAX_PROHIBITED"));
+
+    // 3. Patch targeting tests/cart.spec.ts is rejected with SECURITY_VIOLATION (exit code 11)
     fs::write(
         dir.join("cheat.diff"),
         "--- a/tests/cart.spec.ts\n+++ b/tests/cart.spec.ts\n@@ -1 +1 @@\n-expect(1).toBe(0);\n+expect(1).toBe(1);\n",

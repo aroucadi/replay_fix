@@ -238,15 +238,23 @@ impl TaskManifest {
         let normalized = path_str.replace('\\', "/");
         let path = Path::new(&normalized);
 
-        // Check for reserved DOS device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) in ANY component
+        // Check for reserved DOS device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9) and
+        // Windows NTFS trailing dots/spaces in ANY normal path component
         for component in path.components() {
             if let std::path::Component::Normal(comp) = component {
                 if let Some(comp_str) = comp.to_str() {
-                    let stem = Path::new(comp_str)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(comp_str);
-                    let upper = stem.to_ascii_uppercase();
+                    if comp_str.ends_with('.') || comp_str.ends_with(' ') {
+                        return Err(CoreError::SecurityViolation(format!(
+                            "Trailing dot or space in {} path component is prohibited: '{}'",
+                            field_name, comp_str
+                        )));
+                    }
+                    let prefix_before_dot = comp_str
+                        .split('.')
+                        .next()
+                        .unwrap_or(comp_str)
+                        .trim_end_matches(['.', ' ']);
+                    let upper = prefix_before_dot.to_ascii_uppercase();
                     let is_dos_device = matches!(
                         upper.as_str(),
                         "CON"

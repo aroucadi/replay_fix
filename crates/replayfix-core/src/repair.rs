@@ -212,9 +212,11 @@ impl MuseModelConfig {
     }
 
     /// Switch `serving_model` to the open-weights fallback (`meta-models/muse-spark-open-1026`)
-    /// while preserving `requested_model` for truthful attribution.
+    /// while preserving `requested_model` for truthful attribution, and align `reasoning_effort`
+    /// with the fallback model's supported effort tier.
     pub fn activate_fallback(&mut self) {
         self.serving_model = MuseModelSlug::MuseSparkOpen1026;
+        self.reasoning_effort = self.serving_model.default_effort();
     }
 }
 
@@ -249,9 +251,17 @@ impl TestFreezeGuard {
         for entry in entries {
             let path = entry.path();
             let file_type = entry.file_type()?;
+            let symlink_meta = fs::symlink_metadata(&path)?;
             let name = entry.file_name().to_string_lossy().to_string();
             if name == ".git" || name == "node_modules" || name == "target" {
                 continue;
+            }
+            if file_type.is_symlink() || crate::worktree::is_symlink_or_reparse_point(&symlink_meta)
+            {
+                return Err(CoreError::SecurityViolation(format!(
+                    "TEST_MUTATION_PROHIBITED: symlink or reparse point '{}' is prohibited in sandbox",
+                    path.display()
+                )));
             }
             if file_type.is_dir() {
                 Self::walk_dir(root, &path, out)?;
@@ -280,22 +290,25 @@ impl TestFreezeGuard {
         sha256_hex(buf.as_bytes())
     }
 
-    /// True when `path` (regardless of case, separator style, or intermediate `..` segments)
-    /// refers to a test file, test directory, or test/build runner configuration.
+    /// True when `path` (regardless of case, separator style, trailing dots, or intermediate
+    /// `..` segments) refers to a test file, test directory, or test/build runner configuration.
     #[must_use]
     pub fn is_protected_test_or_config_path(raw_path: &str) -> bool {
         let normalized = raw_path.trim().replace('\\', "/");
         let mut collapsed: Vec<&str> = Vec::new();
 
         for raw_seg in normalized.split('/') {
-            let seg = raw_seg.trim();
-            if seg.is_empty() || seg == "." {
+            let trimmed_seg = raw_seg.trim();
+            if trimmed_seg.is_empty() || trimmed_seg == "." {
                 continue;
             }
-            if seg == ".." {
+            if trimmed_seg == ".." {
                 collapsed.pop();
                 continue;
             }
+            // Strip trailing dots/spaces to defeat Windows NTFS path normalization bypasses
+            // such as `package.json.`, `tests./foo.js`, or `cart.spec.ts.`.
+            let seg = trimmed_seg.trim_end_matches(['.', ' ']);
             let lower_seg = seg.to_ascii_lowercase();
             // Check directory/component name even before collapsing so `tests/../src/foo.js`
             // or `src/../../tests/foo.spec.ts` is caught immediately.
@@ -325,22 +338,37 @@ impl TestFreezeGuard {
     fn is_protected_segment(lower_seg: &str) -> bool {
         matches!(
             lower_seg,
-            "tests" | "test" | "__tests__" | "__mocks__" | "e2e" | "specs"
+            "tests" | "test" | "__tests__" | "__mocks__" | "e2e" | "specs" | "cypress"
         ) || Self::is_protected_filename(lower_seg)
     }
 
     fn is_protected_filename(lower_file: &str) -> bool {
         lower_file.contains(".spec.")
             || lower_file.contains(".test.")
+            || lower_file.contains("_spec.")
+            || lower_file.contains("_test.")
             || lower_file.ends_with(".spec")
             || lower_file.ends_with(".test")
             || lower_file.starts_with("playwright.config.")
             || lower_file.starts_with("jest.config.")
             || lower_file.starts_with("vitest.config.")
             || lower_file.starts_with("cypress.config.")
+            || lower_file.starts_with("vite.config.")
+            || lower_file.starts_with("babel.config.")
+            || lower_file.starts_with("webpack.config.")
+            || lower_file.starts_with("rollup.config.")
+            || lower_file.starts_with(".babelrc")
             || (lower_file.starts_with("tsconfig") && lower_file.ends_with(".json"))
-            || lower_file == "package.json"
-            || lower_file == "package-lock.json"
+            || (lower_file.starts_with("jsconfig") && lower_file.ends_with(".json"))
+            || matches!(
+                lower_file,
+                "package.json"
+                    | "package-lock.json"
+                    | "pnpm-lock.yaml"
+                    | "yarn.lock"
+                    | "bun.lockb"
+                    | "bun.lock"
+            )
     }
 
     /// Validate that a candidate repair `target_file` is both a safe relative path and
@@ -361,7 +389,11 @@ impl TestFreezeGuard {
             .unwrap_or(&normalized)
             .to_string();
 
-        if self.frozen_files.contains_key(&clean) || Self::is_protected_test_or_config_path(&clean)
+        if self
+            .frozen_files
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case(&clean))
+            || Self::is_protected_test_or_config_path(&clean)
         {
             return Err(CoreError::SecurityViolation(format!(
                 "TEST_MUTATION_PROHIBITED: repair patch attempted to target frozen file '{clean}'"
@@ -597,6 +629,208 @@ impl StructuredRepairPatch {
 pub struct BlockPatcher;
 
 impl BlockPatcher {
+    /// Count all occurrences of `needle` in `haystack`, including overlapping matches.
+    fn count_all_occurrences(haystack: &str, needle: &str) -> usize {
+        if needle.is_empty() {
+            return 0;
+        }
+        let mut count = 0usize;
+        let mut offset = 0usize;
+        while offset <= haystack.len() {
+            let Some(pos) = haystack[offset..].find(needle) else {
+                break;
+            };
+            count += 1;
+            let match_start = offset + pos;
+            let step = haystack[match_start..]
+                .chars()
+                .next()
+                .map_or(1, char::len_utf8);
+            offset = match_start + step;
+        }
+        count
+    }
+
+    fn is_ident_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
+    }
+
+    fn is_js_keyword(token: &str) -> bool {
+        matches!(
+            token,
+            "return"
+                | "const"
+                | "let"
+                | "var"
+                | "function"
+                | "export"
+                | "import"
+                | "default"
+                | "if"
+                | "else"
+                | "for"
+                | "while"
+                | "do"
+                | "switch"
+                | "case"
+                | "break"
+                | "continue"
+                | "new"
+                | "typeof"
+                | "void"
+                | "delete"
+                | "in"
+                | "of"
+                | "try"
+                | "catch"
+                | "finally"
+                | "throw"
+                | "class"
+                | "extends"
+                | "super"
+                | "this"
+                | "true"
+                | "false"
+                | "null"
+                | "undefined"
+                | "async"
+                | "await"
+                | "yield"
+        )
+    }
+
+    /// True when `symbol` is a valid non-keyword JS/TS identifier (or dotted member chain).
+    fn is_valid_symbol_identifier(symbol: &str) -> bool {
+        if symbol.is_empty() {
+            return false;
+        }
+        for part in symbol.split('.') {
+            if part.is_empty() || Self::is_js_keyword(part) {
+                return false;
+            }
+            let mut chars = part.chars();
+            let Some(first) = chars.next() else {
+                return false;
+            };
+            if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
+                return false;
+            }
+            if !chars.all(Self::is_ident_char) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check whether `symbol` occurs as a complete identifier token inside `region`.
+    fn contains_identifier_token(region: &str, symbol: &str) -> bool {
+        let mut offset = 0usize;
+        while offset <= region.len() {
+            let Some(pos) = region[offset..].find(symbol) else {
+                break;
+            };
+            let start = offset + pos;
+            let end = start + symbol.len();
+            let prev_ok = region[..start]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !Self::is_ident_char(c));
+            let next_ok = region[end..]
+                .chars()
+                .next()
+                .is_none_or(|c| !Self::is_ident_char(c));
+            if prev_ok && next_ok {
+                return true;
+            }
+            let step = region[start..].chars().next().map_or(1, char::len_utf8);
+            offset = start + step;
+        }
+        false
+    }
+
+    /// Extract the names of declarations (`function <Name>`, `class <Name>`, `const/let/var <Name>`)
+    /// whose `{ ... }` lexical block is still open at the end of `prefix_before_match`.
+    /// Declarations whose block already closed (`}`) before the match offset are popped and excluded.
+    fn open_enclosing_declarations(prefix_before_match: &str) -> Vec<String> {
+        let mut scope_stack: Vec<Option<String>> = Vec::new();
+        let mut pending_decl: Option<String> = None;
+        let mut tokens: Vec<&str> = Vec::new();
+
+        // Collect word and brace/semicolon tokens from `prefix_before_match`.
+        let bytes = prefix_before_match.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'{' {
+                tokens.push("{");
+                i += 1;
+            } else if b == b'}' {
+                tokens.push("}");
+                i += 1;
+            } else if b == b';' {
+                tokens.push(";");
+                i += 1;
+            } else if b.is_ascii_alphanumeric() || b == b'_' || b == b'$' {
+                let start = i;
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
+                {
+                    i += 1;
+                }
+                if let Ok(tok) = std::str::from_utf8(&bytes[start..i]) {
+                    tokens.push(tok);
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        let mut idx = 0usize;
+        while idx < tokens.len() {
+            match tokens[idx] {
+                "function" | "class" => {
+                    if let Some(&name) = tokens.get(idx + 1) {
+                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                            pending_decl = Some(name.to_string());
+                        }
+                    }
+                    idx += 1;
+                }
+                "const" | "let" | "var" => {
+                    if let Some(&name) = tokens.get(idx + 1) {
+                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                            pending_decl = Some(name.to_string());
+                        }
+                    }
+                    idx += 1;
+                }
+                "{" => {
+                    scope_stack.push(pending_decl.take());
+                    idx += 1;
+                }
+                "}" => {
+                    scope_stack.pop();
+                    pending_decl = None;
+                    idx += 1;
+                }
+                ";" => {
+                    pending_decl = None;
+                    idx += 1;
+                }
+                _ => {
+                    idx += 1;
+                }
+            }
+        }
+
+        let mut active: Vec<String> = scope_stack.into_iter().flatten().collect();
+        if let Some(pending) = pending_decl {
+            active.push(pending);
+        }
+        active
+    }
+
     /// Apply `patch` to `original_source` only when `target_file` passes `freeze_guard`
     /// and `search_block` matches **uniquely** (count == 1) in `original_source`.
     pub fn apply(
@@ -628,7 +862,7 @@ impl BlockPatcher {
             ));
         }
 
-        let match_count = norm_source.matches(&norm_search).count();
+        let match_count = Self::count_all_occurrences(&norm_source, &norm_search);
         if match_count == 0 {
             return Err(CoreError::PatchApplicationError(format!(
                 "PATCH_TARGET_NOT_FOUND: search_block did not match any region in '{safe_target}'"
@@ -641,17 +875,29 @@ impl BlockPatcher {
             )));
         }
 
-        let patched_lf = norm_source.replacen(&norm_search, &norm_replace, 1);
+        let match_pos = norm_source.find(&norm_search).unwrap_or(0);
+        let active_enclosing = Self::open_enclosing_declarations(&norm_source[..match_pos]);
 
         for sym in &patch.touched_symbols {
             let trimmed_sym = sym.trim();
-            if !norm_source.contains(trimmed_sym) && !patched_lf.contains(trimmed_sym) {
+            if !Self::is_valid_symbol_identifier(trimmed_sym) {
                 return Err(CoreError::PatchApplicationError(format!(
-                    "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' was not \
-                     found in '{safe_target}'"
+                    "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' is not a \
+                     valid identifier"
+                )));
+            }
+            let in_modified_block = Self::contains_identifier_token(&norm_search, trimmed_sym)
+                || Self::contains_identifier_token(&norm_replace, trimmed_sym);
+            let in_enclosing_scope = active_enclosing.iter().any(|enc| enc == trimmed_sym);
+            if !in_modified_block && !in_enclosing_scope {
+                return Err(CoreError::PatchApplicationError(format!(
+                    "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' does not \
+                     belong to the modified region or its enclosing declaration in '{safe_target}'"
                 )));
             }
         }
+
+        let patched_lf = norm_source.replacen(&norm_search, &norm_replace, 1);
 
         let patched = if uses_crlf {
             patched_lf.replace('\n', "\r\n")
@@ -743,7 +989,7 @@ impl SyntaxPreflight {
 }
 
 /// Float-free token and micro-dollar cost accounting (RFC 8785 canonical JSON compatible).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenAccounting {
     pub prompt_tokens: u64,
     pub cached_prompt_tokens: u64,
@@ -751,9 +997,46 @@ pub struct TokenAccounting {
     pub reasoning_tokens: u64,
     pub latency_ms: u64,
     pub total_cost_micros_usd: u64,
+    #[serde(skip)]
+    total_cost_nanos_usd: u64,
 }
 
+impl PartialEq for TokenAccounting {
+    fn eq(&self, other: &Self) -> bool {
+        self.prompt_tokens == other.prompt_tokens
+            && self.cached_prompt_tokens == other.cached_prompt_tokens
+            && self.completion_tokens == other.completion_tokens
+            && self.reasoning_tokens == other.reasoning_tokens
+            && self.latency_ms == other.latency_ms
+            && self.total_cost_micros_usd == other.total_cost_micros_usd
+    }
+}
+
+impl Eq for TokenAccounting {}
+
 impl TokenAccounting {
+    /// Compute exact cost in integer nano-dollars (`1 USD = 1_000_000_000 nanos`) from
+    /// raw token counts and the serving model's rate card without double-counting cached tokens.
+    #[must_use]
+    pub fn usage_nanos(
+        model: MuseModelSlug,
+        prompt_tokens: u64,
+        cached_prompt_tokens: u64,
+        completion_tokens: u64,
+        reasoning_tokens: u64,
+    ) -> u64 {
+        let effective_cached = cached_prompt_tokens.min(prompt_tokens);
+        let uncached_prompt = prompt_tokens.saturating_sub(effective_cached);
+        let output_tokens = completion_tokens.saturating_add(reasoning_tokens);
+        let (uncached_rate_nanos, cached_rate_nanos, output_rate_nanos) =
+            model.rate_card_nanos_per_token();
+
+        uncached_prompt
+            .saturating_mul(uncached_rate_nanos)
+            .saturating_add(effective_cached.saturating_mul(cached_rate_nanos))
+            .saturating_add(output_tokens.saturating_mul(output_rate_nanos))
+    }
+
     /// Compute cost in integer micro-dollars (`1 USD = 1_000_000 micros`) from raw token
     /// counts and the serving model's rate card, without double-counting cached tokens.
     #[must_use]
@@ -766,16 +1049,13 @@ impl TokenAccounting {
         latency_ms: u64,
     ) -> Self {
         let effective_cached = cached_prompt_tokens.min(prompt_tokens);
-        let uncached_prompt = prompt_tokens.saturating_sub(effective_cached);
-        let output_tokens = completion_tokens.saturating_add(reasoning_tokens);
-        let (uncached_rate_nanos, cached_rate_nanos, output_rate_nanos) =
-            model.rate_card_nanos_per_token();
-
-        let total_nanos = uncached_prompt
-            .saturating_mul(uncached_rate_nanos)
-            .saturating_add(effective_cached.saturating_mul(cached_rate_nanos))
-            .saturating_add(output_tokens.saturating_mul(output_rate_nanos));
-
+        let total_nanos = Self::usage_nanos(
+            model,
+            prompt_tokens,
+            effective_cached,
+            completion_tokens,
+            reasoning_tokens,
+        );
         let total_cost_micros_usd = total_nanos.div_ceil(1000);
 
         Self {
@@ -785,22 +1065,41 @@ impl TokenAccounting {
             reasoning_tokens,
             latency_ms,
             total_cost_micros_usd,
+            total_cost_nanos_usd: total_nanos,
         }
     }
 
     /// Accumulate another attempt's token usage and recompute total micro-dollar cost
-    /// using `model`'s rate card so cumulative rounding is exact.
+    /// from exact nano-dollar totals across both homogeneous and mixed-model fallback runs.
     pub fn accumulate(&mut self, other: &Self, model: MuseModelSlug) {
-        let prompt = self.prompt_tokens.saturating_add(other.prompt_tokens);
-        let cached = self
+        let self_nanos = if self.total_cost_nanos_usd > 0 {
+            self.total_cost_nanos_usd
+        } else {
+            self.total_cost_micros_usd.saturating_mul(1000)
+        };
+        let other_nanos = if other.total_cost_nanos_usd > 0 {
+            other.total_cost_nanos_usd
+        } else {
+            Self::usage_nanos(
+                model,
+                other.prompt_tokens,
+                other.cached_prompt_tokens,
+                other.completion_tokens,
+                other.reasoning_tokens,
+            )
+        };
+
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.cached_prompt_tokens = self
             .cached_prompt_tokens
             .saturating_add(other.cached_prompt_tokens);
-        let completion = self
+        self.completion_tokens = self
             .completion_tokens
             .saturating_add(other.completion_tokens);
-        let reasoning = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
-        let latency = self.latency_ms.saturating_add(other.latency_ms);
-        *self = Self::from_usage(model, prompt, cached, completion, reasoning, latency);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+        self.latency_ms = self.latency_ms.saturating_add(other.latency_ms);
+        self.total_cost_nanos_usd = self_nanos.saturating_add(other_nanos);
+        self.total_cost_micros_usd = self.total_cost_nanos_usd.div_ceil(1000);
     }
 }
 
@@ -1010,14 +1309,28 @@ pub fn check_repair_deadline(started: Instant) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn temp_sandbox(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "replayfix-repair-test-{}-{name}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    struct TempDirGuard(std::path::PathBuf);
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "replayfix-repair-test-{}-{name}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
@@ -1048,7 +1361,8 @@ mod tests {
 
     #[test]
     fn test_test_freeze_guard_blocks_all_test_and_config_variants() {
-        let dir = temp_sandbox("freeze-guard");
+        let guard_dir = TempDirGuard::new("freeze-guard");
+        let dir = guard_dir.path();
         fs::create_dir_all(dir.join("tests")).unwrap();
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("tests/cart.spec.ts"), "expect(1).toBe(1);\n").unwrap();
@@ -1056,7 +1370,7 @@ mod tests {
         fs::write(dir.join("package.json"), "{}\n").unwrap();
         fs::write(dir.join("src/cart-summary.js"), "export function f() {}\n").unwrap();
 
-        let guard = TestFreezeGuard::capture(&dir).unwrap();
+        let guard = TestFreezeGuard::capture(dir).unwrap();
         assert_eq!(guard.frozen_files.len(), 3);
         assert_eq!(
             guard.validate_target_path("src/cart-summary.js").unwrap(),
@@ -1075,6 +1389,9 @@ mod tests {
             "tsconfig.json",
             "tsconfig.build.json",
             "package.json",
+            "package.json.",
+            "tests./cart.spec.ts",
+            "src/cart.spec.ts.",
         ] {
             let err = guard.validate_target_path(forbidden).unwrap_err();
             assert!(
@@ -1084,14 +1401,41 @@ mod tests {
         }
 
         // Verify disk integrity check detects post-capture tampering.
-        assert!(guard.verify_integrity(&dir).is_ok());
+        assert!(guard.verify_integrity(dir).is_ok());
         fs::write(dir.join("tests/cart.spec.ts"), "expect(1).toBe(2);\n").unwrap();
-        let tamper_err = guard.verify_integrity(&dir).unwrap_err();
+        let tamper_err = guard.verify_integrity(dir).unwrap_err();
         assert!(
             matches!(tamper_err, CoreError::SecurityViolation(m) if m.contains("TEST_MUTATION_PROHIBITED"))
         );
+        fs::write(dir.join("tests/cart.spec.ts"), "expect(1).toBe(1);\n").unwrap();
+        assert!(guard.verify_integrity(dir).is_ok());
 
-        let _ = fs::remove_dir_all(&dir);
+        // On Windows, verify real NTFS directory junction (reparse point) creation is caught
+        // by TestFreezeGuard::verify_integrity and TestFreezeGuard::capture.
+        #[cfg(windows)]
+        {
+            let ext_dir = TempDirGuard::new("freeze-junction-ext");
+            fs::write(ext_dir.path().join("ext.js"), "export const x = 1;\n").unwrap();
+            let junction = dir.join("src").join("reparse_link");
+            let mklink = Command::new("cmd")
+                .args([
+                    "/C",
+                    "mklink",
+                    "/J",
+                    &junction.to_string_lossy(),
+                    &ext_dir.path().to_string_lossy(),
+                ])
+                .output()
+                .unwrap();
+            assert!(mklink.status.success(), "mklink /J should succeed");
+
+            let reparse_err = guard.verify_integrity(dir).unwrap_err();
+            assert!(
+                matches!(reparse_err, CoreError::SecurityViolation(ref m) if m.contains("TEST_MUTATION_PROHIBITED")),
+                "expected TEST_MUTATION_PROHIBITED on NTFS junction, got {reparse_err:?}"
+            );
+            let _ = fs::remove_dir(&junction);
+        }
     }
 
     #[test]
@@ -1144,9 +1488,9 @@ mod tests {
     }
 
     #[test]
-    fn test_block_patcher_enforces_exact_single_match_uniqueness() {
-        let dir = temp_sandbox("block-patcher");
-        let guard = TestFreezeGuard::capture(&dir).unwrap();
+    fn test_block_patcher_enforces_exact_single_match_uniqueness_including_overlaps() {
+        let guard_dir = TempDirGuard::new("block-patcher");
+        let guard = TestFreezeGuard::capture(guard_dir.path()).unwrap();
         let src = "export function cartItemCount(cart) {\n  return cart.items.length;\n}\n";
 
         // 0 matches -> PATCH_TARGET_NOT_FOUND
@@ -1178,6 +1522,22 @@ mod tests {
             matches!(err2, CoreError::PatchApplicationError(m) if m.contains("AMBIGUOUS_PATCH"))
         );
 
+        // Overlapping duplicate matches -> AMBIGUOUS_PATCH
+        let overlap_src = "function f() {\n  a();\n  a();\n  a();\n}\n";
+        let overlap_patch = StructuredRepairPatch {
+            explanation: "Fix overlapping".into(),
+            target_file: "src/cart-summary.js".into(),
+            search_block: "  a();\n  a();".into(),
+            replace_block: "  b();".into(),
+            touched_symbols: vec!["f".into()],
+        };
+        let err_overlap =
+            BlockPatcher::apply(overlap_src, "src/cart-summary.js", &overlap_patch, &guard)
+                .unwrap_err();
+        assert!(
+            matches!(err_overlap, CoreError::PatchApplicationError(m) if m.contains("AMBIGUOUS_PATCH"))
+        );
+
         // Exact 1 match -> succeeds
         let ok = BlockPatcher::apply(src, "src/cart-summary.js", &dup_patch, &guard).unwrap();
         assert_eq!(
@@ -1185,11 +1545,29 @@ mod tests {
             "export function cartItemCount(cart) {\n  return cart.items?.length || 0;\n}\n"
         );
 
-        let _ = fs::remove_dir_all(&dir);
+        // Misleading touched_symbols: sibling function that already closed before modified block,
+        // JS keyword, or partial prefix must be rejected with SYMBOL_VERIFICATION_FAILED.
+        let multi_fn_src = "export function unrelatedHelper(x) {\n  return x + 1;\n}\n\nexport function cartItemCount(cart) {\n  return cart.items.length;\n}\n";
+        for bad_sym in ["unrelatedHelper", "return", "cartItem", "123invalid"] {
+            let bad_sym_patch = StructuredRepairPatch {
+                explanation: "Fix with misleading symbol".into(),
+                target_file: "src/cart-summary.js".into(),
+                search_block: "  return cart.items.length;".into(),
+                replace_block: "  return cart.items?.length || 0;".into(),
+                touched_symbols: vec![bad_sym.into()],
+            };
+            let sym_err =
+                BlockPatcher::apply(multi_fn_src, "src/cart-summary.js", &bad_sym_patch, &guard)
+                    .unwrap_err();
+            assert!(
+                matches!(sym_err, CoreError::PatchApplicationError(ref m) if m.contains("SYMBOL_VERIFICATION_FAILED")),
+                "expected SYMBOL_VERIFICATION_FAILED for '{bad_sym}', got {sym_err:?}"
+            );
+        }
     }
 
     #[test]
-    fn test_token_accounting_avoids_double_counting_cached_tokens() {
+    fn test_token_accounting_avoids_double_counting_cached_tokens_and_handles_fallback() {
         let usage = TokenAccounting::from_usage(
             MuseModelSlug::MuseSpark13,
             1400, // total prompt
@@ -1204,6 +1582,37 @@ mod tests {
         // Total = 2_775_000 nUSD = 2775 micro-USD ($0.002775 < $0.02 = 20_000 micro-USD)
         assert_eq!(usage.total_cost_micros_usd, 2775);
         assert!(usage.total_cost_micros_usd < 20_000);
+
+        // Verify mixed-model fallback accumulation preserves exact nano-USD from both rate cards
+        let mut cumulative = TokenAccounting::default();
+        cumulative.accumulate(&usage, MuseModelSlug::MuseSpark13);
+        let fallback_usage = TokenAccounting::from_usage(
+            MuseModelSlug::MuseSparkOpen1026,
+            1500, // total prompt
+            1200, // cached prompt (leaving 300 uncached)
+            150,  // completion
+            250,  // reasoning (400 total output)
+            350,
+        );
+        // Fallback: 300 * 500 + 1200 * 60 + 400 * 2000 = 150_000 + 72_000 + 800_000 = 1_022_000 nUSD = 1022 micro-USD
+        assert_eq!(fallback_usage.total_cost_micros_usd, 1022);
+        cumulative.accumulate(&fallback_usage, MuseModelSlug::MuseSparkOpen1026);
+        assert_eq!(cumulative.prompt_tokens, 2900);
+        assert_eq!(cumulative.cached_prompt_tokens, 2200);
+        assert_eq!(cumulative.total_cost_micros_usd, 2775 + 1022);
+
+        // Verify fallback mode switches serving_model to meta-models/muse-spark-open-1026
+        // and updates reasoning_effort to High
+        let mut config = MuseModelConfig::new("muse-spark-1.3", None).unwrap();
+        let fallback_client =
+            BoundedRepairClient::new(RepairClientMode::OfflineFallbackOnRateLimit);
+        let req = RepairRequest::new(1, &config, "attempt 1".into(), None, None);
+        let resp = fallback_client.generate(&req, &mut config).unwrap();
+        assert!(resp.fallback_used);
+        assert_eq!(config.requested_model, MuseModelSlug::MuseSpark13);
+        assert_eq!(config.serving_model, MuseModelSlug::MuseSparkOpen1026);
+        assert_eq!(config.reasoning_effort, ReasoningEffort::High);
+        assert_eq!(resp.serving_model, MuseModelSlug::MuseSparkOpen1026);
     }
 
     #[test]

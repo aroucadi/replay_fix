@@ -543,12 +543,15 @@ impl MockHealer {
                         reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
                     }
                 };
-                if let Err(CoreError::SecurityViolation(msg)) =
-                    freeze_guard.validate_target_path(&outcome.target_path)
-                {
+                if let Err(err) = freeze_guard.validate_target_path(&outcome.target_path) {
                     bridge.shutdown();
                     server.shutdown();
-                    reject_live!(TriageStatus::SecurityViolation, msg);
+                    match err {
+                        CoreError::SecurityViolation(msg) => {
+                            reject_live!(TriageStatus::SecurityViolation, msg);
+                        }
+                        other => return Err(other),
+                    }
                 }
                 if outcome.target_path != fixture.target_path {
                     bridge.shutdown();
@@ -571,12 +574,15 @@ impl MockHealer {
                 }
 
                 sandbox.write_file(&outcome.target_path, &outcome.patched)?;
-                if let Err(CoreError::SecurityViolation(msg)) =
-                    freeze_guard.verify_integrity(sandbox.root())
-                {
+                if let Err(err) = freeze_guard.verify_integrity(sandbox.root()) {
                     bridge.shutdown();
                     server.shutdown();
-                    reject_live!(TriageStatus::SecurityViolation, msg);
+                    match err {
+                        CoreError::SecurityViolation(msg) => {
+                            reject_live!(TriageStatus::SecurityViolation, msg);
+                        }
+                        other => return Err(other),
+                    }
                 }
                 if let Err(e) = SyntaxPreflight::check_file(sandbox.root(), &outcome.target_path) {
                     bridge.shutdown();
@@ -879,15 +885,47 @@ impl MockHealer {
 
             // 3. Write candidate patch to scratch sandbox and verify frozen test SHA-256 parity.
             sandbox.write_file(&patch_outcome.target_path, &patch_outcome.patched)?;
-            if let Err(CoreError::SecurityViolation(msg)) =
-                freeze_guard.verify_integrity(sandbox.root())
-            {
-                return Ok(AutonomousRepairResult::Rejected {
-                    status: TriageStatus::SecurityViolation,
-                    reason: msg,
-                    repair_telemetry: None,
-                    token_accounting: Some(cumulative_tokens),
-                });
+            if let Err(err) = freeze_guard.verify_integrity(sandbox.root()) {
+                match err {
+                    CoreError::SecurityViolation(msg) => {
+                        attempt_lineage.push(AttemptLineage {
+                            attempt,
+                            response_id: resp.response_id,
+                            previous_response_id: prev_id_for_lineage,
+                            encrypted_content_present: true,
+                            encrypted_content_sha256: encrypted_hash,
+                            syntax_check_passed: false,
+                            patch_applied: true,
+                            failure_reason: Some(msg.clone()),
+                        });
+                        let rtel = RepairTelemetry {
+                            requested_model: model_config.requested_model.as_str().to_string(),
+                            serving_model: model_config.serving_model.as_str().to_string(),
+                            provider_mode: client_mode.provider_mode_str().to_string(),
+                            reasoning_effort: model_config.reasoning_effort.as_str().to_string(),
+                            fallback_used: any_fallback_used,
+                            prompt_cache_key: model_config.prompt_cache_key.clone(),
+                            prompt_cache_retention: model_config.prompt_cache_retention.clone(),
+                            attempts_used: attempt,
+                            max_attempts: MAX_REPAIR_ATTEMPTS,
+                            previous_response_ids,
+                            encrypted_deliberation_preserved: true,
+                            syntax_preflight_passed: false,
+                            test_freeze_verified: false,
+                            test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
+                            gate2_runs_completed: 0,
+                            gate2_stability_passed: false,
+                            attempt_lineage,
+                        };
+                        return Ok(AutonomousRepairResult::Rejected {
+                            status: TriageStatus::SecurityViolation,
+                            reason: msg,
+                            repair_telemetry: Some(rtel),
+                            token_accounting: Some(cumulative_tokens),
+                        });
+                    }
+                    other => return Err(other),
+                }
             }
 
             // 4. Syntax preflight (`node --check`) before Gate 2 execution.
@@ -980,7 +1018,9 @@ impl MockHealer {
             max_attempts: MAX_REPAIR_ATTEMPTS,
             previous_response_ids,
             encrypted_deliberation_preserved: true,
-            syntax_preflight_passed: false,
+            syntax_preflight_passed: attempt_lineage
+                .last()
+                .is_some_and(|a| a.syntax_check_passed),
             test_freeze_verified: true,
             test_freeze_sha256: freeze_guard.aggregate_sha256.clone(),
             gate2_runs_completed: 0,
@@ -1273,10 +1313,13 @@ impl MockHealer {
                     }
                     Err(e) => reject!(TriageStatus::PatchApplyFailed, e.to_string()),
                 };
-                if let Err(CoreError::SecurityViolation(msg)) =
-                    freeze_guard.validate_target_path(&outcome.target_path)
-                {
-                    reject!(TriageStatus::SecurityViolation, msg);
+                if let Err(err) = freeze_guard.validate_target_path(&outcome.target_path) {
+                    match err {
+                        CoreError::SecurityViolation(msg) => {
+                            reject!(TriageStatus::SecurityViolation, msg);
+                        }
+                        other => return Err(other),
+                    }
                 }
                 if outcome.target_path != fixture.target_path {
                     reject!(
@@ -1295,10 +1338,13 @@ impl MockHealer {
                 }
 
                 sandbox.write_file(&outcome.target_path, &outcome.patched)?;
-                if let Err(CoreError::SecurityViolation(msg)) =
-                    freeze_guard.verify_integrity(sandbox.root())
-                {
-                    reject!(TriageStatus::SecurityViolation, msg);
+                if let Err(err) = freeze_guard.verify_integrity(sandbox.root()) {
+                    match err {
+                        CoreError::SecurityViolation(msg) => {
+                            reject!(TriageStatus::SecurityViolation, msg);
+                        }
+                        other => return Err(other),
+                    }
                 }
 
                 // Evaluate Gate 2 across 2 consecutive runs.

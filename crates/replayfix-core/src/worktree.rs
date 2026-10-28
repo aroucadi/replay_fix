@@ -230,8 +230,26 @@ impl ScratchSandbox {
         reject_symlink_chain(&self.root, &full)?;
         if let Some(parent) = full.parent() {
             fs::create_dir_all(parent)?;
+            reject_symlink_chain(&self.root, &full)?;
+            if let (Ok(canon_root), Ok(canon_parent)) =
+                (fs::canonicalize(&self.root), fs::canonicalize(parent))
+            {
+                if !canon_parent.starts_with(&canon_root) {
+                    return Err(CoreError::SecurityViolation(format!(
+                        "Sandbox write parent '{}' escaped canonical sandbox root '{}'",
+                        canon_parent.display(),
+                        canon_root.display()
+                    )));
+                }
+            }
         }
         if let Ok(meta) = fs::symlink_metadata(&full) {
+            if is_symlink_or_reparse_point(&meta) {
+                return Err(CoreError::SecurityViolation(format!(
+                    "Symlink escape detected inside sandbox at '{}'",
+                    full.display()
+                )));
+            }
             let mut perms = meta.permissions();
             if perms.readonly() {
                 #[allow(clippy::permissions_set_readonly_false)]
@@ -466,13 +484,36 @@ fn describe_entry_diff(before: &[FileEntry], after: &[FileEntry]) -> String {
     "workspace file entries changed".to_string()
 }
 
+pub(crate) fn is_symlink_or_reparse_point(meta: &fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            return true;
+        }
+    }
+    false
+}
+
 fn reject_symlink_chain(sandbox_root: &Path, target: &Path) -> Result<()> {
+    if let Ok(root_meta) = fs::symlink_metadata(sandbox_root) {
+        if is_symlink_or_reparse_point(&root_meta) {
+            return Err(CoreError::SecurityViolation(format!(
+                "Symlink escape detected on sandbox root '{}'",
+                sandbox_root.display()
+            )));
+        }
+    }
     let mut cur = sandbox_root.to_path_buf();
     if let Ok(rel) = target.strip_prefix(sandbox_root) {
         for comp in rel.components() {
             cur.push(comp);
             if let Ok(meta) = fs::symlink_metadata(&cur) {
-                if meta.file_type().is_symlink() {
+                if is_symlink_or_reparse_point(&meta) {
                     return Err(CoreError::SecurityViolation(format!(
                         "Symlink escape detected inside sandbox at '{}'",
                         cur.display()
@@ -658,9 +699,45 @@ mod tests {
             perms.set_readonly(true);
             fs::set_permissions(&written, perms).unwrap();
 
-            // Verify traversal outside sandbox is rejected
+            // Verify traversal and trailing-dot/multi-dot DOS paths are rejected
             assert!(sandbox.read_file("../outside.txt").is_err());
             assert!(sandbox.write_file("../../escape.txt", "bad").is_err());
+            assert!(sandbox.write_file("src/cart-summary.js.", "bad").is_err());
+            assert!(sandbox.write_file("src./cart-summary.js", "bad").is_err());
+            assert!(sandbox.write_file("src/CON.txt.bak", "bad").is_err());
+
+            // On Windows, create a real NTFS directory junction (reparse point) without
+            // needing elevation and verify read_file and write_file reject it fail-closed.
+            #[cfg(windows)]
+            {
+                let outside_dir = temp_test_dir("junction-outside");
+                fs::write(outside_dir.join("secret.txt"), "do-not-touch\n").unwrap();
+                let junction_path = sandbox.root().join("src").join("linked_dir");
+                let mklink = Command::new("cmd")
+                    .args([
+                        "/C",
+                        "mklink",
+                        "/J",
+                        &junction_path.to_string_lossy(),
+                        &outside_dir.to_string_lossy(),
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(mklink.status.success(), "mklink /J should succeed");
+
+                let read_err = sandbox.read_file("src/linked_dir/secret.txt").unwrap_err();
+                assert!(matches!(read_err, CoreError::SecurityViolation(_)));
+                let write_err = sandbox
+                    .write_file("src/linked_dir/secret.txt", "overwritten")
+                    .unwrap_err();
+                assert!(matches!(write_err, CoreError::SecurityViolation(_)));
+                assert_eq!(
+                    fs::read_to_string(outside_dir.join("secret.txt")).unwrap(),
+                    "do-not-touch\n"
+                );
+                let _ = fs::remove_dir(&junction_path);
+                let _ = remove_dir_robust(&outside_dir);
+            }
 
             // Base repository must remain completely untouched while sandbox is active
             let mid = WorktreeManifest::capture(&base).unwrap();

@@ -1,3 +1,15 @@
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
+
 pub mod ui;
 
 use clap::{Args, Parser, Subcommand};
@@ -126,6 +138,10 @@ pub struct ReproArgs {
     /// Meta Muse model slug for bounded autonomous repair (muse-spark-1.3, muse-wonder-1.0, muse-spark-1.3-contributor)
     #[arg(long)]
     pub model: Option<String>,
+
+    /// Optional reasoning effort override ('high' or 'xhigh'). 'max' is strictly prohibited.
+    #[arg(long)]
+    pub reasoning_effort: Option<String>,
 
     /// Simulate a 3-attempt bounded repair failure to verify QUARANTINE_REPAIR_FAILED (exit code 21)
     #[arg(long)]
@@ -299,6 +315,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         live_browser,
         mock_ambiguous,
         model,
+        reasoning_effort,
         mock_failing_repair,
         mock_syntax_retry,
         mock_patch,
@@ -307,7 +324,11 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
     } = args;
 
     if let Some(ref slug) = model {
-        if let Err(e) = MuseModelConfig::new(slug, None) {
+        if let Err(e) = MuseModelConfig::new(slug, reasoning_effort.as_deref()) {
+            usage_error(&e.to_string(), theme);
+        }
+    } else if let Some(ref effort) = reasoning_effort {
+        if let Err(e) = replayfix_core::ReasoningEffort::parse(effort) {
             usage_error(&e.to_string(), theme);
         }
     }
