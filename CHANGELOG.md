@@ -17,6 +17,31 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.6.1] - 2026-10-28
+
+Adversarial security hardening and preflight reliability patch for Spec 060 (`060-v0.6-meta-model-bounded-repair`). Full notes: [docs/release-notes/v0.6.1.md](docs/release-notes/v0.6.1.md).
+
+### Security & Hardening
+- **Windows Reparse Points & NTFS Junction Defense (`replayfix_core::worktree`)**:
+  - Implemented `is_symlink_or_reparse_point` via `FILE_ATTRIBUTE_REPARSE_POINT` (`0x0400`) on Windows to block sandbox escapes via directory junctions (`mklink /J`).
+  - Added canonical sandbox root containment verification in `write_file`.
+- **DOS Device & Trailing Dot/Space Path Sanitization (`replayfix_core::manifest`)**:
+  - Hardened `assert_safe_path` against multi-dot DOS reserved device patterns (e.g., `CON.txt.bak`) and stripped trailing dots/spaces from path components.
+- **Enclosing Declaration Verification & Overlapping Matches (`replayfix_core::repair::BlockPatcher`)**:
+  - Validated that `touched_symbols` are either defined in `replace_block` or belong to the active enclosing declaration scope.
+  - Added overlapping match detection to guarantee `search_block` matches uniquely without ambiguous multi-match overlaps.
+- **Fail-Closed Fallback Token Accounting (`replayfix_core::repair::TokenAccounting`)**:
+  - Corrected nano-dollar cost accumulation across mixed model fallback attempts, preserving micro-USD integrity without integer rounding error.
+- **Preflight & Engine Fail-Closed Error Handling (`replayfix_core::engine`)**:
+  - Dynamic `syntax_preflight_passed` state reflection in telemetry.
+  - Replaced partial `if let` blocks with exhaustive `match` arms for security violation reporting.
+- **CLI & Zero-Panic Invariants (`replayfix-cli`)**:
+  - Added CLI argument validation rejecting `--reasoning-effort max` with exit code `2`.
+  - Enforced `#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unimplemented, clippy::unreachable))]` across crates.
+  - Built lexical tokenizer into `.specify/scripts/check-panics.ps1` with `-SelfTest` suite.
+
+---
+
 ## [0.6.0] - 2026-10-28
 
 Delivers **Spec 060 (`060-v0.6-meta-model-bounded-repair`)**: Bounded autonomous Meta Muse repair (`muse-spark-1.3`, `muse-wonder-1.0`, `muse-spark-1.3-contributor`, and open-weights fallback `meta-models/muse-spark-open-1026`), anti-cheating SHA-256 test freeze (`TestFreezeGuard`), `<UNTRUSTED_CONTEXT>` prompt-injection data fencing with 24-hour static prefix caching (`replayfix-v0.6-harness-prefix-v1`), Meta Superpower #3 encrypted deliberation continuity (`reasoning.encrypted_content` + `previous_response_id`), strict 5-field JSON Schema output validation (`StructuredRepairPatch`), ambiguity-safe source-block patching (`BlockPatcher`), `node --input-type=module --check` syntax preflight (`SyntaxPreflight`), 2-run consecutive Gate 2 stability verification, bounded 3-attempt quarantine (`QUARANTINE_REPAIR_FAILED`, exit code `21`), and integer micro-dollar token accounting (`TokenAccounting`). Full notes: [docs/release-notes/v0.6.0.md](docs/release-notes/v0.6.0.md).

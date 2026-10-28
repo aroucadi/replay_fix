@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.6.0` (`060-v0.6-meta-model-bounded-repair` — Bounded Autonomous Meta Muse Repair, Anti-Cheating Test Freeze, Deliberation Continuity & 2-Run Gate 2 Stability)
-- **Status**: Qualified & ready for release tag `v0.6.0`; baseline locked for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`)
+- **Active Milestone**: `v0.6.1` (`v0.6.1-patch-adversarial-hardening` — Preflight Reliability, Windows Reparse Point Security, Enclosing Scope Verification, and Lexical AST Panic Defense)
+- **Status**: Qualified & ready for release tag `v0.6.1`; baseline locked for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`)
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -30,6 +30,14 @@
   - `PromptBuilder` & `RepairRequest`: 24h static prefix caching (`replayfix-v0.6-harness-prefix-v1`), `<UNTRUSTED_CONTEXT>` tag escaping, and Meta Superpower #3 encrypted deliberation continuity (`reasoning.encrypted_content` + `previous_response_id`).
   - `StructuredRepairPatch`, `BlockPatcher`, & `SyntaxPreflight`: strict 5-field JSON Schema (`deny_unknown_fields`), exact single-match uniqueness (`0` -> `PATCH_TARGET_NOT_FOUND`, $\ge 2$ -> `AMBIGUOUS_PATCH`), `node --input-type=module --check` syntax preflight, 2-run consecutive Gate 2 stability (`gate2_runs_completed: 2`), bounded 3-attempt quarantine (`QUARANTINE_REPAIR_FAILED`, exit code `21`), and integer micro-dollar `TokenAccounting`.
   - 151 automated tests passing (125 core unit tests, 24 CLI integration tests, 2 CLI UI unit tests); zero Clippy warnings; zero `.unwrap()` or `.expect()` in production source.
+- [x] **v0.6.1 Adversarial Security Hardening & Preflight Reliability**:
+  - Windows `FILE_ATTRIBUTE_REPARSE_POINT` (NTFS junctions `mklink /J`) and canonical root containment verification in `write_file`.
+  - DOS device stem isolation (`CON.txt.bak`) and trailing dot/space sanitization in `manifest.rs`.
+  - `BlockPatcher` overlapping match detection and enclosing declaration boundary scope verification for `touched_symbols`.
+  - Exact nano-dollar rate cards across multi-model fallback sequences in `TokenAccounting`.
+  - Dynamic `syntax_preflight_passed` state reflection and exhaustive error matching in `engine.rs`.
+  - CLI validation rejecting `--reasoning-effort max` with exit code `2`.
+  - Lexical tokenizer for `check-panics.ps1` with self-test suite and crate-level AST denial lints.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
