@@ -52,7 +52,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.5");
+    assert_eq!(receipt["schema_version"], "0.6");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -88,7 +88,7 @@ fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.5");
+    assert_eq!(receipt["schema_version"], "0.6");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
@@ -121,7 +121,7 @@ fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.5");
+    assert_eq!(triage["schema_version"], "0.6");
     assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
     assert_eq!(triage["exit_code"], 22);
     assert_eq!(triage["substrate"], "playwright-cdp");
@@ -135,7 +135,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.5");
+    assert_eq!(triage["schema_version"], "0.6");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -382,7 +382,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.5");
+    assert_eq!(receipt["schema_version"], "0.6");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
@@ -403,4 +403,120 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
         .expect("keyframe_paths array");
     assert_eq!(keyframes.len(), 1);
     assert!(dir.join(".replayfix/keyframes").exists());
+}
+
+#[test]
+fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
+    let dir = scratch("model-autonomous-v06");
+    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args([
+            "run",
+            "--bug",
+            "RF-01",
+            "--model",
+            "muse-spark-1.3",
+            "--mock-syntax-retry",
+            "--output-dir",
+            "out-retry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let receipt = json(&dir.join("out-retry/audit_receipt.json"));
+    assert_eq!(receipt["schema_version"], "0.6");
+    assert_eq!(
+        receipt["repair_telemetry"]["requested_model"],
+        "muse-spark-1.3"
+    );
+    assert_eq!(
+        receipt["repair_telemetry"]["serving_model"],
+        "muse-spark-1.3"
+    );
+    assert_eq!(receipt["repair_telemetry"]["reasoning_effort"], "xhigh");
+    assert_eq!(receipt["repair_telemetry"]["attempts_used"], 2);
+    assert_eq!(receipt["repair_telemetry"]["gate2_runs_completed"], 2);
+    assert_eq!(receipt["repair_telemetry"]["gate2_stability_passed"], true);
+    assert_eq!(
+        receipt["repair_telemetry"]["encrypted_deliberation_preserved"],
+        true
+    );
+    assert!(
+        receipt["token_accounting"]["total_cost_micros_usd"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
+fn mock_failing_repair_exits_21_with_quarantine_triage_report() {
+    let dir = scratch("quarantine-v06");
+    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args([
+            "run",
+            "--bug",
+            "RF-01",
+            "--mock-failing-repair",
+            "--output-dir",
+            "out-quarantine",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        code(&out),
+        21,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let triage = json(&dir.join("out-quarantine/triage_report.json"));
+    assert_eq!(triage["schema_version"], "0.6");
+    assert_eq!(triage["status"], "QUARANTINE_REPAIR_FAILED");
+    assert_eq!(triage["exit_code"], 21);
+    assert_eq!(triage["repair_telemetry"]["attempts_used"], 3);
+    assert_eq!(triage["repair_telemetry"]["max_attempts"], 3);
+    assert_eq!(triage["repair_telemetry"]["gate2_stability_passed"], false);
+    assert!(
+        triage["token_accounting"]["prompt_tokens"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
+fn disallowed_model_slug_and_test_file_patch_are_rejected() {
+    let dir = scratch("disallowed-and-anticheat");
+
+    // 1. muse-wonder-full-1.0 is rejected at CLI validation with exit code 2
+    let bad_model = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args(["run", "--bug", "RF-01", "--model", "muse-wonder-full-1.0"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&bad_model), 2);
+    assert!(String::from_utf8_lossy(&bad_model.stderr).contains("MODEL_DISALLOWED"));
+
+    // 2. Patch targeting tests/cart.spec.ts is rejected with SECURITY_VIOLATION (exit code 11)
+    fs::write(
+        dir.join("cheat.diff"),
+        "--- a/tests/cart.spec.ts\n+++ b/tests/cart.spec.ts\n@@ -1 +1 @@\n-expect(1).toBe(0);\n+expect(1).toBe(1);\n",
+    )
+    .unwrap();
+    let cheat_out = run(&dir, &["--mock-heal", "--mock-patch", "cheat.diff"]);
+    assert_eq!(code(&cheat_out), 11);
+    let triage = json(&dir.join(".replayfix/triage_report.json"));
+    assert_eq!(triage["status"], "SECURITY_VIOLATION");
+    assert!(triage["reason"]
+        .as_str()
+        .unwrap()
+        .contains("TEST_MUTATION_PROHIBITED"));
 }

@@ -4,7 +4,8 @@ use clap::{Args, Parser, Subcommand};
 use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
 use replayfix_core::{
     BoundingBox, CoreError, DependencyStatus, Doctor, DomCandidate, EnvironmentAdapter, Fixture,
-    HealOutcome, LiveBrowserOptions, MockHealer, Platform, TaskManifest,
+    HealOutcome, LiveBrowserOptions, MockHealer, MuseModelConfig, Platform, RepairClientMode,
+    TaskManifest, MUSE_SPARK_13_SLUG,
 };
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -21,6 +22,7 @@ pub mod exit_codes {
     pub const INTERNAL_OR_SYSTEM_ERROR: i32 = 10;
     pub const SECURITY_VIOLATION: i32 = 11;
     pub const BRIDGE_EXECUTION_FAILED: i32 = 20;
+    pub const QUARANTINE_REPAIR_FAILED: i32 = 21;
     pub const AMBIGUOUS_GROUNDING: i32 = 22;
     pub const REPAIR_REJECTED: i32 = 30;
 }
@@ -120,6 +122,18 @@ pub struct ReproArgs {
     /// Simulate an ambiguous DOM candidate tie (|ΔS| < 0.25) in --live-browser mode to verify fail-closed AMBIGUOUS_GROUNDING abstention
     #[arg(long, requires = "live_browser")]
     pub mock_ambiguous: bool,
+
+    /// Meta Muse model slug for bounded autonomous repair (muse-spark-1.3, muse-wonder-1.0, muse-spark-1.3-contributor)
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Simulate a 3-attempt bounded repair failure to verify QUARANTINE_REPAIR_FAILED (exit code 21)
+    #[arg(long)]
+    pub mock_failing_repair: bool,
+
+    /// Simulate a syntax validation failure on Attempt 1 followed by encrypted deliberation continuity recovery on Attempt 2
+    #[arg(long)]
+    pub mock_syntax_retry: bool,
 
     /// Candidate patch for --mock-heal or --live-browser: 'builtin', 'noop' (empty patch), or a path to a unified diff
     #[arg(long, default_value = "builtin")]
@@ -256,6 +270,9 @@ struct ReproExtras {
     mock_heal: bool,
     live_browser: bool,
     mock_ambiguous: bool,
+    model: Option<String>,
+    mock_failing_repair: bool,
+    mock_syntax_retry: bool,
     mock_patch: String,
     output_dir: String,
     dry_run: bool,
@@ -281,10 +298,19 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_heal,
         live_browser,
         mock_ambiguous,
+        model,
+        mock_failing_repair,
+        mock_syntax_retry,
         mock_patch,
         output_dir,
         dry_run,
     } = args;
+
+    if let Some(ref slug) = model {
+        if let Err(e) = MuseModelConfig::new(slug, None) {
+            usage_error(&e.to_string(), theme);
+        }
+    }
 
     let inferred_from_video = if task_id.is_none() && bug.is_none() {
         video.as_deref().and_then(|v| {
@@ -303,14 +329,16 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
+    let autonomous_requested = model.is_some() || mock_failing_repair || mock_syntax_retry;
     let auto_live_from_video = inferred_from_video.is_some()
         && !mock_heal
         && video.as_deref().is_some_and(|v| Path::new(v).exists());
     let live_browser = live_browser || auto_live_from_video;
+    let mock_heal = mock_heal || (autonomous_requested && !live_browser);
 
     if !mock_heal && !live_browser && (mock_patch != "builtin" || output_dir != ".replayfix") {
         usage_error(
-            "'--mock-patch' and '--output-dir' require either '--mock-heal' or '--live-browser'",
+            "'--mock-patch' and '--output-dir' require '--mock-heal', '--live-browser', or '--model'",
             theme,
         );
     }
@@ -320,6 +348,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_heal,
         live_browser,
         mock_ambiguous,
+        model,
+        mock_failing_repair,
+        mock_syntax_retry,
         mock_patch,
         output_dir,
         dry_run,
@@ -354,7 +385,19 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         .or_else(|| bug_shorthand.map(|b| format!("bug/{b}")))
         .unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
     let video_file = video
-        .or_else(|| bug_shorthand.map(|b| format!("recordings/{b}.mp4")))
+        .or_else(|| {
+            bug_shorthand.map(|b| {
+                let demo_candidate = format!(
+                    "assets/fixtures/{}_demo.mp4",
+                    b.to_ascii_lowercase().replace('-', "")
+                );
+                if Path::new(&demo_candidate).exists() {
+                    demo_candidate
+                } else {
+                    format!("recordings/{b}.mp4")
+                }
+            })
+        })
         .unwrap_or_else(|| usage_error("Missing required argument '--video'", theme));
     let task_title = title.unwrap_or_else(|| format!("Reproduction Task {id}"));
 
@@ -447,6 +490,18 @@ fn short(digest: &str) -> &str {
     digest.get(..12).unwrap_or(digest)
 }
 
+fn resolve_repair_mode(extras: &ReproExtras) -> Option<RepairClientMode> {
+    if extras.mock_failing_repair {
+        Some(RepairClientMode::OfflineFailAllAttempts)
+    } else if extras.mock_syntax_retry {
+        Some(RepairClientMode::OfflineSyntaxRetryThenSuccess)
+    } else if extras.model.is_some() {
+        Some(RepairClientMode::OfflineSuccessFirstAttempt)
+    } else {
+        None
+    }
+}
+
 fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> ! {
     let out_dir = TaskManifest::assert_safe_path(&extras.output_dir, "output-dir")
         .unwrap_or_else(|e| fail(e, "Invalid --output-dir", theme));
@@ -478,6 +533,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         )
     });
     let diff = load_patch(&fixture, &extras.mock_patch, theme);
+    let repair_mode = resolve_repair_mode(extras);
 
     print_security_boundary(theme, &m.repo_path, true, true);
 
@@ -526,6 +582,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             candidate_override,
             video_path: Some(PathBuf::from(&m.video_path)),
             keyframe_dir: Some(out_dir.join("keyframes")),
+            model_slug: extras.model.clone(),
+            repair_mode,
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -533,6 +591,15 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             &repo_dir,
             std::slice::from_ref(&out_dir),
             &opts,
+        )
+    } else if let Some(mode) = repair_mode {
+        let slug = extras.model.as_deref().unwrap_or(MUSE_SPARK_13_SLUG);
+        MockHealer::run_autonomous_in_repo(
+            &fixture,
+            &repo_dir,
+            std::slice::from_ref(&out_dir),
+            slug,
+            mode,
         )
     } else {
         MockHealer::run_in_repo(&fixture, &diff, &repo_dir, std::slice::from_ref(&out_dir))
@@ -621,6 +688,40 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     short(&receipt.gate1.contract_sha256)
                 )),
             );
+            if let Some(rtel) = &receipt.repair_telemetry {
+                print_step(
+                    theme,
+                    "Test Freeze",
+                    StepStatus::Done,
+                    "Anti-cheating SHA-256 test freeze verified",
+                    Some(&format!(
+                        "freeze digest: {}, verified: {}",
+                        short(&rtel.test_freeze_sha256),
+                        rtel.test_freeze_verified
+                    )),
+                );
+                print_step(
+                    theme,
+                    "Muse Repair",
+                    StepStatus::Done,
+                    "Bounded autonomous repair synthesized patch",
+                    Some(&format!(
+                        "model: {} (effort: {}, attempt {}/{}), cache: {}",
+                        rtel.serving_model,
+                        rtel.reasoning_effort,
+                        rtel.attempts_used,
+                        rtel.max_attempts,
+                        rtel.prompt_cache_key
+                    )),
+                );
+                print_step(
+                    theme,
+                    "Syntax Check",
+                    StepStatus::Done,
+                    "Preflight node --check passed in sandbox",
+                    Some(&format!("target: {}", receipt.patch.target_path)),
+                );
+            }
             print_step(
                 theme,
                 "Repair",
@@ -638,7 +739,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 theme,
                 "Gate 2 (GREEN)",
                 StepStatus::Done,
-                "Behavior verified on patched source",
+                "Behavior verified across 2 consecutive runs",
                 Some(&format!(
                     "contract: {}, base repo unmodified: {}",
                     short(&receipt.gate2.contract_sha256),
@@ -672,6 +773,16 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 theme.muted(Symbols::STEP),
                 oracle_desc
             );
+            if let Some(tokens) = &receipt.token_accounting {
+                println!(
+                    "    {} Cost      : {} micro-USD ({} prompt / {} cached / {} output tokens)",
+                    theme.muted(Symbols::STEP),
+                    tokens.total_cost_micros_usd,
+                    tokens.prompt_tokens,
+                    tokens.cached_prompt_tokens,
+                    tokens.completion_tokens + tokens.reasoning_tokens
+                );
+            }
             println!(
                 "    {} Receipt   : {}",
                 theme.muted(Symbols::STEP),

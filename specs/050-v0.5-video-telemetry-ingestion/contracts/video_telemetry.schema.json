@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/video_telemetry.schema.json",
+  "title": "VideoTelemetry",
+  "description": "Deterministic schema for Spec 050 multimodal video telemetry, ROI optical-flow interaction detection, SAM 3.1 contour snapping, and ASR narration alignment.",
+  "type": "object",
+  "required": [
+    "video_metadata",
+    "interaction",
+    "sam_snap",
+    "keyframe_paths"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "video_metadata": {
+      "type": "object",
+      "required": ["width", "height", "duration_ms", "fps_milli", "has_audio", "container"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "duration_ms": { "type": "integer", "minimum": 1, "maximum": 90000 },
+        "fps_milli": { "type": "integer", "minimum": 1 },
+        "has_audio": { "type": "boolean" },
+        "container": { "type": "string", "minLength": 1 }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "required": ["t_ms", "x_video", "y_video", "roi_changed_bps", "score_margin_bps"],
+      "additionalProperties": false,
+      "properties": {
+        "t_ms": { "type": "integer", "minimum": 0 },
+        "x_video": { "type": "integer", "minimum": 0 },
+        "y_video": { "type": "integer", "minimum": 0 },
+        "roi_changed_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "score_margin_bps": { "type": "integer", "minimum": 2500, "maximum": 10000 }
+      }
+    },
+    "sam_snap": {
+      "type": "object",
+      "required": [
+        "model",
+        "wire_token",
+        "box_x1",
+        "box_y1",
+        "box_x2",
+        "box_y2",
+        "centroid_x_video",
+        "centroid_y_video",
+        "calibrated_x_css",
+        "calibrated_y_css",
+        "candidate_score_bps",
+        "score_margin_bps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "const": "sam-3.1" },
+        "wire_token": { "type": "string", "minLength": 1 },
+        "box_x1": { "type": "integer" },
+        "box_y1": { "type": "integer" },
+        "box_x2": { "type": "integer" },
+        "box_y2": { "type": "integer" },
+        "centroid_x_video": { "type": "integer" },
+        "centroid_y_video": { "type": "integer" },
+        "calibrated_x_css": { "type": "integer" },
+        "calibrated_y_css": { "type": "integer" },
+        "candidate_score_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "score_margin_bps": { "type": "integer", "minimum": 2500, "maximum": 10000 }
+      }
+    },
+    "narration": {
+      "type": "object",
+      "required": [
+        "model",
+        "transcript",
+        "audio_processed_ms",
+        "aligned_video_time_ms",
+        "audio_encoding",
+        "mode",
+        "partial_mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "const": "muse-voice-transcribe-1.0" },
+        "transcript": { "type": "string" },
+        "audio_processed_ms": { "type": "integer", "minimum": 0 },
+        "aligned_video_time_ms": { "type": "integer", "minimum": 0 },
+        "audio_encoding": { "type": "string", "const": "PCM_24KHZ" },
+        "mode": { "type": "string", "const": "ENDPOINTING" },
+        "partial_mode": { "type": "string", "const": "DELTA" }
+      }
+    },
+    "keyframe_paths": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string" }
+    }
+  }
+}

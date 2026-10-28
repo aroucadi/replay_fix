@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/repair_response.schema.json",
+  "title": "StructuredRepairPatch",
+  "description": "Strict JSON Schema contract for Meta Muse constrained decoding (text.format.type = json_schema, strict = true) in Spec 060.",
+  "type": "object",
+  "required": [
+    "explanation",
+    "target_file",
+    "search_block",
+    "replace_block",
+    "touched_symbols"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "explanation": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Root-cause diagnosis and explanation of the minimal fix."
+    },
+    "target_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path to the source file to modify (must not be a test or config file)."
+    },
+    "search_block": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact contiguous block of lines in target_file to be replaced (must match uniquely)."
+    },
+    "replace_block": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Replacement block of lines."
+    },
+    "touched_symbols": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Function, method, or variable identifiers modified by this patch."
+    }
+  }
+}

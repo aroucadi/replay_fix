@@ -5,13 +5,14 @@ use crate::error::Result;
 use crate::fsm::Phase;
 use crate::locator::GroundingTelemetry;
 use crate::perception::VideoTelemetry;
+use crate::repair::{RepairTelemetry, TokenAccounting};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.5";
+pub const SCHEMA_VERSION: &str = "0.6";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
@@ -62,6 +63,10 @@ pub struct AuditReceipt {
     pub grounding_telemetry: Option<GroundingTelemetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_telemetry: Option<VideoTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_telemetry: Option<RepairTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_accounting: Option<TokenAccounting>,
     pub created_at: String,
 }
 
@@ -77,6 +82,7 @@ pub enum TriageStatus {
     BaseRepoDirtyMutationDetected,
     AmbiguousGrounding,
     BridgeExecutionFailed,
+    QuarantineRepairFailed,
 }
 
 impl TriageStatus {
@@ -93,6 +99,7 @@ impl TriageStatus {
             Self::BaseRepoDirtyMutationDetected => "BASE_REPO_DIRTY_MUTATION_DETECTED",
             Self::AmbiguousGrounding => "AMBIGUOUS_GROUNDING",
             Self::BridgeExecutionFailed => "BRIDGE_EXECUTION_FAILED",
+            Self::QuarantineRepairFailed => "QUARANTINE_REPAIR_FAILED",
         }
     }
 
@@ -103,6 +110,7 @@ impl TriageStatus {
             Self::Gate1NotRed | Self::ContractMismatch => 10,
             Self::SecurityViolation | Self::BaseRepoDirtyMutationDetected => 11,
             Self::BridgeExecutionFailed => 20,
+            Self::QuarantineRepairFailed => 21,
             Self::AmbiguousGrounding => 22,
             Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
         }
@@ -124,6 +132,10 @@ pub struct TriageReport {
     pub task_id: String,
     pub substrate: String,
     pub phase_trace: Vec<Phase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_telemetry: Option<RepairTelemetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_accounting: Option<TokenAccounting>,
     pub created_at: String,
 }
 
@@ -152,8 +164,21 @@ impl TriageReport {
             task_id: task_id.to_string(),
             substrate: substrate.to_string(),
             phase_trace: phase_trace.to_vec(),
+            repair_telemetry: None,
+            token_accounting: None,
             created_at: timestamp_now(),
         }
+    }
+
+    #[must_use]
+    pub fn with_repair_telemetry(
+        mut self,
+        repair_telemetry: Option<RepairTelemetry>,
+        token_accounting: Option<TokenAccounting>,
+    ) -> Self {
+        self.repair_telemetry = repair_telemetry;
+        self.token_accounting = token_accounting;
+        self
     }
 }
 
@@ -213,6 +238,7 @@ mod tests {
         assert_eq!(TriageStatus::SecurityViolation.exit_code(), 11);
         assert_eq!(TriageStatus::BaseRepoDirtyMutationDetected.exit_code(), 11);
         assert_eq!(TriageStatus::BridgeExecutionFailed.exit_code(), 20);
+        assert_eq!(TriageStatus::QuarantineRepairFailed.exit_code(), 21);
         assert_eq!(TriageStatus::AmbiguousGrounding.exit_code(), 22);
         assert_eq!(TriageStatus::RepairNoopRejected.exit_code(), 30);
         assert_eq!(TriageStatus::PatchApplyFailed.exit_code(), 30);
@@ -279,6 +305,10 @@ mod tests {
             TriageStatus::BridgeExecutionFailed.as_str(),
             "BRIDGE_EXECUTION_FAILED"
         );
+        assert_eq!(
+            TriageStatus::QuarantineRepairFailed.as_str(),
+            "QUARANTINE_REPAIR_FAILED"
+        );
     }
 
     #[test]
@@ -293,6 +323,7 @@ mod tests {
             TriageStatus::BaseRepoDirtyMutationDetected,
             TriageStatus::AmbiguousGrounding,
             TriageStatus::BridgeExecutionFailed,
+            TriageStatus::QuarantineRepairFailed,
         ] {
             let serialized = serde_json::to_string(&status).unwrap();
             assert_eq!(serialized, format!("\"{}\"", status.as_str()));
