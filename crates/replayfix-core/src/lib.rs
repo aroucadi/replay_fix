@@ -11,6 +11,7 @@
 )]
 
 pub mod browser;
+pub mod checkpoint;
 pub mod digest;
 pub mod doctor;
 pub mod engine;
@@ -24,11 +25,16 @@ pub mod perception;
 pub mod platform;
 pub mod process;
 pub mod receipt;
+pub mod regression;
 pub mod repair;
 pub mod video;
 pub mod worktree;
 
 pub use browser::{BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer};
+pub use checkpoint::{
+    CheckpointStage, SessionStateCheckpoint, StageArtifacts, CHECKPOINT_VERSION,
+    DEFAULT_CHECKPOINT_TTL_SECONDS,
+};
 pub use digest::{canonical_json, sha256_hex};
 pub use doctor::{DependencyCheck, DependencyStatus, Doctor, DoctorReport};
 pub use engine::{
@@ -37,7 +43,10 @@ pub use engine::{
 };
 pub use error::{CoreError, Result};
 pub use fixtures::Fixture;
-pub use fsm::{Phase, PhaseMachine};
+pub use fsm::{
+    CausalConfidence, DifferentialDiagnosisReport, DifferentialMatrix, DifferentialState, Phase,
+    PhaseMachine, ReproExecutionResult,
+};
 pub use locator::{BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry, LocatorResolver};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use patch::{PatchOutcome, UnifiedPatcher};
@@ -49,6 +58,7 @@ pub use platform::{EphemeralPort, OsFamily, Platform};
 pub use receipt::{
     AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
 };
+pub use regression::{RegressionEvaluator, RegressionParityReport, TestStatus, TestSuiteSnapshot};
 pub use repair::{
     AttemptLineage, BlockPatcher, BoundedRepairClient, MuseModelConfig, MuseModelSlug,
     PromptBuilder, ReasoningEffort, RepairClientMode, RepairModelResponse, RepairRequest,

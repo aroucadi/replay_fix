@@ -50,7 +50,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.6");
+    assert_eq!(receipt["schema_version"], "0.7");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -86,7 +86,7 @@ fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.6");
+    assert_eq!(receipt["schema_version"], "0.7");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
@@ -119,7 +119,7 @@ fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.6");
+    assert_eq!(triage["schema_version"], "0.7");
     assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
     assert_eq!(triage["exit_code"], 22);
     assert_eq!(triage["substrate"], "playwright-cdp");
@@ -133,7 +133,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.6");
+    assert_eq!(triage["schema_version"], "0.7");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -380,7 +380,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.6");
+    assert_eq!(receipt["schema_version"], "0.7");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
@@ -428,7 +428,7 @@ fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
     );
 
     let receipt = json(&dir.join("out-retry/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.6");
+    assert_eq!(receipt["schema_version"], "0.7");
     assert_eq!(
         receipt["repair_telemetry"]["requested_model"],
         "muse-spark-1.3"
@@ -476,7 +476,7 @@ fn mock_failing_repair_exits_21_with_quarantine_triage_report() {
     );
 
     let triage = json(&dir.join("out-quarantine/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.6");
+    assert_eq!(triage["schema_version"], "0.7");
     assert_eq!(triage["status"], "QUARANTINE_REPAIR_FAILED");
     assert_eq!(triage["exit_code"], 21);
     assert_eq!(triage["repair_telemetry"]["attempts_used"], 3);
@@ -534,4 +534,99 @@ fn disallowed_model_slug_and_test_file_patch_are_rejected() {
         .as_str()
         .unwrap()
         .contains("TEST_MUTATION_PROHIBITED"));
+}
+
+#[test]
+fn freeze_spec_subcommand_locks_files_and_generates_spec() {
+    let dir = scratch("freeze-spec");
+    let out_file = dir.join("specs/RF-01.spec.json");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .args([
+            "freeze-spec",
+            "--bug",
+            "RF-01",
+            "--repo",
+            ".",
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to launch replayfix freeze-spec");
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert!(out_file.exists());
+    let spec = json(&out_file);
+    assert_eq!(spec["schema_version"], "0.7");
+    assert_eq!(spec["bug_id"], "RF-01");
+    assert_eq!(spec["aggregate_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(spec["contract_digest"].as_str().unwrap().len(), 64);
+}
+
+#[test]
+fn mock_pkg_test_mutation_is_rejected_as_security_violation_exit_11() {
+    let dir = scratch("pkg-test-mutation");
+    fs::write(
+        dir.join("package.json"),
+        "{\"scripts\": {\"test\": \"jest\"}}\n",
+    )
+    .unwrap();
+    let out = run(&dir, &["--mock-heal", "--mock-pkg-test-mutation"]);
+
+    assert_eq!(
+        code(&out),
+        11,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let triage = json(&dir.join(".replayfix/triage_report.json"));
+    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["status"], "SECURITY_VIOLATION");
+    assert_eq!(triage["exit_code"], 11);
+}
+
+#[test]
+fn repro_run_with_clean_ref_and_verify_matrix() {
+    let dir = scratch("matrix-clean-ref");
+    let out = run(
+        &dir,
+        &["--mock-heal", "--clean-ref", "main", "--verify-matrix"],
+    );
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
+    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(
+        receipt["differential_diagnosis"]["state"],
+        "CAUSAL_DEFECT_CONFIRMED"
+    );
+    assert_eq!(
+        receipt["differential_diagnosis"]["causal_confidence"],
+        "HIGH"
+    );
+    assert_eq!(receipt["regression_parity"]["parity_passed"], true);
+
+    // Verify disaggregated artifacts were written
+    assert!(dir.join(".replayfix/artifacts/candidate.patch").exists());
+    assert!(dir
+        .join(".replayfix/artifacts/differential_diagnosis.json")
+        .exists());
+    assert!(dir
+        .join(".replayfix/artifacts/regression_parity.json")
+        .exists());
 }

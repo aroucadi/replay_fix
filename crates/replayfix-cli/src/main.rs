@@ -37,6 +37,8 @@ pub mod exit_codes {
     pub const QUARANTINE_REPAIR_FAILED: i32 = 21;
     pub const AMBIGUOUS_GROUNDING: i32 = 22;
     pub const REPAIR_REJECTED: i32 = 30;
+    pub const REGRESSION_DETECTED: i32 = 31;
+    pub const QUARANTINE_INVERTED_BASELINE: i32 = 32;
 }
 
 /// Largest patch file accepted by `--mock-patch`.
@@ -151,6 +153,14 @@ pub struct ReproArgs {
     #[arg(long)]
     pub mock_syntax_retry: bool,
 
+    /// Simulate package.json test script mutation to test surgical DiffGuard rejection (exit 11)
+    #[arg(long)]
+    pub mock_pkg_test_mutation: bool,
+
+    /// Verify and display the 6-state differential diagnosis matrix
+    #[arg(long)]
+    pub verify_matrix: bool,
+
     /// Candidate patch for --mock-heal or --live-browser: 'builtin', 'noop' (empty patch), or a path to a unified diff
     #[arg(long, default_value = "builtin")]
     pub mock_patch: String,
@@ -175,6 +185,18 @@ enum Commands {
     /// Reproduce, verify, and repair visual defects
     #[command(visible_alias = "run")]
     Repro(Box<ReproArgs>),
+    /// Freeze reproduction specification and anti-cheat test baselines
+    FreezeSpec {
+        /// Bug identifier (e.g. RF-01)
+        #[arg(long)]
+        bug: String,
+        /// Path to repository root
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Output destination path (default: .replayfix/specs/<BUG>.spec.json)
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 /// Print an error and exit. Security violations use the dedicated exit code 11.
@@ -289,6 +311,8 @@ struct ReproExtras {
     model: Option<String>,
     mock_failing_repair: bool,
     mock_syntax_retry: bool,
+    mock_pkg_test_mutation: bool,
+    verify_matrix: bool,
     mock_patch: String,
     output_dir: String,
     dry_run: bool,
@@ -318,6 +342,8 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         reasoning_effort,
         mock_failing_repair,
         mock_syntax_retry,
+        mock_pkg_test_mutation,
+        verify_matrix,
         mock_patch,
         output_dir,
         dry_run,
@@ -350,7 +376,8 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
-    let autonomous_requested = model.is_some() || mock_failing_repair || mock_syntax_retry;
+    let autonomous_requested =
+        model.is_some() || mock_failing_repair || mock_syntax_retry || mock_pkg_test_mutation;
     let auto_live_from_video = inferred_from_video.is_some()
         && !mock_heal
         && video.as_deref().is_some_and(|v| Path::new(v).exists());
@@ -372,6 +399,8 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         model,
         mock_failing_repair,
         mock_syntax_retry,
+        mock_pkg_test_mutation,
+        verify_matrix,
         mock_patch,
         output_dir,
         dry_run,
@@ -516,6 +545,8 @@ fn resolve_repair_mode(extras: &ReproExtras) -> Option<RepairClientMode> {
         Some(RepairClientMode::OfflineFailAllAttempts)
     } else if extras.mock_syntax_retry {
         Some(RepairClientMode::OfflineSyntaxRetryThenSuccess)
+    } else if extras.mock_pkg_test_mutation {
+        Some(RepairClientMode::OfflineAttemptPackageJsonTestScriptMutation)
     } else if extras.model.is_some() {
         Some(RepairClientMode::OfflineSuccessFirstAttempt)
     } else {
@@ -605,6 +636,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             keyframe_dir: Some(out_dir.join("keyframes")),
             model_slug: extras.model.clone(),
             repair_mode,
+            clean_ref: m.clean_ref.clone(),
+            verify_matrix: extras.verify_matrix,
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -633,6 +666,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     match outcome {
         HealOutcome::Verified(receipt) => {
             let path = write_artifact(&out_dir, |dir| write_audit_receipt(dir, &receipt));
+            let _ = receipt.write_disaggregated_artifacts(&out_dir, Some(&diff), None);
             print_step(
                 theme,
                 "Isolation",
@@ -804,6 +838,14 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     tokens.completion_tokens + tokens.reasoning_tokens
                 );
             }
+            if let Some(diag) = &receipt.differential_diagnosis {
+                println!(
+                    "    {} Matrix    : {} (Confidence: {:?})",
+                    theme.muted(Symbols::STEP),
+                    theme.bold(diag.state.as_str()),
+                    diag.causal_confidence
+                );
+            }
             println!(
                 "    {} Receipt   : {}",
                 theme.muted(Symbols::STEP),
@@ -847,6 +889,82 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     }
 }
 
+fn run_freeze_spec(
+    bug: &str,
+    repo: &str,
+    output: Option<PathBuf>,
+    theme: &Theme,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo_dir = TaskManifest::assert_safe_path(repo, "repo")
+        .unwrap_or_else(|e| fail(e, "Invalid --repo path", theme));
+    if !repo_dir.exists() || !repo_dir.is_dir() {
+        usage_error(
+            &format!("Target repository directory '{repo}' does not exist or is not a directory"),
+            theme,
+        );
+    }
+
+    let fixture = Fixture::for_task(bug).unwrap_or_else(|| {
+        usage_error(
+            &format!(
+                "Unknown task '{bug}'. Supported tasks: {}",
+                Fixture::supported_tasks().join(", ")
+            ),
+            theme,
+        )
+    });
+
+    let guard = replayfix_core::TestFreezeGuard::capture(&repo_dir)
+        .unwrap_or_else(|e| fail(e, "Failed to capture test freeze guard", theme));
+
+    let contract_digest = fixture
+        .contract
+        .digest()
+        .unwrap_or_else(|e| fail(e, "Failed to compute contract digest", theme));
+
+    let out_path = output.unwrap_or_else(|| {
+        PathBuf::from(".replayfix")
+            .join("specs")
+            .join(format!("{bug}.spec.json"))
+    });
+
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let spec_obj = serde_json::json!({
+        "schema_version": "0.7",
+        "bug_id": bug,
+        "contract_digest": contract_digest,
+        "aggregate_sha256": guard.aggregate_sha256,
+        "frozen_files_count": guard.frozen_files.len(),
+        "frozen_files": guard.frozen_files,
+        "frozen_at": replayfix_core::receipt::timestamp_now(),
+    });
+
+    std::fs::write(&out_path, serde_json::to_string_pretty(&spec_obj)?)?;
+
+    print_banner(theme, "Freeze Spec Generated");
+    print_field(theme, "Bug ID", bug, None);
+    print_field(theme, "Contract Digest", &contract_digest, None);
+    print_field(theme, "Freeze Aggregate", &guard.aggregate_sha256, None);
+    print_field(
+        theme,
+        "Protected Files",
+        &guard.frozen_files.len().to_string(),
+        Some("locked against mutation"),
+    );
+    print_field(theme, "Output Path", &out_path.display().to_string(), None);
+    println!();
+    println!(
+        "  {} {}",
+        theme.success(Symbols::CHECK),
+        theme.success("Reproduction spec and anti-cheat baseline successfully frozen.")
+    );
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -862,6 +980,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
+        Some(Commands::FreezeSpec { bug, repo, output }) => {
+            run_freeze_spec(&bug, &repo, output, &stdout_theme)?;
+        }
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args, &stderr_theme);
             let repo_dir = TaskManifest::assert_safe_path(&manifest.repo_path, "repo_path")

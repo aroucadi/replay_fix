@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/differential_diagnosis.json",
+  "title": "ReplayFixDifferentialDiagnosis",
+  "description": "Six-state differential diagnosis outcome linking baseline, clean, and patched states with causal attribution",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "bug_id",
+    "state",
+    "clean_ref",
+    "clean_ref_commit",
+    "baseline_result",
+    "clean_result",
+    "patched_run1_result",
+    "patched_run2_result",
+    "regression_parity_passed",
+    "causal_confidence",
+    "timestamp_epoch_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.7"
+    },
+    "bug_id": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "CAUSAL_DEFECT_CONFIRMED",
+        "INVALID_TEST_OVERFIT",
+        "QUARANTINE_INVERTED_BASELINE",
+        "UNATTRIBUTED_SYMPTOM",
+        "CLEAN_PASS_UNREPRODUCED",
+        "FLAKY_NON_DETERMINISTIC"
+      ]
+    },
+    "clean_ref": {
+      "type": "string"
+    },
+    "clean_ref_commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "baseline_result": {
+      "type": "object",
+      "required": ["passed", "exit_code", "error_message"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "exit_code": { "type": "integer" },
+        "error_message": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "clean_result": {
+      "type": "object",
+      "required": ["passed", "exit_code", "error_message"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "exit_code": { "type": "integer" },
+        "error_message": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "patched_run1_result": {
+      "type": "object",
+      "required": ["passed", "exit_code", "error_message"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "exit_code": { "type": "integer" },
+        "error_message": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "patched_run2_result": {
+      "type": "object",
+      "required": ["passed", "exit_code", "error_message"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "exit_code": { "type": "integer" },
+        "error_message": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "regression_parity_passed": {
+      "type": "boolean"
+    },
+    "causal_confidence": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW", "NONE"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "timestamp_epoch_ms": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": false
+}

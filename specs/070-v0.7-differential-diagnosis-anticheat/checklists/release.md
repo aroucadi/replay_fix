@@ -1,0 +1,32 @@
+# Release Checklist: ReplayFix v0.7.0 Release Qualification
+
+- [ ] **REL-070-01: Quality Gates**:
+  - `cargo fmt --all -- --check` exits with 0.
+  - `cargo check --workspace --all-targets --all-features` exits with 0.
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings` exits with 0.
+  - `cargo test --workspace --all-targets` passes all tests (unit and integration) with 0 failures and 0 ignores.
+  - `powershell -ExecutionPolicy Bypass -File scripts/check-panics.ps1` exits with 0 and reports 0 non-test violations.
+- [ ] **REL-070-02: 6-State FSM Verification**:
+  - Integration/unit tests exist proving correct transition to all 6 states (`CAUSAL_DEFECT_CONFIRMED`, `INVALID_TEST_OVERFIT`, `QUARANTINE_INVERTED_BASELINE`, `UNATTRIBUTED_SYMPTOM`, `CLEAN_PASS_UNREPRODUCED`, `FLAKY_NON_DETERMINISTIC`).
+  - Correct exit codes emitted for each state (`0`, `10`, `32`, `21`, `10`, `21`).
+- [ ] **REL-070-03: Regression Parity Verification**:
+  - Unit tests verify regression detection when patched suite drops a test, adds a new failure, or increases skip count.
+  - Parity passes when patched suite has identical or subset failures of baseline suite.
+- [ ] **REL-070-04: Anti-Cheat Verification**:
+  - Unit tests verify rejection of test file tampering (direct test file edits).
+  - Unit tests verify rejection of `package.json` `"scripts.test*"` modifications.
+  - Unit tests verify acceptance of valid `package.json` edits that do not touch test scripts.
+- [ ] **REL-070-05: Checkpoint & Resume Verification**:
+  - Resuming with valid checkpoint skips completed stages.
+  - Expired TTL or mismatched repo HEAD / manifest SHA-256 fails closed.
+- [ ] **REL-070-06: Schema & Artifacts Verification**:
+  - Audit receipts and triage reports validate against schema `"0.7"`.
+  - Disaggregated artifacts correctly created in `.replayfix/artifacts/`.
+- [ ] **REL-070-07: Documentation & Release Notes**:
+  - `docs/release-notes/v0.7.0.md` created.
+  - `CHANGELOG.md` updated with v0.7.0 changes.
+  - `docs/agent-state.md` updated.
+- [ ] **REL-070-08: Git Release Discipline**:
+  - Staged and committed on `release/v0.7.0-fsm-anticheat`.
+  - Fast-forward merged into `main`.
+  - Tagged `v0.7.0` and pushed to `origin`.

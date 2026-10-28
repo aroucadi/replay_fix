@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.6.2` (`v0.6.2-patch-packaging-resiliency` — Git Packaging, Windows Test Resiliency, Sandbox Seeding Junction Hardening, and Lexical Scope Hygiene)
-- **Status**: Qualified & ready for release tag `v0.6.2`; baseline locked for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`)
+- **Active Milestone**: `v0.7.0` (`070-v0.7-differential-diagnosis-anticheat` — Differential Diagnosis, Surgical Anti-Cheat, Regression Parity & Resumable Checkpoints)
+- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.7.0`.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -43,6 +43,14 @@
   - Windows test runner: replaced fragile `.expect()` in `tests/cli.rs::code()` with `unwrap_or(-1)`.
   - Sandbox seeding: `collect_entries` and `copy_tree` in `worktree.rs` inspect `is_symlink_or_reparse_point(&symlink_meta)` to skip NTFS directory junctions (`mklink /J`).
   - Block patcher hygiene: `strip_comments_and_strings` in `repair.rs` blanks comments (`//`, `/* */`) and string literals before scope extraction.
+- [x] **v0.7.0 Differential Diagnosis, Cryptographic Anti-Cheat, Regression Parity & Resumable Checkpoints**:
+  - 6-state differential diagnosis matrix (`CAUSAL_DEFECT_CONFIRMED`, `INVALID_TEST_OVERFIT`, `QUARANTINE_INVERTED_BASELINE`, `UNATTRIBUTED_SYMPTOM`, `CLEAN_PASS_UNREPRODUCED`, `FLAKY_NON_DETERMINISTIC`).
+  - Surgical `package.json` test script locking (`"scripts.test*"` locked byte-by-byte while allowing dependency updates; violations throw exit `11`).
+  - Structured regression parity engine enforcing $F_{\text{patched}} \setminus F_{\text{baseline}} = \emptyset$, test suite preservation, and zero test skip inflation.
+  - Durable resumable checkpoints (`session_state.json`) with git HEAD, manifest hash, and TTL staleness rejection.
+  - Schema bumped to `"0.7"` with disaggregated stage artifacts (`candidate.patch`, `repro_spec.json`, `differential_diagnosis.json`, `regression_parity.json`).
+  - New subcommand `freeze-spec --bug <ID>` and CLI flags `--clean-ref <REF>`, `--verify-matrix`, `--mock-pkg-test-mutation`.
+  - 168 automated tests passing (139 core unit tests, 27 CLI integration tests, 2 CLI unit tests); zero panic violations; zero clippy warnings.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.

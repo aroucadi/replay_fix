@@ -2,9 +2,10 @@
 
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
-use crate::fsm::Phase;
+use crate::fsm::{DifferentialDiagnosisReport, Phase};
 use crate::locator::GroundingTelemetry;
 use crate::perception::VideoTelemetry;
+use crate::regression::RegressionParityReport;
 use crate::repair::{RepairTelemetry, TokenAccounting};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.6";
+pub const SCHEMA_VERSION: &str = "0.7";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
@@ -67,7 +68,41 @@ pub struct AuditReceipt {
     pub repair_telemetry: Option<RepairTelemetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_accounting: Option<TokenAccounting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub differential_diagnosis: Option<DifferentialDiagnosisReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_parity: Option<RegressionParityReport>,
     pub created_at: String,
+}
+
+impl AuditReceipt {
+    /// Write disaggregated stage artifacts into `<output_dir>/artifacts/`.
+    pub fn write_disaggregated_artifacts(
+        &self,
+        output_dir: &Path,
+        raw_patch_content: Option<&str>,
+        repro_spec_json: Option<&str>,
+    ) -> Result<PathBuf> {
+        let artifacts_dir = output_dir.join("artifacts");
+        fs::create_dir_all(&artifacts_dir)?;
+
+        if let Some(diff) = raw_patch_content {
+            fs::write(artifacts_dir.join("candidate.patch"), diff)?;
+        }
+        if let Some(spec) = repro_spec_json {
+            fs::write(artifacts_dir.join("repro_spec.json"), spec)?;
+        }
+        if let Some(ref diag) = self.differential_diagnosis {
+            let diag_json = serde_json::to_string_pretty(diag)?;
+            fs::write(artifacts_dir.join("differential_diagnosis.json"), diag_json)?;
+        }
+        if let Some(ref reg) = self.regression_parity {
+            let reg_json = serde_json::to_string_pretty(reg)?;
+            fs::write(artifacts_dir.join("regression_parity.json"), reg_json)?;
+        }
+
+        Ok(artifacts_dir)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -83,6 +118,11 @@ pub enum TriageStatus {
     AmbiguousGrounding,
     BridgeExecutionFailed,
     QuarantineRepairFailed,
+    QuarantineInvertedBaseline,
+    RegressionDetected,
+    FlakyNonDeterministic,
+    InvalidTestOverfit,
+    CleanPassUnreproduced,
 }
 
 impl TriageStatus {
@@ -100,6 +140,11 @@ impl TriageStatus {
             Self::AmbiguousGrounding => "AMBIGUOUS_GROUNDING",
             Self::BridgeExecutionFailed => "BRIDGE_EXECUTION_FAILED",
             Self::QuarantineRepairFailed => "QUARANTINE_REPAIR_FAILED",
+            Self::QuarantineInvertedBaseline => "QUARANTINE_INVERTED_BASELINE",
+            Self::RegressionDetected => "REGRESSION_DETECTED",
+            Self::FlakyNonDeterministic => "FLAKY_NON_DETERMINISTIC",
+            Self::InvalidTestOverfit => "INVALID_TEST_OVERFIT",
+            Self::CleanPassUnreproduced => "CLEAN_PASS_UNREPRODUCED",
         }
     }
 
@@ -107,12 +152,17 @@ impl TriageStatus {
     #[must_use]
     pub const fn exit_code(self) -> i32 {
         match self {
-            Self::Gate1NotRed | Self::ContractMismatch => 10,
+            Self::Gate1NotRed
+            | Self::ContractMismatch
+            | Self::InvalidTestOverfit
+            | Self::CleanPassUnreproduced => 10,
             Self::SecurityViolation | Self::BaseRepoDirtyMutationDetected => 11,
             Self::BridgeExecutionFailed => 20,
-            Self::QuarantineRepairFailed => 21,
+            Self::QuarantineRepairFailed | Self::FlakyNonDeterministic => 21,
             Self::AmbiguousGrounding => 22,
             Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
+            Self::RegressionDetected => 31,
+            Self::QuarantineInvertedBaseline => 32,
         }
     }
 }
@@ -136,6 +186,10 @@ pub struct TriageReport {
     pub repair_telemetry: Option<RepairTelemetry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_accounting: Option<TokenAccounting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub differential_diagnosis: Option<DifferentialDiagnosisReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regression_parity: Option<RegressionParityReport>,
     pub created_at: String,
 }
 
@@ -166,6 +220,8 @@ impl TriageReport {
             phase_trace: phase_trace.to_vec(),
             repair_telemetry: None,
             token_accounting: None,
+            differential_diagnosis: None,
+            regression_parity: None,
             created_at: timestamp_now(),
         }
     }
@@ -178,6 +234,21 @@ impl TriageReport {
     ) -> Self {
         self.repair_telemetry = repair_telemetry;
         self.token_accounting = token_accounting;
+        self
+    }
+
+    #[must_use]
+    pub fn with_differential_diagnosis(
+        mut self,
+        diag: Option<DifferentialDiagnosisReport>,
+    ) -> Self {
+        self.differential_diagnosis = diag;
+        self
+    }
+
+    #[must_use]
+    pub fn with_regression_parity(mut self, parity: Option<RegressionParityReport>) -> Self {
+        self.regression_parity = parity;
         self
     }
 }
@@ -235,19 +306,25 @@ mod tests {
     fn test_exit_codes_match_documented_mapping() {
         assert_eq!(TriageStatus::Gate1NotRed.exit_code(), 10);
         assert_eq!(TriageStatus::ContractMismatch.exit_code(), 10);
+        assert_eq!(TriageStatus::InvalidTestOverfit.exit_code(), 10);
+        assert_eq!(TriageStatus::CleanPassUnreproduced.exit_code(), 10);
         assert_eq!(TriageStatus::SecurityViolation.exit_code(), 11);
         assert_eq!(TriageStatus::BaseRepoDirtyMutationDetected.exit_code(), 11);
         assert_eq!(TriageStatus::BridgeExecutionFailed.exit_code(), 20);
         assert_eq!(TriageStatus::QuarantineRepairFailed.exit_code(), 21);
+        assert_eq!(TriageStatus::FlakyNonDeterministic.exit_code(), 21);
         assert_eq!(TriageStatus::AmbiguousGrounding.exit_code(), 22);
         assert_eq!(TriageStatus::RepairNoopRejected.exit_code(), 30);
         assert_eq!(TriageStatus::PatchApplyFailed.exit_code(), 30);
         assert_eq!(TriageStatus::Gate2NotGreen.exit_code(), 30);
+        assert_eq!(TriageStatus::RegressionDetected.exit_code(), 31);
+        assert_eq!(TriageStatus::QuarantineInvertedBaseline.exit_code(), 32);
     }
 
     #[test]
     fn test_triage_report_serializes_screaming_status_and_phases() {
         let json = serde_json::to_value(sample_triage()).unwrap();
+        assert_eq!(json["schema_version"], "0.7");
         assert_eq!(json["status"], "REPAIR_NOOP_REJECTED");
         assert_eq!(json["exit_code"], 30);
         assert_eq!(
@@ -309,6 +386,26 @@ mod tests {
             TriageStatus::QuarantineRepairFailed.as_str(),
             "QUARANTINE_REPAIR_FAILED"
         );
+        assert_eq!(
+            TriageStatus::QuarantineInvertedBaseline.as_str(),
+            "QUARANTINE_INVERTED_BASELINE"
+        );
+        assert_eq!(
+            TriageStatus::RegressionDetected.as_str(),
+            "REGRESSION_DETECTED"
+        );
+        assert_eq!(
+            TriageStatus::FlakyNonDeterministic.as_str(),
+            "FLAKY_NON_DETERMINISTIC"
+        );
+        assert_eq!(
+            TriageStatus::InvalidTestOverfit.as_str(),
+            "INVALID_TEST_OVERFIT"
+        );
+        assert_eq!(
+            TriageStatus::CleanPassUnreproduced.as_str(),
+            "CLEAN_PASS_UNREPRODUCED"
+        );
     }
 
     #[test]
@@ -324,6 +421,11 @@ mod tests {
             TriageStatus::AmbiguousGrounding,
             TriageStatus::BridgeExecutionFailed,
             TriageStatus::QuarantineRepairFailed,
+            TriageStatus::QuarantineInvertedBaseline,
+            TriageStatus::RegressionDetected,
+            TriageStatus::FlakyNonDeterministic,
+            TriageStatus::InvalidTestOverfit,
+            TriageStatus::CleanPassUnreproduced,
         ] {
             let serialized = serde_json::to_string(&status).unwrap();
             assert_eq!(serialized, format!("\"{}\"", status.as_str()));

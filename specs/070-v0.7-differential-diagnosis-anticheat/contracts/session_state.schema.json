@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/session_state.json",
+  "title": "ReplayFixSessionState",
+  "description": "Durable checkpoint state for resumable execution with stale-state rejection and artifact disaggregation",
+  "type": "object",
+  "required": [
+    "checkpoint_version",
+    "bug_id",
+    "base_repo_head",
+    "manifest_sha256",
+    "contract_digest",
+    "current_stage",
+    "created_at_epoch",
+    "ttl_seconds"
+  ],
+  "properties": {
+    "checkpoint_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "bug_id": {
+      "type": "string"
+    },
+    "base_repo_head": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "contract_digest": {
+      "type": "string"
+    },
+    "current_stage": {
+      "type": "string",
+      "enum": [
+        "INITIALIZED",
+        "REPRODUCED_GATE1_RED",
+        "PATCH_PROPOSED",
+        "PREFLIGHT_PASSED",
+        "VERIFIED_GATE2_GREEN",
+        "PARITY_LOCKED",
+        "RECEIPT_ISSUED"
+      ]
+    },
+    "created_at_epoch": {
+      "type": "integer"
+    },
+    "ttl_seconds": {
+      "type": "integer",
+      "default": 3600
+    },
+    "stage_artifacts": {
+      "type": "object",
+      "properties": {
+        "repro_spec_path": { "type": "string" },
+        "repro_spec_sha256": { "type": "string" },
+        "candidate_diff_path": { "type": "string" },
+        "candidate_diff_sha256": { "type": "string" },
+        "preflight_result_path": { "type": "string" },
+        "gate2_evidence_path": { "type": "string" },
+        "audit_receipt_path": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

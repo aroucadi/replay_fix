@@ -1,6 +1,12 @@
 //! Guarded phase machine for the dual-gate repair loop.
 
+pub mod matrix;
+
 use crate::error::{CoreError, Result};
+pub use matrix::{
+    CausalConfidence, DifferentialDiagnosisReport, DifferentialMatrix, DifferentialState,
+    ReproExecutionResult,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

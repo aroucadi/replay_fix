@@ -1,0 +1,32 @@
+# Requirements Checklist: Spec 070 Differential Diagnosis & Anti-Cheat
+
+- [ ] **FR-070-01: Baseline Isolation & Causal Attribution**: Verify reproduction on unpatched baseline (`Gate 1 RED`) before proposing repair.
+- [ ] **FR-070-02: Clean Reference Baseline (`--clean-ref`)**: Verify reproduction test on clean baseline (`clean_ref`); must NOT fail; otherwise triage as `QUARANTINE_INVERTED_BASELINE` (exit 32).
+- [ ] **FR-070-03: 6-State FSM Differential Matrix**: Correctly classify run outcomes into exactly one of:
+  - `CAUSAL_DEFECT_CONFIRMED` (exit 0)
+  - `INVALID_TEST_OVERFIT` (exit 10)
+  - `QUARANTINE_INVERTED_BASELINE` (exit 32)
+  - `UNATTRIBUTED_SYMPTOM` (exit 21)
+  - `CLEAN_PASS_UNREPRODUCED` (exit 10)
+  - `FLAKY_NON_DETERMINISTIC` (exit 21)
+- [ ] **FR-070-04: Cryptographic Anti-Cheat Test & Config Freeze**:
+  - Enforce SHA-256 pre/post freeze on all test files and configs (`tests/**`, `__tests__/**`, `*.spec.*`, `*.test.*`, `playwright.config.*`, `tsconfig*.json`).
+  - Enforce byte-level surgical immutability on `package.json` `"scripts.test*"` keys while permitting non-test script modifications.
+  - Reject tampering with `CoreError::SecurityViolation("TEST_MUTATION_PROHIBITED")` or `"CONFIG_MUTATION_PROHIBITED"` (exit 11).
+- [ ] **FR-070-05: Strict Regression Parity ($F_{\text{patched}} \setminus F_{\text{baseline}} = \emptyset$)**:
+  - Parse Playwright/test runner JSON output.
+  - Zero new test failures allowed: $F_{\text{patched}} \setminus F_{\text{baseline}} = \emptyset$.
+  - Zero deleted tests allowed: $T_{\text{baseline}} \setminus T_{\text{patched}} = \emptyset$.
+  - Zero silent skips: $\text{Skipped}_{\text{patched}} \le \text{Skipped}_{\text{baseline}}$.
+  - Regression failure exits with exit code 31 (`REGRESSION_DETECTED`).
+- [ ] **FR-070-06: 2-Run Gate 2 Stability Pass**: Gate 2 verification requires two consecutive identical passing runs (`gate2_runs_completed: 2`) within the 180s wall-clock ceiling.
+- [ ] **FR-070-07: Durable Checkpoints & TTL Expiration**:
+  - `session_state.json` captures stage, commit HEAD, manifest SHA-256, and stage artifact paths.
+  - Reject checkpoints with expired TTL (`ttl_seconds`, default 3600) or mismatched repo HEAD / manifest SHA-256.
+- [ ] **FR-070-08: Artifact Disaggregation & Receipt Schema 0.7**:
+  - Write stage artifacts to `.replayfix/artifacts/` (`repro_spec.json`, `candidate.patch`, `regression_report.json`).
+  - Bump `AuditReceipt` and `TriageReport` schema to `"0.7"` incorporating `differential_diagnosis` and `regression_parity`.
+- [ ] **FR-070-09: CLI Subcommands & Flags**:
+  - Support `replayfix run --clean-ref <REF>`.
+  - Support `replayfix freeze-spec --bug <ID>`.
+  - Support `replayfix --verify-matrix`.

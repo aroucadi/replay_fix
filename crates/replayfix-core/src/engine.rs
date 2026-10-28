@@ -150,6 +150,8 @@ pub struct LiveBrowserOptions {
     pub keyframe_dir: Option<PathBuf>,
     pub model_slug: Option<String>,
     pub repair_mode: Option<RepairClientMode>,
+    pub clean_ref: Option<String>,
+    pub verify_matrix: bool,
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -674,6 +676,37 @@ impl MockHealer {
         fsm.advance(Phase::Gate2Green)?;
         let gate2_at = timestamp_now();
 
+        let clean_ref_name = options
+            .clean_ref
+            .clone()
+            .unwrap_or_else(|| "main".to_string());
+        let clean_ref_commit = "0000000000000000000000000000000000000000".to_string();
+        let diag = crate::fsm::DifferentialMatrix::evaluate(
+            task_id,
+            &clean_ref_name,
+            &clean_ref_commit,
+            crate::fsm::ReproExecutionResult::fail(1, "Gate 1 Red baseline defect reproduced"),
+            crate::fsm::ReproExecutionResult::pass(0),
+            crate::fsm::ReproExecutionResult::pass(0),
+            crate::fsm::ReproExecutionResult::pass(0),
+            true,
+            chrono::Utc::now().timestamp_millis() as u64,
+        );
+        let parity = crate::regression::RegressionParityReport {
+            schema_version: "0.7".to_string(),
+            baseline_total_tests: 1,
+            patched_total_tests: 1,
+            baseline_failures: Vec::new(),
+            patched_failures: Vec::new(),
+            new_failures: Vec::new(),
+            missing_tests: Vec::new(),
+            baseline_skipped_count: 0,
+            patched_skipped_count: 0,
+            skipped_increase: 0,
+            parity_passed: true,
+            duration_ms: 0,
+        };
+
         Ok(HealOutcome::Verified(Box::new(AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
@@ -710,6 +743,8 @@ impl MockHealer {
             video_telemetry,
             repair_telemetry,
             token_accounting,
+            differential_diagnosis: Some(diag),
+            regression_parity: Some(parity),
             created_at: timestamp_now(),
         })))
     }
@@ -1394,6 +1429,34 @@ impl MockHealer {
         fsm.advance(Phase::Gate2Green)?;
         let gate2_at = timestamp_now();
 
+        let clean_ref_name = "main".to_string();
+        let clean_ref_commit = "0000000000000000000000000000000000000000".to_string();
+        let diag = crate::fsm::DifferentialMatrix::evaluate(
+            task_id,
+            &clean_ref_name,
+            &clean_ref_commit,
+            crate::fsm::ReproExecutionResult::fail(1, "Gate 1 Red baseline defect reproduced"),
+            crate::fsm::ReproExecutionResult::pass(0),
+            crate::fsm::ReproExecutionResult::pass(0),
+            crate::fsm::ReproExecutionResult::pass(0),
+            true,
+            chrono::Utc::now().timestamp_millis() as u64,
+        );
+        let parity = crate::regression::RegressionParityReport {
+            schema_version: "0.7".to_string(),
+            baseline_total_tests: 1,
+            patched_total_tests: 1,
+            baseline_failures: Vec::new(),
+            patched_failures: Vec::new(),
+            new_failures: Vec::new(),
+            missing_tests: Vec::new(),
+            baseline_skipped_count: 0,
+            patched_skipped_count: 0,
+            skipped_increase: 0,
+            parity_passed: true,
+            duration_ms: 0,
+        };
+
         Ok(HealOutcome::Verified(Box::new(AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
@@ -1430,6 +1493,8 @@ impl MockHealer {
             video_telemetry: None,
             repair_telemetry,
             token_accounting,
+            differential_diagnosis: Some(diag),
+            regression_parity: Some(parity),
             created_at: timestamp_now(),
         })))
     }
@@ -1482,7 +1547,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.6");
+        assert_eq!(receipt.schema_version, "0.7");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -1525,7 +1590,7 @@ mod tests {
         .unwrap() else {
             panic!("expected autonomous repair verification");
         };
-        assert_eq!(receipt.schema_version, "0.6");
+        assert_eq!(receipt.schema_version, "0.7");
         let rtel = receipt.repair_telemetry.expect("expected repair_telemetry");
         assert_eq!(rtel.requested_model, "muse-spark-1.3");
         assert_eq!(rtel.serving_model, "muse-spark-1.3");
@@ -1626,7 +1691,7 @@ mod tests {
         else {
             panic!("expected live browser verification");
         };
-        assert_eq!(receipt.schema_version, "0.6");
+        assert_eq!(receipt.schema_version, "0.7");
         assert_eq!(receipt.substrate, "playwright-cdp");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);

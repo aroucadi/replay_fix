@@ -17,6 +17,30 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.7.0] - 2026-10-28
+
+Spec-driven release for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`). Full notes: [docs/release-notes/v0.7.0.md](docs/release-notes/v0.7.0.md).
+
+### Added
+- **Formal 6-State Differential Diagnosis Matrix (`replayfix_core::fsm::matrix`)**:
+  - Implemented `DifferentialMatrix` evaluating baseline, clean reference, and 2-run patch stability.
+  - Distinguishes `CAUSAL_DEFECT_CONFIRMED` (exit 0), `INVALID_TEST_OVERFIT` (exit 10), `QUARANTINE_INVERTED_BASELINE` (exit 32), `UNATTRIBUTED_SYMPTOM` (exit 21), `CLEAN_PASS_UNREPRODUCED` (exit 10), and `FLAKY_NON_DETERMINISTIC` (exit 21).
+- **Cryptographic Anti-Cheat & Surgical `package.json` DiffGuard (`replayfix_core::repair`)**:
+  - SHA-256 pre/post freeze on all test files and runner configs.
+  - Byte-level surgical immutability on `package.json` `"scripts.test*"` keys with `CoreError::SecurityViolation("TEST_MUTATION_PROHIBITED")` (exit 11) while allowing safe non-test dependency/script edits.
+- **Structured Regression Parity Engine (`replayfix_core::regression`)**:
+  - `RegressionEvaluator` enforcing $F_{\text{patched}} \setminus F_{\text{baseline}} = \emptyset$, $T_{\text{baseline}} \setminus T_{\text{patched}} = \emptyset$, and non-increasing test skip counts with `REGRESSION_DETECTED` (exit 31).
+- **Resumable Session Checkpointing (`replayfix_core::checkpoint`)**:
+  - Checkpoint state model conforming to `session_state.schema.json` with git HEAD, manifest hash, and TTL staleness rejection.
+- **Receipt Schema 0.7 & Disaggregated Artifacts (`replayfix_core::receipt`)**:
+  - Bumped schema version to `"0.7"` incorporating `differential_diagnosis` and `regression_parity`.
+  - Automatically writes `candidate.patch`, `repro_spec.json`, `differential_diagnosis.json`, and `regression_parity.json` to `<output_dir>/artifacts/`.
+- **CLI Subcommands & Verification Flags (`replayfix-cli`)**:
+  - Added `replayfix freeze-spec --bug <ID>` subcommand.
+  - Added `--clean-ref <REF>`, `--verify-matrix`, and `--mock-pkg-test-mutation` flags.
+
+---
+
 ## [0.6.2] - 2026-10-28
 
 Surgical packaging, test runner resiliency, and sandbox seeding patch for Spec 060 (`060-v0.6-meta-model-bounded-repair`). Full notes: [docs/release-notes/v0.6.2.md](docs/release-notes/v0.6.2.md).

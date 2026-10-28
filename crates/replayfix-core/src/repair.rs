@@ -270,7 +270,14 @@ impl TestFreezeGuard {
                     .strip_prefix(root)
                     .map_err(|e| CoreError::Worktree(format!("strip_prefix failed: {e}")))?;
                 let norm = rel.to_string_lossy().replace('\\', "/");
-                if Self::is_protected_test_or_config_path(&norm) {
+                if norm == "package.json" {
+                    let bytes = fs::read(&path)?;
+                    let scripts = Self::extract_package_json_test_scripts(&bytes)?;
+                    out.insert(
+                        "package.json:scripts:test".to_string(),
+                        Self::digest_test_scripts(&scripts),
+                    );
+                } else if Self::is_protected_test_or_config_path(&norm) {
                     let bytes = fs::read(&path)?;
                     out.insert(norm, sha256_hex(&bytes));
                 }
@@ -362,12 +369,7 @@ impl TestFreezeGuard {
             || (lower_file.starts_with("jsconfig") && lower_file.ends_with(".json"))
             || matches!(
                 lower_file,
-                "package.json"
-                    | "package-lock.json"
-                    | "pnpm-lock.yaml"
-                    | "yarn.lock"
-                    | "bun.lockb"
-                    | "bun.lock"
+                "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock" | "bun.lockb" | "bun.lock"
             )
     }
 
@@ -375,6 +377,14 @@ impl TestFreezeGuard {
     /// does not target any frozen test or runner configuration file.
     pub fn validate_target_path(&self, raw_path: &str) -> Result<String> {
         let trimmed = raw_path.trim();
+
+        // Rejection of Windows trailing dots/spaces NTFS bypass
+        if trimmed.ends_with('.') || trimmed.ends_with(' ') {
+            return Err(CoreError::SecurityViolation(format!(
+                "TEST_MUTATION_PROHIBITED: invalid trailing character in path '{trimmed}'"
+            )));
+        }
+
         if Self::is_protected_test_or_config_path(trimmed) {
             return Err(CoreError::SecurityViolation(format!(
                 "TEST_MUTATION_PROHIBITED: repair patch attempted to target protected test or \
@@ -383,11 +393,17 @@ impl TestFreezeGuard {
         }
 
         TaskManifest::assert_safe_path(trimmed, "repair target_file")?;
+
         let normalized = trimmed.replace('\\', "/");
         let clean = normalized
             .strip_prefix("./")
             .unwrap_or(&normalized)
             .to_string();
+
+        if clean == "package.json" {
+            // Permitted for non-test modifications; test scripts immutability is enforced by verify_integrity
+            return Ok(clean);
+        }
 
         if self
             .frozen_files
@@ -396,7 +412,8 @@ impl TestFreezeGuard {
             || Self::is_protected_test_or_config_path(&clean)
         {
             return Err(CoreError::SecurityViolation(format!(
-                "TEST_MUTATION_PROHIBITED: repair patch attempted to target frozen file '{clean}'"
+                "TEST_MUTATION_PROHIBITED: repair patch attempted to target protected test or \
+                 configuration path '{clean}'"
             )));
         }
 
@@ -407,6 +424,18 @@ impl TestFreezeGuard {
     /// deleted, or added on disk.
     pub fn verify_integrity(&self, sandbox_root: &Path) -> Result<()> {
         let current = Self::capture(sandbox_root)?;
+
+        if let (Some(pre_hash), Some(post_hash)) = (
+            self.frozen_files.get("package.json:scripts:test"),
+            current.frozen_files.get("package.json:scripts:test"),
+        ) {
+            if pre_hash != post_hash {
+                return Err(CoreError::SecurityViolation(
+                    "TEST_MUTATION_PROHIBITED: package.json test scripts altered".to_string(),
+                ));
+            }
+        }
+
         if current.aggregate_sha256 != self.aggregate_sha256
             || current.frozen_files != self.frozen_files
         {
@@ -417,6 +446,45 @@ impl TestFreezeGuard {
             ));
         }
         Ok(())
+    }
+
+    /// Parse package.json bytes and extract all script keys starting with "test" or containing "test".
+    pub fn extract_package_json_test_scripts(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
+        let val: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
+            CoreError::SecurityViolation(format!("Invalid package.json format: {e}"))
+        })?;
+        let mut map = BTreeMap::new();
+        if let Some(scripts) = val.get("scripts").and_then(|v| v.as_object()) {
+            for (k, v) in scripts {
+                let lower_k = k.to_ascii_lowercase();
+                if lower_k == "test"
+                    || lower_k.starts_with("test:")
+                    || lower_k.starts_with("test_")
+                    || lower_k.starts_with("test-")
+                    || lower_k.contains("test")
+                {
+                    let s = match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    map.insert(k.clone(), s);
+                }
+            }
+        }
+        Ok(map)
+    }
+
+    /// Compute canonical digest for test scripts mapping.
+    #[must_use]
+    pub fn digest_test_scripts(scripts: &BTreeMap<String, String>) -> String {
+        let mut buf = String::new();
+        for (k, v) in scripts {
+            buf.push_str(k);
+            buf.push('=');
+            buf.push_str(v);
+            buf.push('\n');
+        }
+        sha256_hex(buf.as_bytes())
     }
 }
 
@@ -928,6 +996,17 @@ impl BlockPatcher {
         freeze_guard: &TestFreezeGuard,
     ) -> Result<PatchOutcome> {
         let safe_target = freeze_guard.validate_target_path(&patch.target_file)?;
+
+        if safe_target == "package.json" {
+            let lower_search = patch.search_block.to_ascii_lowercase();
+            let lower_replace = patch.replace_block.to_ascii_lowercase();
+            if lower_search.contains("test") || lower_replace.contains("test") {
+                return Err(CoreError::SecurityViolation(
+                    "TEST_MUTATION_PROHIBITED: package.json test scripts altered".to_string(),
+                ));
+            }
+        }
+
         let expected_clean = expected_target_file.trim().replace('\\', "/");
         if safe_target != expected_clean {
             return Err(CoreError::PatchApplicationError(format!(
@@ -1256,6 +1335,9 @@ pub enum RepairClientMode {
     /// Deterministic offline fixture that attempts to patch `tests/cart.spec.ts` to test
     /// `TEST_MUTATION_PROHIBITED` enforcement.
     OfflineAttemptTestMutation,
+    /// Deterministic offline fixture that attempts to alter test scripts in `package.json`
+    /// to test surgical script immutability enforcement.
+    OfflineAttemptPackageJsonTestScriptMutation,
 }
 
 impl RepairClientMode {
@@ -1266,7 +1348,8 @@ impl RepairClientMode {
             | Self::OfflineSyntaxRetryThenSuccess
             | Self::OfflineFailAllAttempts
             | Self::OfflineFallbackOnRateLimit
-            | Self::OfflineAttemptTestMutation => "deterministic-offline-fixture",
+            | Self::OfflineAttemptTestMutation
+            | Self::OfflineAttemptPackageJsonTestScriptMutation => "deterministic-offline-fixture",
         }
     }
 }
@@ -1324,6 +1407,14 @@ impl BoundedRepairClient {
                 "search_block": "expect(count).toBe(0);",
                 "replace_block": "expect(true).toBe(true);",
                 "touched_symbols": ["expect"]
+            })
+            .to_string(),
+            (RepairClientMode::OfflineAttemptPackageJsonTestScriptMutation, _) => serde_json::json!({
+                "explanation": "Attempt to alter test script in package.json",
+                "target_file": "package.json",
+                "search_block": "\"test\": \"jest\"",
+                "replace_block": "\"test\": \"exit 0\"",
+                "touched_symbols": ["test"]
             })
             .to_string(),
             (RepairClientMode::OfflineSyntaxRetryThenSuccess, 1) => serde_json::json!({
@@ -1448,6 +1539,55 @@ mod tests {
     }
 
     #[test]
+    fn test_package_json_surgical_immutability() {
+        let guard_dir = TempDirGuard::new("freeze-pkg");
+        let dir = guard_dir.path();
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\": {\"build\": \"tsc\", \"test\": \"jest\"}}\n",
+        )
+        .unwrap();
+
+        let guard = TestFreezeGuard::capture(dir).unwrap();
+        assert_eq!(
+            guard.validate_target_path("package.json").unwrap(),
+            "package.json"
+        );
+
+        // Modifying non-test script in package.json is permitted
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\": {\"build\": \"vite build\", \"test\": \"jest\"}}\n",
+        )
+        .unwrap();
+        assert!(guard.verify_integrity(dir).is_ok());
+
+        // Tampering with test script in package.json is rejected
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\": {\"build\": \"vite build\", \"test\": \"exit 0\"}}\n",
+        )
+        .unwrap();
+        let pkg_tamper = guard.verify_integrity(dir).unwrap_err();
+        assert!(
+            matches!(pkg_tamper, CoreError::SecurityViolation(ref m) if m.contains("package.json test scripts altered")),
+            "expected package.json test scripts altered, got {pkg_tamper:?}"
+        );
+
+        // Deleting package.json test script is rejected
+        fs::write(
+            dir.join("package.json"),
+            "{\"scripts\": {\"build\": \"vite build\"}}\n",
+        )
+        .unwrap();
+        let pkg_deleted = guard.verify_integrity(dir).unwrap_err();
+        assert!(
+            matches!(pkg_deleted, CoreError::SecurityViolation(ref m) if m.contains("TEST_MUTATION_PROHIBITED")),
+            "expected TEST_MUTATION_PROHIBITED on deleted test script, got {pkg_deleted:?}"
+        );
+    }
+
+    #[test]
     fn test_test_freeze_guard_blocks_all_test_and_config_variants() {
         let guard_dir = TempDirGuard::new("freeze-guard");
         let dir = guard_dir.path();
@@ -1476,7 +1616,6 @@ mod tests {
             "vitest.config.ts",
             "tsconfig.json",
             "tsconfig.build.json",
-            "package.json",
             "package.json.",
             "tests./cart.spec.ts",
             "src/cart.spec.ts.",
@@ -1488,8 +1627,16 @@ mod tests {
             );
         }
 
+        // package.json is allowed for non-test updates
+        assert_eq!(
+            guard.validate_target_path("package.json").unwrap(),
+            "package.json"
+        );
+
         // Verify disk integrity check detects post-capture tampering.
         assert!(guard.verify_integrity(dir).is_ok());
+
+        // Restore package.json to original state after checking validate_target_path
         fs::write(dir.join("tests/cart.spec.ts"), "expect(1).toBe(2);\n").unwrap();
         let tamper_err = guard.verify_integrity(dir).unwrap_err();
         assert!(

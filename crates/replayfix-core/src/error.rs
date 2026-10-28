@@ -49,6 +49,12 @@ pub enum CoreError {
 
     #[error("Syntax validation failed: {0}")]
     SyntaxValidationError(String),
+
+    #[error("Session checkpoint error: {0}")]
+    Checkpoint(String),
+
+    #[error("Regression parity error: {0}")]
+    Regression(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

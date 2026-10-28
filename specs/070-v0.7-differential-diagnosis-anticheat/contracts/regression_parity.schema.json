@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/regression_parity.json",
+  "title": "ReplayFixRegressionParityReport",
+  "description": "Regression parity evaluation ensuring F_patched \\ F_baseline = empty set and suite preservation",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "baseline_total_tests",
+    "patched_total_tests",
+    "baseline_failures",
+    "patched_failures",
+    "new_failures",
+    "missing_tests",
+    "skipped_increase",
+    "parity_passed",
+    "duration_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.7"
+    },
+    "baseline_total_tests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "patched_total_tests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "baseline_failures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "patched_failures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "new_failures": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "missing_tests": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "baseline_skipped_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "patched_skipped_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "skipped_increase": {
+      "type": "integer"
+    },
+    "parity_passed": {
+      "type": "boolean"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}
