@@ -2,7 +2,7 @@
 
 ## 1. Project Phase & Active Task
 - **Active Milestone**: `v0.8.1` (`080-v0.8-observability-ingestion` — Hardening & Qualification Freeze)
-- **Status**: Release Qualification Complete; 186/186 Tests Passing, Zero Panics, 0 Clippy Warnings. Ready to freeze baseline for `090-v0.9-merkle-receipt-benchmark-suite`.
+- **Status**: Gap Remediation Complete; 187/187 Tests Passing, Zero Panics, 0 Clippy Warnings. All audit gaps remediated. Ready to advance to `090-v0.9-merkle-receipt-benchmark-suite`.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -67,6 +67,15 @@
   - Base worktree mutation (`UnifiedPatcher::apply_to_worktree`) applying verified and approved patches with path traversal defenses.
   - Disaggregated fact artifacts persisted in `.replayfix/artifacts/` (`candidate.patch`, `approval_audit.json`, `issue_ingestion.json`, `differential_diagnosis.json`, `regression_parity.json`, `playwright.trace.zip`).
   - 185 automated tests passing (152 core unit tests, 33 CLI integration tests); zero Clippy warnings; zero panics in production source.
+
+- [x] **v0.8.2 Gap Remediation & Atomic Write Hardening**:
+  - Unified atomic fact artifact pipeline via `ArtifactStore` and `atomic_write_file` (`.tmp` -> `rename` with unique PID/counter) across all CLI and receipt writers with defensive error cleanup.
+  - Artifact path traversal and separator validation in `ArtifactStore`.
+  - Worktree mutation atomicity in `UnifiedPatcher::apply_to_worktree` via `atomic_write_file`, eliminating partial file writes.
+  - Output directory alignment for `write_approval_audit` across custom `--output-dir` arguments.
+  - Schema version harmonization to `"0.8"` across `receipt.rs`, `matrix.rs`, `regression.rs`, `main.rs` (`freeze-spec`), and integration tests.
+  - Dynamic harness User-Agent resolution via `CARGO_PKG_VERSION` in `ingestion.rs`.
+  - 188 automated tests passing (155 core unit tests, 33 CLI integration tests); zero Clippy warnings; zero panics in production source.
 
 - [x] **v0.8.1 GStack Release Qualification & Baseline Hardening**:
   - Adversarial prompt injection defense escaping `<UNTRUSTED_ISSUE_METADATA>` delimiters within GitHub issue titles, steps, and descriptions.

@@ -244,15 +244,11 @@ pub fn write_approval_audit(audit: &ApprovalAudit, output_dir: impl AsRef<Path>)
     let p = output_dir.as_ref();
     let artifacts_dir = if p.ends_with("artifacts") {
         p.to_path_buf()
-    } else if p.ends_with(".replayfix") {
-        p.join("artifacts")
     } else {
-        p.join(".replayfix").join("artifacts")
+        p.join("artifacts")
     };
-    let _ = std::fs::create_dir_all(&artifacts_dir);
-    let target = artifacts_dir.join("approval_audit.json");
-    let json_bytes = serde_json::to_vec_pretty(audit)?;
-    std::fs::write(&target, json_bytes)?;
+    let store = replayfix_core::artifacts::ArtifactStore::new(&artifacts_dir)?;
+    store.write_json_pretty("approval_audit.json", audit)?;
     Ok(())
 }
 

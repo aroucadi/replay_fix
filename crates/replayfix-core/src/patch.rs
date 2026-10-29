@@ -6,6 +6,7 @@
 use crate::error::{CoreError, Result};
 use crate::manifest::TaskManifest;
 use regex::Regex;
+use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -149,9 +150,11 @@ impl UnifiedPatcher {
     pub fn apply_to_worktree(repo_dir: impl AsRef<Path>, diff: &str) -> Result<PatchOutcome> {
         let (target_path, _) = Self::parse(diff)?;
         let full_path = repo_dir.as_ref().join(&target_path);
-        let original = std::fs::read_to_string(&full_path)?;
+        let original = fs::read_to_string(&full_path)?;
         let outcome = Self::apply_diff(&original, diff)?;
-        std::fs::write(&full_path, outcome.patched.as_bytes())?;
+
+        crate::artifacts::atomic_write_file(&full_path, outcome.patched.as_bytes())?;
+
         Ok(outcome)
     }
 
@@ -441,5 +444,27 @@ mod tests {
         let d = diff("@@ -1,2 +1 @@\n--- comment\n keep\n");
         let out = UnifiedPatcher::apply_diff(src, &d).unwrap();
         assert_eq!(out.patched, "keep\n");
+    }
+
+    #[test]
+    fn test_apply_to_worktree_atomically_replaces_file() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("replayfix_patch_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        let src_dir = temp_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let target_file = src_dir.join("counter.js");
+        fs::write(&target_file, "let count = 0;\n").unwrap();
+
+        let patch_diff = "--- a/src/counter.js\n+++ b/src/counter.js\n@@ -1 +1 @@\n-let count = 0;\n+let count = 1;\n";
+        let outcome = UnifiedPatcher::apply_to_worktree(&temp_dir, patch_diff).unwrap();
+        assert_eq!(outcome.target_path, "src/counter.js");
+        assert_eq!(outcome.insertions, 1);
+        assert_eq!(outcome.deletions, 1);
+
+        let modified = fs::read_to_string(&target_file).unwrap();
+        assert_eq!(modified, "let count = 1;\n");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

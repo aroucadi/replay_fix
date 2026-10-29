@@ -489,11 +489,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         };
 
         let artifacts_dir = Path::new(&output_dir).join("artifacts");
-        let _ = std::fs::create_dir_all(&artifacts_dir);
-        let _ = std::fs::write(
-            artifacts_dir.join("issue_ingestion.json"),
-            serde_json::to_vec_pretty(&ingestion_res).unwrap_or_default(),
-        );
+        if let Ok(store) = replayfix_core::artifacts::ArtifactStore::new(&artifacts_dir) {
+            let _ = store.write_json_pretty("issue_ingestion.json", &ingestion_res);
+        }
 
         Some(ingestion_res)
     } else {
@@ -950,8 +948,9 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             );
             // Spec 080: Write disaggregated candidate patch
             let artifacts_dir = out_dir.join("artifacts");
-            let _ = std::fs::create_dir_all(&artifacts_dir);
-            let _ = std::fs::write(artifacts_dir.join("candidate.patch"), diff.as_bytes());
+            if let Ok(store) = replayfix_core::artifacts::ArtifactStore::new(&artifacts_dir) {
+                let _ = store.write_text("candidate.patch", &diff);
+            }
 
             // Spec 080: Human Confirmation Gate
             if extras.apply {
@@ -1001,7 +1000,13 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             if extras.trace {
                 let trace_path = artifacts_dir.join("playwright.trace.zip");
                 if !trace_path.exists() {
-                    let _ = std::fs::write(&trace_path, b"PK00PlaywrightTraceZipReplayFix");
+                    if let Ok(store) = replayfix_core::artifacts::ArtifactStore::new(&artifacts_dir)
+                    {
+                        let _ = store.write_bytes(
+                            "playwright.trace.zip",
+                            b"PK00PlaywrightTraceZipReplayFix",
+                        );
+                    }
                 }
                 let is_interactive = std::io::stdout().is_terminal();
                 let is_ci = is_ci_environment();
@@ -1096,7 +1101,7 @@ fn run_freeze_spec(
     }
 
     let spec_obj = serde_json::json!({
-        "schema_version": "0.7",
+        "schema_version": "0.8",
         "bug_id": bug,
         "contract_digest": contract_digest,
         "aggregate_sha256": guard.aggregate_sha256,
@@ -1105,7 +1110,8 @@ fn run_freeze_spec(
         "frozen_at": replayfix_core::receipt::timestamp_now(),
     });
 
-    std::fs::write(&out_path, serde_json::to_string_pretty(&spec_obj)?)?;
+    let spec_bytes = serde_json::to_vec_pretty(&spec_obj)?;
+    replayfix_core::artifacts::atomic_write_file(&out_path, &spec_bytes)?;
 
     let repro_dir = repo_dir.join("tests").join("repro");
     std::fs::create_dir_all(&repro_dir)?;
@@ -1126,7 +1132,7 @@ fn run_freeze_spec(
         target = fixture.contract.target,
         action = fixture.contract.action,
     );
-    std::fs::write(&spec_ts_path, ts_content)?;
+    replayfix_core::artifacts::atomic_write_file(&spec_ts_path, ts_content.as_bytes())?;
 
     print_banner(theme, "Freeze Spec Generated");
     print_field(theme, "Bug ID", bug, None);

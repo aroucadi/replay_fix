@@ -50,7 +50,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["schema_version"], "0.8");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -86,7 +86,7 @@ fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["schema_version"], "0.8");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
@@ -119,7 +119,7 @@ fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["schema_version"], "0.8");
     assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
     assert_eq!(triage["exit_code"], 22);
     assert_eq!(triage["substrate"], "playwright-cdp");
@@ -133,7 +133,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["schema_version"], "0.8");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -380,7 +380,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["schema_version"], "0.8");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
@@ -428,7 +428,7 @@ fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
     );
 
     let receipt = json(&dir.join("out-retry/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["schema_version"], "0.8");
     assert_eq!(
         receipt["repair_telemetry"]["requested_model"],
         "muse-spark-1.3"
@@ -476,7 +476,7 @@ fn mock_failing_repair_exits_21_with_quarantine_triage_report() {
     );
 
     let triage = json(&dir.join("out-quarantine/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["schema_version"], "0.8");
     assert_eq!(triage["status"], "QUARANTINE_REPAIR_FAILED");
     assert_eq!(triage["exit_code"], 21);
     assert_eq!(triage["repair_telemetry"]["attempts_used"], 3);
@@ -564,7 +564,7 @@ fn freeze_spec_subcommand_locks_files_and_generates_spec() {
 
     assert!(out_file.exists());
     let spec = json(&out_file);
-    assert_eq!(spec["schema_version"], "0.7");
+    assert_eq!(spec["schema_version"], "0.8");
     assert_eq!(spec["bug_id"], "RF-01");
     assert_eq!(spec["aggregate_sha256"].as_str().unwrap().len(), 64);
     assert_eq!(spec["contract_digest"].as_str().unwrap().len(), 64);
@@ -598,7 +598,7 @@ fn mock_pkg_test_mutation_is_rejected_as_security_violation_exit_11() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["schema_version"], "0.8");
     assert_eq!(triage["status"], "SECURITY_VIOLATION");
     assert_eq!(triage["exit_code"], 11);
 }
@@ -619,7 +619,7 @@ fn repro_run_with_clean_ref_and_verify_matrix() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.7");
+    assert_eq!(receipt["schema_version"], "0.8");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(
         receipt["differential_diagnosis"]["state"],
@@ -665,7 +665,7 @@ fn mock_regression_triggers_exit_31_and_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["schema_version"], "0.8");
     assert_eq!(triage["status"], "REGRESSION_DETECTED");
     assert_eq!(triage["exit_code"], 31);
     assert_eq!(triage["regression_parity"]["parity_passed"], false);

@@ -168,7 +168,10 @@ impl IssueFetcher for SystemIssueFetcher {
             .arg("--max-time")
             .arg("10")
             .arg("-H")
-            .arg("User-Agent: ReplayFix-Harness/0.8.1")
+            .arg(format!(
+                "User-Agent: ReplayFix-Harness/{}",
+                env!("CARGO_PKG_VERSION")
+            ))
             .arg("-H")
             .arg("Accept: application/vnd.github.v3+json");
 

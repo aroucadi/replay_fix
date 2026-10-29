@@ -1606,7 +1606,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.7");
+        assert_eq!(receipt.schema_version, "0.8");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -1649,7 +1649,7 @@ mod tests {
         .unwrap() else {
             panic!("expected autonomous repair verification");
         };
-        assert_eq!(receipt.schema_version, "0.7");
+        assert_eq!(receipt.schema_version, "0.8");
         let rtel = receipt.repair_telemetry.expect("expected repair_telemetry");
         assert_eq!(rtel.requested_model, "muse-spark-1.3");
         assert_eq!(rtel.serving_model, "muse-spark-1.3");
@@ -1750,7 +1750,7 @@ mod tests {
         else {
             panic!("expected live browser verification");
         };
-        assert_eq!(receipt.schema_version, "0.7");
+        assert_eq!(receipt.schema_version, "0.8");
         assert_eq!(receipt.substrate, "playwright-cdp");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);

@@ -17,6 +17,22 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.8.2] - 2026-10-29
+
+Comprehensive remediation of identified architectural gaps, schema version harmonization, and write atomicity hardening across the observability and ingestion pipeline. Full notes: [docs/release-notes/v0.8.2.md](docs/release-notes/v0.8.2.md).
+
+### Added
+- **Unified Atomic Artifact Pipeline (`replayfix-core::artifacts`)**: Integrated `ArtifactStore` and `atomic_write_file` across all artifact and spec writers, providing two-phase atomic (`.tmp` -> `rename`) writes with unique PID/counter suffixes and defensive error cleanup.
+- **Artifact Traversal Protection (`replayfix-core::artifacts`)**: Enforced strict `validate_file_name` in `ArtifactStore`, blocking path traversal and directory separators.
+- **Worktree Mutation Atomicity (`replayfix-core::patch`)**: Hardened `UnifiedPatcher::apply_to_worktree` to apply patches atomically via `atomic_write_file`, eliminating partial or truncated file writes on disk interruption.
+- **Custom Output Directory Consistency (`replayfix-cli::approval`)**: Fixed `write_approval_audit` to consistently place `approval_audit.json` in `<output_dir>/artifacts` across custom and default directories.
+- **Dynamic Harness User-Agent (`replayfix-core::ingestion`)**: Dynamically resolves harness package version via `CARGO_PKG_VERSION` to eliminate version drift in GitHub API interactions.
+
+### Changed
+- **Schema Version Harmonization (`0.8`)**: Bumped `SCHEMA_VERSION` to `"0.8"` across `receipt.rs`, `matrix.rs`, `regression.rs`, and `freeze-spec`, resolving specification alignment gaps.
+
+---
+
 ## [0.8.1] - 2026-10-29
 
 Security hardening, terminal injection defense, authenticated issue ingestion, and specification harmonization for v0.8.x baseline qualification freeze. Full notes: [docs/release-notes/v0.8.1.md](docs/release-notes/v0.8.1.md).

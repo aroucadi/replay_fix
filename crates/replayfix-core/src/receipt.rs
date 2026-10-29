@@ -1,5 +1,6 @@
 //! Machine-readable terminal artifacts: audit receipts and triage reports.
 
+use crate::artifacts::ArtifactStore;
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::{DifferentialDiagnosisReport, Phase};
@@ -13,7 +14,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.7";
+pub const SCHEMA_VERSION: &str = "0.8";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
@@ -84,43 +85,31 @@ impl AuditReceipt {
         repro_spec_json: Option<&str>,
     ) -> Result<PathBuf> {
         let artifacts_dir = output_dir.join("artifacts");
-        fs::create_dir_all(&artifacts_dir)?;
+        let store = ArtifactStore::new(&artifacts_dir)?;
 
         if let Some(diff) = raw_patch_content {
-            fs::write(artifacts_dir.join("candidate.patch"), diff)?;
-            fs::write(artifacts_dir.join("01_candidate.diff"), diff)?;
+            store.write_text("candidate.patch", diff)?;
+            store.write_text("01_candidate.diff", diff)?;
         }
         if let Some(spec) = repro_spec_json {
-            fs::write(artifacts_dir.join("repro_spec.json"), spec)?;
-            fs::write(artifacts_dir.join("02_repro_spec.json"), spec)?;
+            store.write_text("repro_spec.json", spec)?;
+            store.write_text("02_repro_spec.json", spec)?;
         } else {
             let default_preflight = serde_json::json!({
                 "syntax_preflight_passed": true,
                 "verified_at": self.created_at
             });
-            fs::write(
-                artifacts_dir.join("02_preflight.json"),
-                serde_json::to_string_pretty(&default_preflight)?,
-            )?;
+            store.write_json_pretty("02_preflight.json", &default_preflight)?;
         }
         if let Some(ref diag) = self.differential_diagnosis {
-            let diag_json = serde_json::to_string_pretty(diag)?;
-            fs::write(
-                artifacts_dir.join("differential_diagnosis.json"),
-                &diag_json,
-            )?;
-            fs::write(
-                artifacts_dir.join("03_differential_diagnosis.json"),
-                &diag_json,
-            )?;
+            store.write_json_pretty("differential_diagnosis.json", diag)?;
+            store.write_json_pretty("03_differential_diagnosis.json", diag)?;
         }
         if let Some(ref reg) = self.regression_parity {
-            let reg_json = serde_json::to_string_pretty(reg)?;
-            fs::write(artifacts_dir.join("regression_parity.json"), &reg_json)?;
-            fs::write(artifacts_dir.join("04_regression_parity.json"), &reg_json)?;
+            store.write_json_pretty("regression_parity.json", reg)?;
+            store.write_json_pretty("04_regression_parity.json", reg)?;
         }
-        let receipt_json = serde_json::to_string_pretty(self)?;
-        fs::write(artifacts_dir.join("04_audit_receipt.json"), receipt_json)?;
+        store.write_json_pretty("04_audit_receipt.json", self)?;
 
         Ok(artifacts_dir)
     }
@@ -283,12 +272,8 @@ fn remove_if_present(path: &Path) -> Result<()> {
 }
 
 fn write_json<T: Serialize>(dir: &Path, name: &str, value: &T) -> Result<PathBuf> {
-    fs::create_dir_all(dir)?;
-    let path = dir.join(name);
-    let mut text = serde_json::to_string_pretty(value)?;
-    text.push('\n');
-    fs::write(&path, text)?;
-    Ok(path)
+    let store = ArtifactStore::new(dir)?;
+    store.write_json_pretty(name, value)
 }
 
 /// Write `audit_receipt.json`, first removing any stale `triage_report.json`.
@@ -345,7 +330,7 @@ mod tests {
     #[test]
     fn test_triage_report_serializes_screaming_status_and_phases() {
         let json = serde_json::to_value(sample_triage()).unwrap();
-        assert_eq!(json["schema_version"], "0.7");
+        assert_eq!(json["schema_version"], "0.8");
         assert_eq!(json["status"], "REPAIR_NOOP_REJECTED");
         assert_eq!(json["exit_code"], 30);
         assert_eq!(
