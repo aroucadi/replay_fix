@@ -84,10 +84,11 @@ pub struct AuditReceipt {
 }
 
 impl AuditReceipt {
-    /// Write disaggregated stage artifacts into `<output_dir>/artifacts/` and compute RFC 6962
-    /// Merkle tree receipts and Ed25519 attestations.
+    /// Write disaggregated stage artifacts into `<output_dir>/artifacts/`, compute RFC 6962
+    /// Merkle tree receipts and Ed25519 attestations, populate `self.merkle_root` and
+    /// `self.attestation`, and atomically update `<output_dir>/audit_receipt.json`.
     pub fn write_disaggregated_artifacts(
-        &self,
+        &mut self,
         output_dir: &Path,
         raw_patch_content: Option<&str>,
         repro_spec_json: Option<&str>,
@@ -117,7 +118,12 @@ impl AuditReceipt {
             store.write_json_pretty("regression_parity.json", reg)?;
             store.write_json_pretty("04_regression_parity.json", reg)?;
         }
-        store.write_json_pretty("04_audit_receipt.json", self)?;
+
+        // Ensure 04_audit_receipt.json is serialized as the pre-Merkle core receipt payload
+        let mut core_receipt = self.clone();
+        core_receipt.merkle_root = None;
+        core_receipt.attestation = None;
+        store.write_json_pretty("04_audit_receipt.json", &core_receipt)?;
 
         // Collect all written artifacts as Merkle evidence leaves
         let mut leaves = Vec::new();
@@ -127,6 +133,7 @@ impl AuditReceipt {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if !name.ends_with("merkle_receipt.json")
                     && !name.ends_with("attestation.json")
+                    && !name.ends_with(".tmp")
                     && entry.path().is_file()
                 {
                     file_entries.push((name, entry.path()));
@@ -171,7 +178,8 @@ impl AuditReceipt {
         let tree = MerkleTree::new(leaves)?;
         let mut merkle_receipt = tree.to_receipt()?;
 
-        let keypair = KeypairManager::generate();
+        let key_dir = output_dir.join("keys");
+        let keypair = KeypairManager::load_or_generate(Some(&key_dir))?;
         let attestation = keypair.sign(
             &self.schema_version,
             &merkle_receipt.merkle_root,
@@ -180,15 +188,360 @@ impl AuditReceipt {
         )?;
 
         merkle_receipt.attestation = Some(attestation.clone());
+        self.merkle_root = Some(merkle_receipt.merkle_root.clone());
+        self.attestation = Some(attestation.clone());
 
         store.write_json_pretty("merkle_receipt.json", &merkle_receipt)?;
         store.write_json_pretty("attestation.json", &attestation)?;
 
-        // Also write at top level of output_dir
-        let _ = write_json(output_dir, "merkle_receipt.json", &merkle_receipt);
-        let _ = write_json(output_dir, "attestation.json", &attestation);
+        // Atomically write top-level merkle_receipt.json, attestation.json, and updated audit_receipt.json
+        write_json(output_dir, "merkle_receipt.json", &merkle_receipt)?;
+        write_json(output_dir, "attestation.json", &attestation)?;
+        write_audit_receipt(output_dir, self)?;
 
         Ok(artifacts_dir)
+    }
+
+    /// Perform complete 4-Layer Zero-Trust verification on a receipt file or directory:
+    /// - Layer 1: Verify every referenced evidence leaf file on disk exists, matches `size_bytes`,
+    ///   and hashes to `content_sha256` (plus cross-checks top-level `audit_receipt.json` against
+    ///   `04_audit_receipt.json`).
+    /// - Layer 2: Verify RFC 6962 Merkle inclusion proofs against `merkle_root`.
+    /// - Layer 3: Verify RFC 8032 Pure Ed25519 digital signature over the canonical signing payload.
+    /// - Layer 4: Evaluate signer public key against `trust_policy`.
+    pub fn verify_receipt_and_attestation(
+        path: &Path,
+        trust_policy: &crate::crypto::TrustPolicy,
+    ) -> Result<(
+        crate::crypto::VerificationOutcome,
+        AttestationRecord,
+        String,
+        usize,
+    )> {
+        let target_file = if path.is_dir() {
+            let candidates = [
+                path.join("artifacts").join("merkle_receipt.json"),
+                path.join("merkle_receipt.json"),
+                path.join("sweep_receipt.json"),
+                path.join("artifacts").join("04_audit_receipt.json"),
+                path.join("audit_receipt.json"),
+            ];
+            candidates.into_iter().find(|p| p.exists()).ok_or_else(|| {
+                crate::error::CoreError::SecurityViolation(format!(
+                    "No receipt found in directory '{}'",
+                    path.display()
+                ))
+            })?
+        } else {
+            path.to_path_buf()
+        };
+
+        if !target_file.exists() {
+            return Err(crate::error::CoreError::SecurityViolation(format!(
+                "Receipt file '{}' does not exist",
+                target_file.display()
+            )));
+        }
+
+        let file_content = fs::read_to_string(&target_file).map_err(|e| {
+            crate::error::CoreError::SecurityViolation(format!(
+                "Failed to read receipt '{}': {e}",
+                target_file.display()
+            ))
+        })?;
+
+        let json_val: serde_json::Value = serde_json::from_str(&file_content).map_err(|e| {
+            crate::error::CoreError::SecurityViolation(format!("Malformed receipt JSON: {e}"))
+        })?;
+
+        let parent_dir = target_file.parent().unwrap_or_else(|| Path::new("."));
+
+        // Case A: SweepReceipt verification
+        if json_val.get("total_bugs").is_some() && json_val.get("results").is_some() {
+            let sweep: crate::sweep::SweepReceipt =
+                serde_json::from_value(json_val).map_err(|e| {
+                    crate::error::CoreError::SecurityViolation(format!(
+                        "Malformed SweepReceipt JSON: {e}"
+                    ))
+                })?;
+
+            // Reconstruct sweep Merkle leaves from on-disk per-bug receipts and verify
+            let mut leaves = Vec::new();
+            for bug_id in sweep.results.keys() {
+                let bug_receipt_rel = format!("{bug_id}/audit_receipt.json");
+                let bug_triage_rel = format!("{bug_id}/triage_report.json");
+                let bug_receipt_path = parent_dir.join(&bug_receipt_rel);
+                let bug_triage_path = parent_dir.join(&bug_triage_rel);
+
+                if bug_receipt_path.exists() {
+                    let bytes = fs::read(&bug_receipt_path).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Failed to read sweep bug receipt '{}': {e}",
+                            bug_receipt_path.display()
+                        ))
+                    })?;
+                    let parsed: AuditReceipt = serde_json::from_slice(&bytes).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Malformed sweep bug receipt '{}': {e}",
+                            bug_receipt_path.display()
+                        ))
+                    })?;
+                    leaves.push(EvidenceLeaf {
+                        artifact_type: "sweep_bug_receipt".to_string(),
+                        file_name: bug_receipt_rel,
+                        content_sha256: crate::digest::sha256_hex(&bytes),
+                        size_bytes: bytes.len(),
+                        timestamp: parsed.created_at,
+                    });
+                } else if bug_triage_path.exists() {
+                    let bytes = fs::read(&bug_triage_path).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Failed to read sweep bug triage '{}': {e}",
+                            bug_triage_path.display()
+                        ))
+                    })?;
+                    let parsed: TriageReport = serde_json::from_slice(&bytes).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Malformed sweep bug triage '{}': {e}",
+                            bug_triage_path.display()
+                        ))
+                    })?;
+                    leaves.push(EvidenceLeaf {
+                        artifact_type: "sweep_bug_triage".to_string(),
+                        file_name: bug_triage_rel,
+                        content_sha256: crate::digest::sha256_hex(&bytes),
+                        size_bytes: bytes.len(),
+                        timestamp: parsed.created_at,
+                    });
+                } else {
+                    return Err(crate::error::CoreError::SecurityViolation(format!(
+                        "MERKLE_PROOF_INVALID: Missing on-disk per-bug artifact for '{bug_id}'"
+                    )));
+                }
+            }
+
+            let recomputed_tree = MerkleTree::new(leaves)?;
+            let recomputed_root = recomputed_tree.root_hex();
+            if recomputed_root != sweep.merkle_root {
+                return Err(crate::error::CoreError::SecurityViolation(format!(
+                    "MERKLE_PROOF_INVALID: Sweep Merkle root mismatch (expected {}, recomputed {})",
+                    sweep.merkle_root, recomputed_root
+                )));
+            }
+
+            let outcome = crate::crypto::verify_attestation(
+                &sweep.ed25519_attestation,
+                &sweep.merkle_root,
+                recomputed_tree.len(),
+                trust_policy,
+            )?;
+
+            return Ok((
+                outcome,
+                sweep.ed25519_attestation,
+                sweep.merkle_root,
+                recomputed_tree.len(),
+            ));
+        }
+
+        // Case B: MerkleReceipt or AuditReceipt verification (fail-closed if merkle_receipt is absent)
+        let (merkle_receipt, attestation, artifacts_dir, root_out_dir) = if json_val
+            .get("inclusion_proofs")
+            .is_some()
+        {
+            let mr: crate::merkle::MerkleReceipt =
+                serde_json::from_value(json_val).map_err(|e| {
+                    crate::error::CoreError::SecurityViolation(format!(
+                        "Malformed MerkleReceipt: {e}"
+                    ))
+                })?;
+            let att = mr.attestation.clone().or_else(|| {
+                let att_path = parent_dir.join("attestation.json");
+                fs::read_to_string(att_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            });
+            let (art_dir, out_dir) = if parent_dir.file_name().is_some_and(|n| n == "artifacts") {
+                (
+                    parent_dir.to_path_buf(),
+                    parent_dir.parent().unwrap_or(parent_dir).to_path_buf(),
+                )
+            } else {
+                (parent_dir.join("artifacts"), parent_dir.to_path_buf())
+            };
+            (mr, att, art_dir, out_dir)
+        } else {
+            let audit_rec: AuditReceipt = serde_json::from_value(json_val).map_err(|e| {
+                crate::error::CoreError::SecurityViolation(format!("Malformed AuditReceipt: {e}"))
+            })?;
+            let (art_dir, out_dir) = if parent_dir.file_name().is_some_and(|n| n == "artifacts") {
+                (
+                    parent_dir.to_path_buf(),
+                    parent_dir.parent().unwrap_or(parent_dir).to_path_buf(),
+                )
+            } else {
+                (parent_dir.join("artifacts"), parent_dir.to_path_buf())
+            };
+            let mr_path = if art_dir.join("merkle_receipt.json").exists() {
+                art_dir.join("merkle_receipt.json")
+            } else {
+                out_dir.join("merkle_receipt.json")
+            };
+            if !mr_path.exists() {
+                return Err(crate::error::CoreError::SecurityViolation(
+                        "MERKLE_PROOF_INVALID: Missing merkle_receipt.json required for cryptographic verification"
+                            .to_string(),
+                    ));
+            }
+            let mr_str = fs::read_to_string(&mr_path).map_err(|e| {
+                crate::error::CoreError::SecurityViolation(format!(
+                    "Failed to read merkle_receipt.json: {e}"
+                ))
+            })?;
+            let mr: crate::merkle::MerkleReceipt = serde_json::from_str(&mr_str).map_err(|e| {
+                crate::error::CoreError::SecurityViolation(format!(
+                    "Malformed merkle_receipt.json: {e}"
+                ))
+            })?;
+
+            if let Some(ref rec_root) = audit_rec.merkle_root {
+                if rec_root != &mr.merkle_root {
+                    return Err(crate::error::CoreError::SecurityViolation(format!(
+                            "MERKLE_PROOF_INVALID: AuditReceipt merkle_root '{}' does not match MerkleReceipt root '{}'",
+                            rec_root, mr.merkle_root
+                        )));
+                }
+            }
+
+            let att = audit_rec
+                .attestation
+                .or_else(|| mr.attestation.clone())
+                .or_else(|| {
+                    let att_path = out_dir.join("attestation.json");
+                    fs::read_to_string(att_path)
+                        .ok()
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                });
+            (mr, att, art_dir, out_dir)
+        };
+
+        // Layer 2: Verify RFC 6962 Merkle inclusion proofs against merkle_root
+        match merkle_receipt.verify_all() {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(crate::error::CoreError::SecurityViolation(format!(
+                    "MERKLE_PROOF_INVALID: One or more inclusion proofs failed verification against root {}",
+                    merkle_receipt.merkle_root
+                )));
+            }
+            Err(e) => {
+                return Err(crate::error::CoreError::SecurityViolation(format!(
+                    "MERKLE_PROOF_INVALID: {e}"
+                )));
+            }
+        }
+
+        // Layer 1: Verify on-disk artifact integrity if the artifacts directory is present
+        if artifacts_dir.exists() {
+            for leaf in &merkle_receipt.leaves {
+                let leaf_path = artifacts_dir.join(&leaf.file_name);
+                if !leaf_path.exists() {
+                    return Err(crate::error::CoreError::SecurityViolation(format!(
+                        "MERKLE_PROOF_INVALID: Referenced artifact '{}' is missing on disk",
+                        leaf.file_name
+                    )));
+                }
+                let disk_bytes = fs::read(&leaf_path).map_err(|e| {
+                    crate::error::CoreError::SecurityViolation(format!(
+                        "Failed to read artifact '{}': {e}",
+                        leaf.file_name
+                    ))
+                })?;
+                if disk_bytes.len() != leaf.size_bytes {
+                    return Err(crate::error::CoreError::SecurityViolation(format!(
+                        "MERKLE_PROOF_INVALID: Artifact '{}' size mismatch (expected {} bytes, found {} bytes)",
+                        leaf.file_name,
+                        leaf.size_bytes,
+                        disk_bytes.len()
+                    )));
+                }
+                let disk_sha = crate::digest::sha256_hex(&disk_bytes);
+                if disk_sha != leaf.content_sha256 {
+                    return Err(crate::error::CoreError::SecurityViolation(format!(
+                        "MERKLE_PROOF_INVALID: Artifact '{}' content SHA-256 mismatch (expected {}, found {})",
+                        leaf.file_name, leaf.content_sha256, disk_sha
+                    )));
+                }
+            }
+
+            // Cross-check top-level audit_receipt.json against 04_audit_receipt.json if both exist
+            let top_audit = root_out_dir.join(AUDIT_RECEIPT_FILE);
+            let leaf_audit = artifacts_dir.join("04_audit_receipt.json");
+            if top_audit.exists() && leaf_audit.exists() {
+                let mut top_rec: AuditReceipt =
+                    serde_json::from_str(&fs::read_to_string(&top_audit).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Failed to read top-level audit_receipt.json: {e}"
+                        ))
+                    })?)
+                    .map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Malformed top-level audit_receipt.json: {e}"
+                        ))
+                    })?;
+                let mut leaf_rec: AuditReceipt =
+                    serde_json::from_str(&fs::read_to_string(&leaf_audit).map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Failed to read 04_audit_receipt.json: {e}"
+                        ))
+                    })?)
+                    .map_err(|e| {
+                        crate::error::CoreError::SecurityViolation(format!(
+                            "Malformed 04_audit_receipt.json: {e}"
+                        ))
+                    })?;
+
+                if let Some(ref top_root) = top_rec.merkle_root {
+                    if top_root != &merkle_receipt.merkle_root {
+                        return Err(crate::error::CoreError::SecurityViolation(
+                            "MERKLE_PROOF_INVALID: Top-level audit_receipt.json merkle_root mismatch"
+                                .to_string(),
+                        ));
+                    }
+                }
+                top_rec.merkle_root = None;
+                top_rec.attestation = None;
+                leaf_rec.merkle_root = None;
+                leaf_rec.attestation = None;
+                if top_rec != leaf_rec {
+                    return Err(crate::error::CoreError::SecurityViolation(
+                        "MERKLE_PROOF_INVALID: Top-level audit_receipt.json core fields diverged from committed 04_audit_receipt.json leaf"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
+
+        // Layer 3 & 4: Verify Ed25519 signature and trust policy
+        let att = attestation.ok_or_else(|| {
+            crate::error::CoreError::SecurityViolation(
+                "SIGNATURE_VERIFICATION_FAILED: Missing cryptographic attestation".to_string(),
+            )
+        })?;
+
+        let outcome = crate::crypto::verify_attestation(
+            &att,
+            &merkle_receipt.merkle_root,
+            merkle_receipt.tree_size,
+            trust_policy,
+        )?;
+
+        Ok((
+            outcome,
+            att,
+            merkle_receipt.merkle_root,
+            merkle_receipt.tree_size,
+        ))
     }
 }
 
@@ -518,7 +871,7 @@ mod tests {
     #[test]
     fn test_disaggregated_artifacts_merkle_and_attestation() {
         let dir = scratch("disagg-merkle");
-        let receipt = AuditReceipt {
+        let mut receipt = AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
             task_id: "RF-01".to_string(),
@@ -571,52 +924,55 @@ mod tests {
             .write_disaggregated_artifacts(&dir, Some(diff), None)
             .unwrap();
 
+        assert!(receipt.merkle_root.is_some());
+        assert!(receipt.attestation.is_some());
         assert!(artifacts_dir.join("01_candidate.diff").exists());
         assert!(artifacts_dir.join("02_preflight.json").exists());
         assert!(artifacts_dir.join("04_audit_receipt.json").exists());
         assert!(artifacts_dir.join("merkle_receipt.json").exists());
         assert!(artifacts_dir.join("attestation.json").exists());
+        assert!(dir.join("audit_receipt.json").exists());
         assert!(dir.join("merkle_receipt.json").exists());
         assert!(dir.join("attestation.json").exists());
 
-        // Verify Merkle receipt
-        let receipt_data: crate::merkle::MerkleReceipt = serde_json::from_str(
-            &fs::read_to_string(artifacts_dir.join("merkle_receipt.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(receipt_data.schema_version, "0.9");
-        assert!(receipt_data.tree_size >= 3);
-        assert!(receipt_data.verify_all().unwrap());
+        // Top-level audit_receipt.json has merkle_root and attestation populated
+        let top_receipt: AuditReceipt =
+            serde_json::from_str(&fs::read_to_string(dir.join("audit_receipt.json")).unwrap())
+                .unwrap();
+        assert_eq!(top_receipt.merkle_root, receipt.merkle_root);
+        assert_eq!(top_receipt.attestation, receipt.attestation);
 
-        // Verify Attestation
-        let att: AttestationRecord = serde_json::from_str(
-            &fs::read_to_string(artifacts_dir.join("attestation.json")).unwrap(),
-        )
-        .unwrap();
-        let outcome = crate::crypto::verify_attestation(
-            &att,
-            &receipt_data.merkle_root,
-            receipt_data.tree_size,
+        // Full 4-layer verification succeeds on both dir and audit_receipt.json
+        let (v_out, att, root, tree_size) = AuditReceipt::verify_receipt_and_attestation(
+            &dir.join("audit_receipt.json"),
             &crate::crypto::TrustPolicy::AllowAny,
         )
         .unwrap();
         assert_eq!(
-            outcome,
+            v_out,
             crate::crypto::VerificationOutcome::VerifiedUntrustedSigner
         );
+        assert!(tree_size >= 3);
+        assert_eq!(Some(root), receipt.merkle_root);
 
         let pinned = std::collections::HashSet::from([att.public_key.clone()]);
-        let trusted_outcome = crate::crypto::verify_attestation(
-            &att,
-            &receipt_data.merkle_root,
-            receipt_data.tree_size,
+        let (trusted_out, _, _, _) = AuditReceipt::verify_receipt_and_attestation(
+            &dir,
             &crate::crypto::TrustPolicy::PinnedKeys(pinned),
         )
         .unwrap();
         assert_eq!(
-            trusted_outcome,
+            trusted_out,
             crate::crypto::VerificationOutcome::VerifiedTrusted
         );
+
+        // Layer 1 Negative Test: Tampering with 01_candidate.diff on disk MUST fail verification
+        fs::write(artifacts_dir.join("01_candidate.diff"), "tampered diff").unwrap();
+        assert!(AuditReceipt::verify_receipt_and_attestation(
+            &dir,
+            &crate::crypto::TrustPolicy::AllowAny
+        )
+        .is_err());
 
         let _ = fs::remove_dir_all(&dir);
     }

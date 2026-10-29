@@ -1577,8 +1577,10 @@ impl ModelPool {
     }
 
     /// Execute competitive candidate generation across the model pool.
-    /// Evaluates candidate patches in competitive order; the first candidate whose
-    /// patch passes validation wins, and competing tasks are aborted via the cancellation flag.
+    /// Generates candidates concurrently across up to `max_concurrent_tasks` bounded worker
+    /// threads (enforcing `timeout_per_task` per candidate) and evaluates candidate patches
+    /// in deterministic priority order; the first candidate whose patch passes validation wins,
+    /// and competing tasks are marked cancelled via the atomic cancellation flag.
     pub fn race_candidates<F>(
         &self,
         task_id: &str,
@@ -1592,31 +1594,53 @@ impl ModelPool {
     {
         let cancelled = Arc::new(AtomicBool::new(false));
         let mut candidate_responses = Vec::new();
+        let max_tasks = self.config.max_concurrent_tasks.max(1);
+        let timeout = self.config.timeout_per_task;
 
-        for (attempts_idx, model_slug) in self.config.models.iter().enumerate() {
+        // Spawn bounded concurrent candidate generation across the configured model pool
+        let generated: Vec<(MuseModelSlug, MuseModelConfig, Option<RepairModelResponse>)> =
+            std::thread::scope(|s| {
+                let mut handles = Vec::new();
+                for model_slug in self.config.models.iter().take(max_tasks).copied() {
+                    let cancelled_ref = Arc::clone(&cancelled);
+                    let client_mode = self.client_mode;
+                    handles.push(s.spawn(move || {
+                        if cancelled_ref.load(Ordering::SeqCst) {
+                            return None;
+                        }
+                        let task_start = std::time::Instant::now();
+                        let mut config = MuseModelConfig::new(model_slug.as_str(), None).ok()?;
+                        let client = BoundedRepairClient::new(client_mode);
+                        let user_prompt = PromptBuilder::build_user_prompt(
+                            task_id,
+                            target_path,
+                            initial_source,
+                            "Gate 1 RED baseline established",
+                            None,
+                        );
+                        let req = RepairRequest::new(1, &config, user_prompt, None, None);
+                        let resp = client.generate(&req, &mut config).ok();
+                        if task_start.elapsed() > timeout {
+                            return Some((model_slug, config, None));
+                        }
+                        Some((model_slug, config, resp))
+                    }));
+                }
+                handles
+                    .into_iter()
+                    .filter_map(|h| h.join().ok().flatten())
+                    .collect()
+            });
+
+        for (attempts_idx, (model_slug, config, maybe_resp)) in generated.into_iter().enumerate() {
             if cancelled.load(Ordering::SeqCst) {
                 break;
             }
             let attempts = attempts_idx + 1;
 
-            let mut config = match MuseModelConfig::new(model_slug.as_str(), None) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            let client = BoundedRepairClient::new(self.client_mode);
-            let user_prompt = PromptBuilder::build_user_prompt(
-                task_id,
-                target_path,
-                initial_source,
-                "Gate 1 RED baseline established",
-                None,
-            );
-            let req = RepairRequest::new(1, &config, user_prompt, None, None);
-
-            let resp = match client.generate(&req, &mut config) {
-                Ok(r) => r,
-                Err(_) => continue,
+            let resp = match maybe_resp {
+                Some(r) => r,
+                None => continue,
             };
             candidate_responses.push(resp.clone());
 
@@ -1637,7 +1661,7 @@ impl ModelPool {
                 Ok(true) => {
                     cancelled.store(true, Ordering::SeqCst);
                     let outcome = ModelCandidateOutcome {
-                        winning_model: *model_slug,
+                        winning_model: model_slug,
                         attempts_evaluated: attempts,
                         candidate_responses,
                         cancellation_triggered: true,

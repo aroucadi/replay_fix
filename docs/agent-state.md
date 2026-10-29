@@ -1,11 +1,18 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.9.0` (`090-v0.9-cryptographic-merkle-receipts-multimodel-verification`)
-- **Status**: Release Qualification Complete; 203/203 Tests Passing, Zero Panics, 0 Clippy Warnings. RFC 6962 Merkle receipts, pure Ed25519 attestation, `verify-receipt`, 5-bug benchmark suite (`RF-01` to `RF-05`), tri-model pooling, and high-performance `sweep` CLI verified.
+- **Active Milestone**: `v0.9.1` (`090-v0.9-cryptographic-merkle-receipts-multimodel-verification` — Zero-Trust Qualification & Hardening)
+- **Status**: Release Qualification Complete; 209/209 Tests Passing, Zero Panics, 0 Clippy Warnings. 4-layer cryptographic receipt verification (including Layer 1 on-disk artifact hash/size verification), RFC 8785 UTF-16 canonical JSON sorting, strict RFC 6962 proof invariants, persistent/env Ed25519 key provisioning, 5-bug benchmark sweep (`RF-01` to `RF-05`), and bounded concurrent tri-model pooling verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v0.9.1 Independent Zero-Trust Audit Remediation & Cryptographic Hardening**:
+  - 4-Layer Zero-Trust verification in `AuditReceipt::verify_receipt_and_attestation`: verifies on-disk artifact files (`01_candidate.diff`, `02_preflight.json`, `03_differential_diagnosis.json`, `04_regression_parity.json`, `04_audit_receipt.json`) against committed `EvidenceLeaf` `content_sha256` and `size_bytes`, cross-checks top-level `audit_receipt.json` against `04_audit_receipt.json`, fails closed (`Exit 40`) if `merkle_receipt.json` is missing or any artifact is tampered with on disk, and verifies `sweep_receipt.json` against per-bug receipts.
+  - Strict RFC 6962 `MerkleReceipt::verify_all` invariants (`tree_size == leaves.len()`, `proof.tree_size == tree_size`, `proof.leaf_index == idx`, unique leaf `file_name`, and empty remaining `audit_path` at `size == 1`).
+  - RFC 8785 Section 3.2.3 UTF-16 code-unit key sorting (`encode_utf16`) in `digest::canonical_json` with supplementary-plane surrogate-pair regression tests.
+  - `KeypairManager::load_or_generate` supporting `REPLAYFIX_SIGNING_KEY` and atomic key persistence (`atomic_write_file`).
+  - Harmonized `contracts/sweep_receipt.schema.json` with `SweepReceipt`, added pre/post `WorktreeManifest` $\Delta\text{repo}=0$ verification and `atomic_write_file` in `run_sweep`, and upgraded `ModelPool::race_candidates` to bounded concurrent scoped threads with per-task timeouts.
+  - 209 automated tests passing (170 core unit tests, 39 CLI integration tests); zero Clippy warnings; zero panics in production source.
 - [x] **v0.9.0 RFC 6962 Merkle Receipts, Ed25519 Attestation, 5-Bug Suite & Tri-Model Sweep**:
   - RFC 6962 compliant Merkle trees with explicit domain separation ($0x00$ leaf, $0x01$ node) and reproducible inclusion proofs across all disaggregated fact artifacts.
   - Pure Ed25519 cryptographic signing (`ed25519-dalek`) over versioned signing payload (`REPLAYFIX-ATTESTATION:v0.9:...`), public-key trust policies (`AllowAny`, `PinnedKeys`), and fail-closed exit code 40 (`RECEIPT_VERIFICATION_FAILED`).
@@ -98,11 +105,10 @@
 - Windows Smart App Control can block fresh build outputs: use `scripts/sign-build-outputs.ps1` (see `docs/windows-code-signing.md`).
 
 ## 4. Deferred Items (documented, not hidden)
-- `tracing_subscriber` is initialised but nothing logs yet; kept because later specs add structured logging.
-- Receipts are unsigned until Spec 090 (RFC 6962 Merkle tree + Ed25519 signature).
+- `tracing_subscriber` is initialised for structured diagnostic logging.
 
 ## 5. v1.0.0 Readiness
-- **Shipping status**: Progressing through roadmap. Next is Spec 090 (RFC 6962 Merkle receipt & benchmark suite).
+- **Shipping status**: Spec 000 through Spec 090 (`v0.9.1`) complete and verified. Ready for final v1.0.0 packaging and submission.
 
 ## 6. Next Immediate Task
-- Advance to Spec 090: `090-v0.9-merkle-receipt-benchmark-suite`.
+- Stand by for v0.9.1 release tagging / v1.0.0 Grand Finale packaging instructions.

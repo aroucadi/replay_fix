@@ -293,6 +293,28 @@ pub struct MerkleReceipt {
 impl MerkleReceipt {
     /// Verify all inclusion proofs against the recorded Merkle root.
     pub fn verify_all(&self) -> Result<bool> {
+        if self.schema_version != "0.9" {
+            return Err(CoreError::SecurityViolation(format!(
+                "Unsupported MerkleReceipt schema_version '{}': expected '0.9'",
+                self.schema_version
+            )));
+        }
+        if self.tree_size != self.leaves.len() {
+            return Err(CoreError::SecurityViolation(format!(
+                "MerkleReceipt tree_size {} does not match leaves count {}",
+                self.tree_size,
+                self.leaves.len()
+            )));
+        }
+        if self.tree_size == 0 {
+            if !self.inclusion_proofs.is_empty() {
+                return Err(CoreError::SecurityViolation(
+                    "Empty MerkleReceipt must not contain inclusion proofs".to_string(),
+                ));
+            }
+            return Ok(self.merkle_root == EMPTY_TREE_ROOT);
+        }
+
         let root_bytes = from_hex(&self.merkle_root).map_err(|e| {
             CoreError::SecurityViolation(format!("Invalid hex in receipt merkle_root: {}", e))
         })?;
@@ -304,7 +326,16 @@ impl MerkleReceipt {
         let mut root_arr = [0u8; 32];
         root_arr.copy_from_slice(&root_bytes);
 
+        let mut seen_filenames = std::collections::HashSet::with_capacity(self.leaves.len());
+
         for (idx, leaf) in self.leaves.iter().enumerate() {
+            if !seen_filenames.insert(&leaf.file_name) {
+                return Err(CoreError::SecurityViolation(format!(
+                    "Duplicate leaf file_name '{}' in MerkleReceipt",
+                    leaf.file_name
+                )));
+            }
+
             let leaf_hash = leaf.leaf_hash()?;
             let leaf_hash_hex = to_hex(&leaf_hash);
 
@@ -330,6 +361,13 @@ impl MerkleReceipt {
                 return Err(CoreError::SecurityViolation(format!(
                     "Inclusion proof leaf_index {} does not match leaf position {}",
                     proof.leaf_index, idx
+                )));
+            }
+
+            if proof.tree_size != self.tree_size {
+                return Err(CoreError::SecurityViolation(format!(
+                    "Inclusion proof tree_size {} does not match receipt tree_size {}",
+                    proof.tree_size, self.tree_size
                 )));
             }
 
@@ -567,5 +605,24 @@ mod tests {
         let mut missing_proof = base_receipt.clone();
         missing_proof.inclusion_proofs.remove("01_candidate.diff");
         assert!(missing_proof.verify_all().is_err());
+
+        // 6. Receipt tree_size tampering fail-closed
+        let mut tampered_tree_size = base_receipt.clone();
+        tampered_tree_size.tree_size = 2;
+        assert!(tampered_tree_size.verify_all().is_err());
+
+        // 7. Proof tree_size mismatch fail-closed
+        let mut tampered_proof_size = base_receipt.clone();
+        tampered_proof_size
+            .inclusion_proofs
+            .get_mut("01_candidate.diff")
+            .unwrap()
+            .tree_size = 99;
+        assert!(tampered_proof_size.verify_all().is_err());
+
+        // 8. Duplicate leaf file_name fail-closed
+        let mut duplicate_leaves = base_receipt;
+        duplicate_leaves.leaves[1].file_name = "01_candidate.diff".to_string();
+        assert!(duplicate_leaves.verify_all().is_err());
     }
 }

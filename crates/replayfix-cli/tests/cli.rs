@@ -897,10 +897,60 @@ fn test_sweep_all_five_bugs_cli() {
     assert_eq!(sweep_json["failed_bugs"], 0);
     assert!(sweep_json["elapsed_wall_clock_ms"].as_u64().unwrap() < 60_000);
 
-    // Each bug has its own receipt
+    // Each bug has its own receipt with merkle_root and attestation populated
     for bug in &["RF-01", "RF-02", "RF-03", "RF-04", "RF-05"] {
-        assert!(dir
-            .join(format!(".replayfix/{bug}/audit_receipt.json"))
-            .exists());
+        let bug_receipt_path = dir.join(format!(".replayfix/{bug}/audit_receipt.json"));
+        assert!(bug_receipt_path.exists());
+        let bug_rec = json(&bug_receipt_path);
+        assert!(bug_rec["merkle_root"].is_string());
+        assert!(bug_rec["attestation"].is_object());
     }
+
+    // Verify sweep_receipt.json cryptographically via verify-receipt
+    let verify_sweep = run_cmd(
+        &dir,
+        &["verify-receipt", ".replayfix/sweep_receipt.json", "--json"],
+    );
+    assert_eq!(
+        code(&verify_sweep),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&verify_sweep.stderr)
+    );
+    let vs_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&verify_sweep.stdout)).unwrap();
+    assert_eq!(vs_json["status"], "SUCCESS");
+    assert_eq!(vs_json["tree_size"], 5);
+}
+
+#[test]
+fn test_verify_receipt_on_disk_artifact_tampering_fails_exit_40() {
+    let dir = scratch("merkle-disk-tamper");
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(code(&out), 0);
+
+    // Tamper with 01_candidate.diff on disk without modifying merkle_receipt.json
+    let diff_path = dir.join(".replayfix/artifacts/01_candidate.diff");
+    fs::write(&diff_path, "evil injected backdoor diff").unwrap();
+
+    let verify_out = run_cmd(&dir, &["verify-receipt", ".replayfix/audit_receipt.json"]);
+    assert_eq!(code(&verify_out), 40);
+    let stderr = String::from_utf8_lossy(&verify_out.stderr);
+    assert!(stderr.contains("MERKLE_PROOF_INVALID"));
+}
+
+#[test]
+fn test_verify_receipt_deleted_merkle_receipt_fails_exit_40() {
+    let dir = scratch("merkle-deleted");
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(code(&out), 0);
+
+    // Remove both merkle_receipt.json files and verify that audit_receipt.json fails closed
+    let _ = fs::remove_file(dir.join(".replayfix/artifacts/merkle_receipt.json"));
+    let _ = fs::remove_file(dir.join(".replayfix/merkle_receipt.json"));
+
+    let verify_out = run_cmd(&dir, &["verify-receipt", ".replayfix/audit_receipt.json"]);
+    assert_eq!(code(&verify_out), 40);
+    let stderr = String::from_utf8_lossy(&verify_out.stderr);
+    assert!(stderr.contains("MERKLE_PROOF_INVALID"));
 }

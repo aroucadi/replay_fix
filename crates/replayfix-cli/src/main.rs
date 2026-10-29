@@ -14,18 +14,14 @@ pub mod approval;
 pub mod ui;
 
 use approval::{evaluate_approval_gate, write_approval_audit, ApprovalDecision, ApprovalMode};
-use replayfix_core::crypto::{
-    verify_attestation, AttestationRecord, TrustPolicy, VerificationOutcome,
-};
+use replayfix_core::crypto::{TrustPolicy, VerificationOutcome};
 use replayfix_core::ingestion::{
     ingest_issue, GitHubIssueRef, MockIssueFetcher, SystemIssueFetcher,
 };
-use replayfix_core::merkle::MerkleReceipt;
-use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
+use replayfix_core::receipt::{write_triage_report, AuditReceipt};
 use replayfix_core::sweep::{run_sweep, SweepOptions};
 use replayfix_core::trace::{is_ci_environment, launch_trace_viewer};
 use std::collections::HashSet;
-use std::fs;
 use std::io::IsTerminal;
 
 use clap::{Args, Parser, Subcommand};
@@ -800,9 +796,11 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     });
 
     match outcome {
-        HealOutcome::Verified(receipt) => {
-            let path = write_artifact(&out_dir, |dir| write_audit_receipt(dir, &receipt));
-            let _ = receipt.write_disaggregated_artifacts(&out_dir, Some(&diff), None);
+        HealOutcome::Verified(mut receipt) => {
+            write_artifact(&out_dir, |dir| {
+                receipt.write_disaggregated_artifacts(dir, Some(&diff), None)
+            });
+            let path = out_dir.join(replayfix_core::receipt::AUDIT_RECEIPT_FILE);
             print_step(
                 theme,
                 "Isolation",
@@ -1208,143 +1206,19 @@ fn handle_verify_receipt(
     json_output: bool,
     theme: &Theme,
 ) -> ! {
-    let target_file = if path.is_dir() {
-        let candidates = [
-            path.join("artifacts").join("merkle_receipt.json"),
-            path.join("merkle_receipt.json"),
-            path.join("artifacts").join("04_audit_receipt.json"),
-            path.join("audit_receipt.json"),
-        ];
-        candidates
-            .into_iter()
-            .find(|p| p.exists())
-            .unwrap_or_else(|| {
-                eprintln!(
-                    "  {} No receipt found in directory '{}'",
-                    theme.error(Symbols::CROSS),
-                    path.display()
-                );
-                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-            })
-    } else {
-        path
-    };
-
-    if !target_file.exists() {
-        eprintln!(
-            "  {} Receipt file '{}' does not exist",
-            theme.error(Symbols::CROSS),
-            target_file.display()
-        );
-        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-    }
-
-    let file_content = fs::read_to_string(&target_file).unwrap_or_else(|e| {
-        eprintln!(
-            "  {} Failed to read receipt '{}': {e}",
-            theme.error(Symbols::CROSS),
-            target_file.display()
-        );
-        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-    });
-
-    let json_val: serde_json::Value = serde_json::from_str(&file_content).unwrap_or_else(|e| {
-        eprintln!(
-            "  {} Malformed receipt JSON: {e}",
-            theme.error(Symbols::CROSS)
-        );
-        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-    });
-
-    // Check if it is a MerkleReceipt directly or an AuditReceipt
-    let (merkle_receipt, attestation) = if json_val.get("inclusion_proofs").is_some() {
-        let mr: MerkleReceipt = serde_json::from_value(json_val.clone()).unwrap_or_else(|e| {
-            eprintln!(
-                "  {} Malformed Merkle receipt: {e}",
-                theme.error(Symbols::CROSS)
-            );
-            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-        });
-        let att = mr.attestation.clone().or_else(|| {
-            let att_path = target_file.parent()?.join("attestation.json");
-            fs::read_to_string(att_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-        });
-        (Some(mr), att)
-    } else {
-        let att = json_val
-            .get("attestation")
-            .and_then(|v| serde_json::from_value::<AttestationRecord>(v.clone()).ok())
-            .or_else(|| {
-                let att_path = target_file.parent()?.join("attestation.json");
-                fs::read_to_string(att_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-            });
-        let mr = target_file
-            .parent()
-            .map(|p| p.join("merkle_receipt.json"))
-            .and_then(|p| fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str::<MerkleReceipt>(&s).ok());
-        (mr, att)
-    };
-
-    // 1. Verify Merkle inclusion proofs if present
-    if let Some(ref mr) = merkle_receipt {
-        match mr.verify_all() {
-            Ok(true) => {}
-            Ok(false) => {
-                eprintln!(
-                    "  {} MERKLE_PROOF_INVALID: One or more inclusion proofs failed verification against root {}",
-                    theme.error(Symbols::CROSS),
-                    mr.merkle_root
-                );
-                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-            }
-            Err(e) => {
-                eprintln!(
-                    "  {} MERKLE_PROOF_INVALID: Verification failed: {e}",
-                    theme.error(Symbols::CROSS)
-                );
-                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-            }
-        }
-    }
-
-    // 2. Verify Attestation
-    let att = match attestation {
-        Some(a) => a,
-        None => {
-            eprintln!(
-                "  {} SIGNATURE_VERIFICATION_FAILED: Missing cryptographic attestation",
-                theme.error(Symbols::CROSS)
-            );
-            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-        }
-    };
-
     let trust_policy = match trusted_key {
         Some(key) => TrustPolicy::PinnedKeys(HashSet::from([key.to_lowercase()])),
         None => TrustPolicy::AllowAny,
     };
 
-    let (merkle_root, tree_size) = if let Some(ref mr) = merkle_receipt {
-        (mr.merkle_root.as_str(), mr.tree_size)
-    } else {
-        ("", 0)
-    };
-
-    let outcome = match verify_attestation(&att, merkle_root, tree_size, &trust_policy) {
-        Ok(out) => out,
-        Err(e) => {
-            eprintln!(
-                "  {} SIGNATURE_VERIFICATION_FAILED: {e}",
-                theme.error(Symbols::CROSS)
-            );
-            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
-        }
-    };
+    let (outcome, att, merkle_root, tree_size) =
+        match AuditReceipt::verify_receipt_and_attestation(&path, &trust_policy) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("  {} {e}", theme.error(Symbols::CROSS));
+                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+            }
+        };
 
     if json_output {
         let out = serde_json::json!({

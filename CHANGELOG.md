@@ -9,8 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Roadmap to v1.0.0
 
-The full production release **v1.0.0** follows the completion of Spec 090:
+The full production release **v1.0.0** follows the completion of Spec 090 (`v0.9.1` release qualification):
 - Final submission package, live video demo assets, and submission manifest.
+
+---
+
+## [0.9.1] - 2026-10-29
+
+Independent Zero-Trust Qualification remediation for Spec 090: 4-Layer Cryptographic Trust Verification (Layer 1 on-disk artifact integrity, Layer 2 strict RFC 6962 tree-size/audit-path invariants, Layer 3 pure Ed25519 signature verification, Layer 4 public-key trust policy), RFC 8785 UTF-16 code-unit canonical JSON sorting, complete `audit_receipt.json` & `sweep_receipt.json` attestation binding, atomic key & sweep persistence, and bounded concurrent `ModelPool` execution. Full notes: [docs/release-notes/v0.9.1.md](docs/release-notes/v0.9.1.md).
+
+### Added
+- **4-Layer Zero-Trust Receipt & Sweep Verifier (`replayfix-core::receipt`, `replayfix-cli`)**: `AuditReceipt::verify_receipt_and_attestation` now performs end-to-end verification across all 4 trust layers:
+  - **Layer 1 (On-Disk Evidence Integrity)**: Re-reads every referenced artifact file in `<dir>/artifacts/<file_name>` on disk, verifies exact `size_bytes` and `content_sha256`, cross-checks top-level `audit_receipt.json` core fields against the committed `04_audit_receipt.json` leaf, and fails closed (`MERKLE_PROOF_INVALID`, exit code 40) if any file is tampered with or if `merkle_receipt.json` is deleted.
+  - **Layer 2 (Strict RFC 6962 Merkle Proofs)**: Enforces `tree_size == leaves.len()`, `proof.tree_size == receipt.tree_size`, `proof.leaf_index == idx`, unique leaf `file_name` entries, and empty remaining `audit_path` at `size == 1` (`verify_node`).
+  - **Layer 3 & Layer 4 (Ed25519 & Signer Trust Policy)**: Verifies pure Ed25519 signatures over `REPLAYFIX-ATTESTATION:v0.9:{schema}:{root}:{size}:{timestamp}` and supports direct cryptographic verification of `.replayfix/sweep_receipt.json` against per-bug receipts on disk.
+- **Persistent & Environment-Driven Ed25519 Key Management (`replayfix-core::crypto`)**: Added `KeypairManager::load_or_generate` following `ADR-03` priority (`REPLAYFIX_SIGNING_KEY` environment variable $\rightarrow$ `<output_dir>/keys/ed25519_signing.key` $\rightarrow$ atomic generation via `atomic_write_file`).
+- **RFC 8785 Surrogate-Pair UTF-16 Key Ordering Test (`replayfix-core::digest`)**: Enforced UTF-16 code-unit key sorting (`a.encode_utf16().cmp(b.encode_utf16())`) in `canonical_json` with regression coverage for supplementary-plane surrogate pairs (`\u{10000}` vs. `\u{E000}`).
+
+### Fixed
+- **Top-Level `audit_receipt.json` Attestation Completeness (`replayfix-core::receipt`, `replayfix-cli`)**: `AuditReceipt::write_disaggregated_artifacts` now populates `self.merkle_root` and `self.attestation` and atomically updates `<output_dir>/audit_receipt.json` across both single-bug and 5-bug sweep runs.
+- **Sweep Receipt Schema & Isolation Hardening (`replayfix-core::sweep`, `contracts/sweep_receipt.schema.json`)**: Aligned `contracts/sweep_receipt.schema.json` with `SweepReceipt` (removing non-canonical float fields), added pre/post `WorktreeManifest` $\Delta\text{repo}=0$ verification across the entire sweep, wired `options.live_browser`, hashed final on-disk per-bug receipts into the sweep Merkle root, and persisted `sweep_receipt.json` via `atomic_write_file`.
+- **Bounded Concurrent `ModelPool` Execution (`replayfix-core::repair`)**: Upgraded `ModelPool::race_candidates` to dispatch candidate generation across bounded scoped worker threads (`max_concurrent_tasks`) with per-task timeout enforcement (`timeout_per_task`).
 
 ---
 

@@ -1,14 +1,15 @@
 //! Spec 090: High-Performance Five-Bug Benchmark Sweep (`replayfix sweep`),
 //! Ephemeral Scratch Isolation, Aggregate Merkle Root, and Ed25519 Attestation.
 
+use crate::artifacts::atomic_write_file;
 use crate::crypto::{AttestationRecord, KeypairManager};
 use crate::digest::sha256_hex;
-use crate::engine::{HealOutcome, MockHealer};
+use crate::engine::{HealOutcome, LiveBrowserOptions, MockHealer};
 use crate::error::{CoreError, Result};
 use crate::fixtures::Fixture;
 use crate::merkle::{EvidenceLeaf, MerkleTree};
-use crate::receipt::{timestamp_now, write_audit_receipt, write_triage_report, SCHEMA_VERSION};
-use crate::worktree::ScratchSandbox;
+use crate::receipt::{timestamp_now, write_triage_report, SCHEMA_VERSION};
+use crate::worktree::{ScratchSandbox, WorktreeManifest};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -84,6 +85,11 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
 
     fs::create_dir_all(&options.output_dir)?;
 
+    let pre_manifest = WorktreeManifest::capture_with_excludes(
+        base_repo,
+        std::slice::from_ref(&options.output_dir),
+    )?;
+
     let mut results = BTreeMap::new();
     let mut leaves = Vec::new();
     let mut repaired_count = 0;
@@ -100,27 +106,47 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
         let sandbox = ScratchSandbox::create(base_repo, bug_id)?;
         sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
 
-        let outcome = MockHealer::run_in_repo_with_regression(
-            &fixture,
-            fixture.builtin_diff,
-            sandbox.root(),
-            std::slice::from_ref(&bug_out_dir),
-            false,
-        )?;
+        let outcome = if options.live_browser {
+            let live_opts = LiveBrowserOptions {
+                headed: false,
+                candidate_override: None,
+                video_path: None,
+                keyframe_dir: None,
+                model_slug: None,
+                repair_mode: None,
+                clean_ref: None,
+                verify_matrix: false,
+                mock_regression: false,
+            };
+            MockHealer::run_live_browser_in_repo(
+                &fixture,
+                fixture.builtin_diff,
+                sandbox.root(),
+                std::slice::from_ref(&bug_out_dir),
+                &live_opts,
+            )?
+        } else {
+            MockHealer::run_in_repo_with_regression(
+                &fixture,
+                fixture.builtin_diff,
+                sandbox.root(),
+                std::slice::from_ref(&bug_out_dir),
+                false,
+            )?
+        };
 
         let bug_elapsed = bug_start.elapsed().as_millis() as u64;
 
         match outcome {
-            HealOutcome::Verified(receipt) => {
+            HealOutcome::Verified(mut receipt) => {
                 repaired_count += 1;
-                let _ = write_audit_receipt(&bug_out_dir, &receipt);
-                let _ = receipt.write_disaggregated_artifacts(
+                receipt.write_disaggregated_artifacts(
                     &bug_out_dir,
                     Some(fixture.builtin_diff),
                     None,
-                );
+                )?;
 
-                let receipt_bytes = serde_json::to_vec_pretty(&receipt)?;
+                let receipt_bytes = fs::read(bug_out_dir.join("audit_receipt.json"))?;
                 let content_sha256 = sha256_hex(&receipt_bytes);
 
                 leaves.push(EvidenceLeaf {
@@ -146,9 +172,9 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
             }
             HealOutcome::Rejected(triage) => {
                 failed_count += 1;
-                let _ = write_triage_report(&bug_out_dir, &triage);
+                write_triage_report(&bug_out_dir, &triage)?;
 
-                let triage_bytes = serde_json::to_vec_pretty(&triage)?;
+                let triage_bytes = fs::read(bug_out_dir.join("triage_report.json"))?;
                 let content_sha256 = sha256_hex(&triage_bytes);
 
                 leaves.push(EvidenceLeaf {
@@ -175,9 +201,16 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
         }
     }
 
+    let post_manifest = WorktreeManifest::capture_with_excludes(
+        base_repo,
+        std::slice::from_ref(&options.output_dir),
+    )?;
+    pre_manifest.verify_unchanged(&post_manifest)?;
+
     let merkle_tree = MerkleTree::new(leaves)?;
     let merkle_root = merkle_tree.root_hex();
-    let keypair = KeypairManager::generate();
+    let key_dir = options.output_dir.join("keys");
+    let keypair = KeypairManager::load_or_generate(Some(&key_dir))?;
     let now = timestamp_now();
     let attestation = keypair.sign(SCHEMA_VERSION, &merkle_root, merkle_tree.len(), &now)?;
 
@@ -197,7 +230,7 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
 
     let receipt_path = options.output_dir.join("sweep_receipt.json");
     let json_bytes = serde_json::to_vec_pretty(&receipt)?;
-    fs::write(receipt_path, json_bytes)?;
+    atomic_write_file(&receipt_path, &json_bytes)?;
 
     Ok(receipt)
 }

@@ -62,10 +62,48 @@ impl std::fmt::Debug for KeypairManager {
 
 impl KeypairManager {
     /// Generate an ephemeral keypair using system randomness.
+    /// If `REPLAYFIX_SIGNING_KEY` is set to a valid 64-character hex seed, uses that key.
     #[must_use]
     pub fn generate() -> Self {
+        if let Ok(env_hex) = std::env::var("REPLAYFIX_SIGNING_KEY") {
+            if !env_hex.trim().is_empty() {
+                if let Ok(kp) = Self::from_hex(env_hex.trim()) {
+                    return kp;
+                }
+            }
+        }
         let signing_key = SigningKey::generate(&mut OsRng);
         Self { signing_key }
+    }
+
+    /// Resolve a signing key following ADR-03 priority:
+    /// 1. `REPLAYFIX_SIGNING_KEY` environment variable (fails closed if set but malformed).
+    /// 2. Persisted key at `<key_dir>/ed25519_signing.key` if `key_dir` is provided.
+    /// 3. Freshly generated keypair (atomically persisted to `<key_dir>/ed25519_signing.key` if `key_dir` is provided).
+    pub fn load_or_generate(key_dir: Option<&std::path::Path>) -> Result<Self> {
+        if let Ok(env_hex) = std::env::var("REPLAYFIX_SIGNING_KEY") {
+            let trimmed = env_hex.trim();
+            if !trimmed.is_empty() {
+                return Self::from_hex(trimmed);
+            }
+        }
+
+        if let Some(dir) = key_dir {
+            std::fs::create_dir_all(dir)?;
+            let priv_path = dir.join("ed25519_signing.key");
+            let pub_path = dir.join("ed25519_signing.pub");
+            if priv_path.exists() {
+                let raw = std::fs::read_to_string(&priv_path)?;
+                return Self::from_hex(raw.trim());
+            }
+            let kp = Self::generate();
+            let secret_hex = to_hex(&kp.signing_key.to_bytes());
+            crate::artifacts::atomic_write_file(&priv_path, secret_hex.as_bytes())?;
+            crate::artifacts::atomic_write_file(&pub_path, kp.public_key_hex().as_bytes())?;
+            return Ok(kp);
+        }
+
+        Ok(Self::generate())
     }
 
     /// Load a signing key from raw 32-byte secret key bytes.
@@ -297,5 +335,21 @@ mod tests {
 
         let err = verify_attestation(&attestation, "abc", 1, &TrustPolicy::PinnedKeys(pinned));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_keypair_load_or_generate_persists_and_reloads_atomically() {
+        let dir =
+            std::env::temp_dir().join(format!("replayfix-crypto-keydir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let kp1 = KeypairManager::load_or_generate(Some(&dir)).unwrap();
+        assert!(dir.join("ed25519_signing.key").exists());
+        assert!(dir.join("ed25519_signing.pub").exists());
+
+        let kp2 = KeypairManager::load_or_generate(Some(&dir)).unwrap();
+        assert_eq!(kp1.public_key_hex(), kp2.public_key_hex());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

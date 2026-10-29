@@ -112,4 +112,24 @@ mod tests {
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
+
+    #[test]
+    fn test_canonical_json_rfc8785_utf16_surrogate_ordering() {
+        // RFC 8785 Section 3.2.3:
+        // U+E000 (Private Use) has UTF-16 code unit 0xE000.
+        // U+10000 (Linear B Syllable B008 A) has UTF-16 surrogate pair [0xD800, 0xDC00].
+        // In UTF-8 byte order / Unicode code point order, U+E000 < U+10000.
+        // In UTF-16 code unit order (RFC 8785 JCS), 0xD800 < 0xE000, so U+10000 MUST come before U+E000.
+        let val = json!({
+            "\u{E000}": "bmp_high",
+            "\u{10000}": "supplementary_surrogate"
+        });
+        let canonical = canonical_json(&val).unwrap();
+        let pos_supp = canonical.find('\u{10000}').unwrap();
+        let pos_bmp = canonical.find('\u{E000}').unwrap();
+        assert!(
+            pos_supp < pos_bmp,
+            "RFC 8785 requires UTF-16 code-unit sorting where U+10000 (0xD800) precedes U+E000 (0xE000), got: {canonical}"
+        );
+    }
 }
