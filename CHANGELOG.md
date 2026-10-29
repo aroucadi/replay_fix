@@ -17,6 +17,21 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.8.1] - 2026-10-29
+
+Security hardening, terminal injection defense, authenticated issue ingestion, and specification harmonization for v0.8.x baseline qualification freeze. Full notes: [docs/release-notes/v0.8.1.md](docs/release-notes/v0.8.1.md).
+
+### Added
+- **Adversarial Prompt Injection Defense (`replayfix-core::ingestion`)**: Entity-escapes embedded `<UNTRUSTED_ISSUE_METADATA>` and `</UNTRUSTED_ISSUE_METADATA>` delimiters within issue titles, reproduction steps, and raw markdown bodies.
+- **Authenticated GitHub Issue Retrieval (`replayfix-core::ingestion`)**: Supports `GH_TOKEN` / `GITHUB_TOKEN` environment variables to prevent rate limiting (60/hr) and access private issues without credential leakage.
+- **Terminal Injection Sanitization (`replayfix-cli::approval`)**: Neutralizes raw ANSI control characters (`\x1b` -> `^[`) in diff previews, preventing terminal hijack vulnerabilities.
+- **Interactive EOF Fail-Closed Handling (`replayfix-cli::approval`)**: Ensures non-affirmative EOF triggers fail-closed `ManualNegative` rejection.
+
+### Changed
+- **Spec 080 Harmonization**: Synchronized acceptance criteria exit codes in `specs/080-v0.8-observability-ingestion/spec.md` with Section 4 mapping (12, 13, 23, 24).
+
+---
+
 ## [0.8.0] - 2026-10-29
 
 Observability suite, live GitHub issue ingestion, interactive human confirmation gate, and disaggregated evidence artifacts for Spec 080. Full notes: [docs/release-notes/v0.8.0.md](docs/release-notes/v0.8.0.md).

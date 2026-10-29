@@ -689,9 +689,10 @@ fn test_trace_generates_zip_and_skips_gui_in_non_interactive() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Trace Export"));
     assert!(stdout.contains("true"));
-    assert!(dir
-        .join(".replayfix/artifacts/playwright.trace.zip")
-        .exists());
+    let trace_path = dir.join(".replayfix/artifacts/playwright.trace.zip");
+    assert!(trace_path.exists());
+    let trace_meta = fs::metadata(&trace_path).unwrap();
+    assert!(trace_meta.len() > 0);
 }
 
 #[test]

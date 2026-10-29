@@ -30,34 +30,40 @@ pub struct ApprovalAudit {
     pub tty_detected: bool,
 }
 
+/// Strip or neutralize raw ANSI escape codes to prevent terminal injection.
+fn sanitize_ansi(s: &str) -> String {
+    s.replace('\x1b', "^[")
+}
+
 /// Highlight unified diff syntax using standard ANSI escape codes.
 #[must_use]
 pub fn highlight_diff(diff: &str) -> String {
     let mut out = String::with_capacity(diff.len() + 1024);
 
     for line in diff.lines() {
-        if line.starts_with("+++") || line.starts_with("---") {
+        let clean = sanitize_ansi(line);
+        if clean.starts_with("+++") || clean.starts_with("---") {
             out.push_str("\x1b[1;37m"); // Bold White
-            out.push_str(line);
+            out.push_str(&clean);
             out.push_str("\x1b[0m\n");
-        } else if line.starts_with("diff --git") || line.starts_with("index ") {
+        } else if clean.starts_with("diff --git") || clean.starts_with("index ") {
             out.push_str("\x1b[1;34m"); // Bold Blue
-            out.push_str(line);
+            out.push_str(&clean);
             out.push_str("\x1b[0m\n");
-        } else if line.starts_with("@@") {
+        } else if clean.starts_with("@@") {
             out.push_str("\x1b[36m"); // Cyan
-            out.push_str(line);
+            out.push_str(&clean);
             out.push_str("\x1b[0m\n");
-        } else if line.starts_with('+') {
+        } else if clean.starts_with('+') {
             out.push_str("\x1b[32m"); // Green
-            out.push_str(line);
+            out.push_str(&clean);
             out.push_str("\x1b[0m\n");
-        } else if line.starts_with('-') {
+        } else if clean.starts_with('-') {
             out.push_str("\x1b[31m"); // Red
-            out.push_str(line);
+            out.push_str(&clean);
             out.push_str("\x1b[0m\n");
         } else {
-            out.push_str(line);
+            out.push_str(&clean);
             out.push('\n');
         }
     }
@@ -338,5 +344,31 @@ mod tests {
 
         assert_eq!(res.decision, ApprovalDecision::Rejected);
         assert_eq!(res.audit.mode, ApprovalMode::ManualNegative);
+    }
+
+    #[test]
+    fn interactive_eof_rejects_fail_closed() {
+        let mut input = io::Cursor::new(b"");
+        let mut output = Vec::new();
+        let res = evaluate_approval_gate(
+            SAMPLE_DIFF,
+            false,
+            Some(true),
+            Some(&mut input),
+            Some(&mut output),
+        )
+        .unwrap();
+
+        assert_eq!(res.decision, ApprovalDecision::Rejected);
+        assert_eq!(res.audit.mode, ApprovalMode::ManualNegative);
+    }
+
+    #[test]
+    fn raw_ansi_escape_bytes_are_neutralized_in_diff() {
+        let malicious_diff = "+++ b/malicious.js\n+\x1b[31;1mInjected ANSI code\x1b[0m\n";
+        let highlighted = highlight_diff(malicious_diff);
+        // Ensure no raw \x1b exists inside the diff text itself (only outer styling)
+        assert!(!highlighted.contains("+\x1b[31;1m"));
+        assert!(highlighted.contains("^["));
     }
 }

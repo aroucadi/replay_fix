@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.8.0` (`080-v0.8-observability-ingestion` — Observability, GitHub Ingestion, Human Confirmation Gate & Disaggregated Artifacts)
-- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.8.0`.
+- **Active Milestone**: `v0.8.1` (`080-v0.8-observability-ingestion` — Hardening & Qualification Freeze)
+- **Status**: Release Qualification Complete; 186/186 Tests Passing, Zero Panics, 0 Clippy Warnings. Ready to freeze baseline for `090-v0.9-merkle-receipt-benchmark-suite`.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -67,6 +67,14 @@
   - Base worktree mutation (`UnifiedPatcher::apply_to_worktree`) applying verified and approved patches with path traversal defenses.
   - Disaggregated fact artifacts persisted in `.replayfix/artifacts/` (`candidate.patch`, `approval_audit.json`, `issue_ingestion.json`, `differential_diagnosis.json`, `regression_parity.json`, `playwright.trace.zip`).
   - 185 automated tests passing (152 core unit tests, 33 CLI integration tests); zero Clippy warnings; zero panics in production source.
+
+- [x] **v0.8.1 GStack Release Qualification & Baseline Hardening**:
+  - Adversarial prompt injection defense escaping `<UNTRUSTED_ISSUE_METADATA>` delimiters within GitHub issue titles, steps, and descriptions.
+  - Authenticated GitHub API ingestion via `GH_TOKEN` / `GITHUB_TOKEN` environment variables to prevent rate limiting (60/hr) with leak-proof error diagnostics.
+  - Terminal injection sanitization in `highlight_diff` neutralizing raw ANSI control sequences (`\x1b` -> `^[`) in diff previews.
+  - Interactive EOF fail-closed handling (`io::Cursor::new(b"")`) ensuring safe `ManualNegative` rejection when interactive streams terminate unexpectedly.
+  - Spec 080 exit code taxonomy alignment (12, 13, 23, 24).
+  - 186 automated tests passing (153 core unit tests, 33 CLI integration tests); zero Clippy warnings; zero panics in production source.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.

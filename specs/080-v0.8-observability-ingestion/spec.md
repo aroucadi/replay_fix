@@ -36,7 +36,7 @@ As a developer or hackathon judge, I want ReplayFix to automatically collect and
 As an engineer fixing an open-source issue, I want to pass `--issue https://github.com/owner/repo/issues/123` to ReplayFix, so that it automatically ingests the title, issue body, and reproduction steps into a normalized task manifest.
 
 - **Acceptance Criteria**:
-  - Strict URL validation: must match `^https://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/issues/(\d+)$`. Pull requests, commits, and arbitrary hosts are rejected immediately (exit code 20).
+  - Strict URL validation: must match `^https://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)/issues/(\d+)$`. Pull requests, commits, and arbitrary hosts are rejected immediately (exit code 23).
   - Robust retrieval: retrieves issue JSON via GitHub REST API (or fallback to `gh issue view` if available/configured) with timeouts (default 10s), size limits (max 512KB), and polite User-Agent headers.
   - Untrusted input isolation: the issue body is treated strictly as untrusted context (wrapped in `<UNTRUSTED_ISSUE_BODY>` guards) and never executed directly as shell commands.
   - Extraction: parses markdown headers/lists for steps to reproduce (e.g. `### Steps to Reproduce`, `1. Click X...`) into candidate user actions.
@@ -49,8 +49,8 @@ As a repository owner, I want ReplayFix to preview the unified diff with colored
   - After Gate 2 (Green) and Regression Parity pass, before `apply_patch_to_base()` is invoked, ReplayFix displays the candidate unified diff with ANSI colored formatting (+green, -red, @cyan).
   - Displays summary: files modified, insertions, deletions, and candidate patch SHA-256.
   - Prompts `Apply patch to base repository? [y/N]: `.
-  - In interactive TTY: requires affirmative `y` or `yes` (case-insensitive). Refusal (`n` or blank Enter for default No) aborts the write cleanly with exit code 10 (`UserRejectedPatch`), leaving base repo unchanged ($\Delta\text{repo}=0$).
-  - In non-interactive environments: if `--yes` flag is passed, automatically confirms; if `--yes` is absent in non-interactive environment, fails closed with exit code 11 (`NonInteractiveRefusal`), preserving $\Delta\text{repo}=0$.
+  - In interactive TTY: requires affirmative `y` or `yes` (case-insensitive). Refusal (`n` or blank Enter for default No) aborts the write cleanly with exit code 12 (`UserRejectedPatch`), leaving base repo unchanged ($\Delta\text{repo}=0$).
+  - In non-interactive environments: if `--yes` flag is passed, automatically confirms; if `--yes` is absent in non-interactive environment, fails closed with exit code 13 (`NonInteractiveRefusal`), preserving $\Delta\text{repo}=0$.
   - Generates `.replayfix/artifacts/approval_audit.json` recording user decision, timestamp, TTY mode, and patch SHA-256.
 
 ### User Story 4 (US4) - Disaggregated Fact Artifacts
