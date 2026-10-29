@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.7.0` (`070-v0.7-differential-diagnosis-anticheat` — Differential Diagnosis, Surgical Anti-Cheat, Regression Parity & Resumable Checkpoints)
-- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.7.0`.
+- **Active Milestone**: `v0.7.1` (`070-v0.7-differential-diagnosis-anticheat-hardening` — DiffGuard, Active Regression Wiring, CheckpointManager & Spec Inoculation)
+- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.7.1`.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -51,6 +51,16 @@
   - Schema bumped to `"0.7"` with disaggregated stage artifacts (`candidate.patch`, `repro_spec.json`, `differential_diagnosis.json`, `regression_parity.json`).
   - New subcommand `freeze-spec --bug <ID>` and CLI flags `--clean-ref <REF>`, `--verify-matrix`, `--mock-pkg-test-mutation`.
   - 168 automated tests passing (139 core unit tests, 27 CLI integration tests, 2 CLI unit tests); zero panic violations; zero clippy warnings.
+- [x] **v0.7.1 Spec 070 Hardening, Active Regression Parity & Inoculation**:
+  - Dedicated `DiffGuard` module (`crates/replayfix-core/src/diffguard.rs`) enforcing runner configuration immutability and structural `package.json` script locking.
+  - Active `RegressionEvaluator::evaluate` and test snapshot discovery wiring into `engine.rs`, rejecting test regressions with exit code 31 (`REGRESSION_DETECTED`).
+  - `CheckpointManager` orchestrating monotonic stage advancement, durable disk persistence of `session_state.json`, and staleness invalidation.
+  - `replayfix freeze-spec --bug <ID>` generating permanent Playwright regression tests (`tests/repro/rf_{id}_regression.spec.ts`) with immutable cryptographic aggregate SHA-256 headers.
+  - Complete numbered fact artifacts suite (`01_candidate.diff`, `02_preflight.json`, `03_differential_diagnosis.json`, `04_regression_parity.json`, `04_audit_receipt.json`).
+  - Real git ref resolution via `resolve_git_ref`.
+  - Added CLI flag `--mock-regression` and integration test asserting exit code 31.
+  - 174 automated tests passing (144 core unit tests, 28 CLI integration tests, 2 CLI unit tests); zero panic violations; zero clippy warnings.
+
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
@@ -65,4 +75,4 @@
 - **Shipping status**: BLOCKED until Specs 070–090 are implemented and verified.
 
 ## 6. Next Immediate Task
-- Advance to Spec 070: `070-v0.7-differential-diagnosis-anticheat`.
+- Advance to Spec 080: `080-v0.8-observability-github-ingestion`.

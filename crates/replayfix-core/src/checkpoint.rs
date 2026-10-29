@@ -4,7 +4,7 @@
 use crate::error::{CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Checkpoint version constant conforming to session_state.schema.json.
 pub const CHECKPOINT_VERSION: &str = "1.0";
@@ -180,6 +180,70 @@ impl SessionStateCheckpoint {
     }
 }
 
+/// Checkpoint manager that orchestrates monotonic stage advances,
+/// disk persistence to `session_state.json`, and freshness validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckpointManager {
+    pub checkpoint: SessionStateCheckpoint,
+    pub checkpoint_path: PathBuf,
+}
+
+impl CheckpointManager {
+    /// Initialize a new CheckpointManager and save the initial checkpoint.
+    pub fn init(
+        bug_id: impl Into<String>,
+        base_repo_head: impl Into<String>,
+        manifest_sha256: impl Into<String>,
+        contract_digest: impl Into<String>,
+        checkpoint_path: PathBuf,
+        now_epoch: u64,
+        ttl_seconds: Option<u64>,
+    ) -> Result<Self> {
+        let checkpoint = SessionStateCheckpoint::new(
+            bug_id,
+            base_repo_head,
+            manifest_sha256,
+            contract_digest,
+            now_epoch,
+            ttl_seconds,
+        );
+        checkpoint.save_to_path(&checkpoint_path)?;
+        Ok(Self {
+            checkpoint,
+            checkpoint_path,
+        })
+    }
+
+    /// Advance to the next legal stage and persist immediately.
+    pub fn advance(&mut self, next: CheckpointStage) -> Result<()> {
+        self.checkpoint.advance_to(next)?;
+        self.checkpoint.save_to_path(&self.checkpoint_path)?;
+        Ok(())
+    }
+
+    /// Update stage artifacts and persist.
+    pub fn update_artifacts(&mut self, artifacts: StageArtifacts) -> Result<()> {
+        self.checkpoint.stage_artifacts = artifacts;
+        self.checkpoint.save_to_path(&self.checkpoint_path)?;
+        Ok(())
+    }
+
+    /// Resume an existing session, verifying freshness, git HEAD, and manifest hash.
+    pub fn resume(
+        path: &Path,
+        expected_head: &str,
+        expected_manifest: &str,
+        now_epoch: u64,
+    ) -> Result<Self> {
+        let checkpoint = SessionStateCheckpoint::load_from_path(path)?;
+        checkpoint.validate_freshness(expected_head, expected_manifest, now_epoch)?;
+        Ok(Self {
+            checkpoint,
+            checkpoint_path: path.to_path_buf(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +360,40 @@ mod tests {
         assert_eq!(
             loaded.stage_artifacts.candidate_diff_path.as_deref(),
             Some(".replayfix/candidate.patch")
+        );
+    }
+
+    #[test]
+    fn test_checkpoint_manager_lifecycle() {
+        let guard = TempDirGuard::new("manager");
+        let cp_path = guard.path().join("session_state.json");
+
+        let mut mgr = CheckpointManager::init(
+            "RF-01",
+            "commit123",
+            "manifest123",
+            "contract123",
+            cp_path.clone(),
+            1000,
+            Some(3600),
+        )
+        .unwrap();
+
+        assert_eq!(mgr.checkpoint.current_stage, CheckpointStage::Initialized);
+        assert!(cp_path.exists());
+
+        mgr.advance(CheckpointStage::ReproducedGate1Red).unwrap();
+        assert_eq!(
+            mgr.checkpoint.current_stage,
+            CheckpointStage::ReproducedGate1Red
+        );
+
+        // Test resume
+        let resumed =
+            CheckpointManager::resume(&cp_path, "commit123", "manifest123", 1500).unwrap();
+        assert_eq!(
+            resumed.checkpoint.current_stage,
+            CheckpointStage::ReproducedGate1Red
         );
     }
 }

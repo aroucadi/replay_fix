@@ -12,6 +12,7 @@
 
 pub mod browser;
 pub mod checkpoint;
+pub mod diffguard;
 pub mod digest;
 pub mod doctor;
 pub mod engine;
@@ -32,9 +33,10 @@ pub mod worktree;
 
 pub use browser::{BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer};
 pub use checkpoint::{
-    CheckpointStage, SessionStateCheckpoint, StageArtifacts, CHECKPOINT_VERSION,
+    CheckpointManager, CheckpointStage, SessionStateCheckpoint, StageArtifacts, CHECKPOINT_VERSION,
     DEFAULT_CHECKPOINT_TTL_SECONDS,
 };
+pub use diffguard::DiffGuard;
 pub use digest::{canonical_json, sha256_hex};
 pub use doctor::{DependencyCheck, DependencyStatus, Doctor, DoctorReport};
 pub use engine::{

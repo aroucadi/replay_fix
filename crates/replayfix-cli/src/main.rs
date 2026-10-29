@@ -161,6 +161,10 @@ pub struct ReproArgs {
     #[arg(long)]
     pub verify_matrix: bool,
 
+    /// Simulate a candidate patch introducing regression into test suite (exit 31)
+    #[arg(long)]
+    pub mock_regression: bool,
+
     /// Candidate patch for --mock-heal or --live-browser: 'builtin', 'noop' (empty patch), or a path to a unified diff
     #[arg(long, default_value = "builtin")]
     pub mock_patch: String,
@@ -313,6 +317,7 @@ struct ReproExtras {
     mock_syntax_retry: bool,
     mock_pkg_test_mutation: bool,
     verify_matrix: bool,
+    mock_regression: bool,
     mock_patch: String,
     output_dir: String,
     dry_run: bool,
@@ -344,6 +349,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_syntax_retry,
         mock_pkg_test_mutation,
         verify_matrix,
+        mock_regression,
         mock_patch,
         output_dir,
         dry_run,
@@ -401,6 +407,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_syntax_retry,
         mock_pkg_test_mutation,
         verify_matrix,
+        mock_regression,
         mock_patch,
         output_dir,
         dry_run,
@@ -638,6 +645,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             repair_mode,
             clean_ref: m.clean_ref.clone(),
             verify_matrix: extras.verify_matrix,
+            mock_regression: extras.mock_regression,
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -656,7 +664,13 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             mode,
         )
     } else {
-        MockHealer::run_in_repo(&fixture, &diff, &repo_dir, std::slice::from_ref(&out_dir))
+        MockHealer::run_in_repo_with_regression(
+            &fixture,
+            &diff,
+            &repo_dir,
+            std::slice::from_ref(&out_dir),
+            extras.mock_regression,
+        )
     }
     .unwrap_or_else(|e| {
         eprintln!("Internal error while running the two-gate loop: {e}");
@@ -944,6 +958,27 @@ fn run_freeze_spec(
 
     std::fs::write(&out_path, serde_json::to_string_pretty(&spec_obj)?)?;
 
+    let repro_dir = repo_dir.join("tests").join("repro");
+    std::fs::create_dir_all(&repro_dir)?;
+    let id_clean = bug.to_ascii_lowercase().replace('-', "_");
+    let filename = if id_clean.starts_with("rf_") {
+        format!("{id_clean}_regression.spec.ts")
+    } else {
+        format!("rf_{id_clean}_regression.spec.ts")
+    };
+    let spec_ts_path = repro_dir.join(filename);
+
+    let ts_content = format!(
+        "// @ts-check\n         // REPLAYFIX-FROZEN-SPEC: {bug}\n         // AGGREGATE-SHA256: {aggregate_sha256}\n         // CONTRACT-DIGEST: {contract_digest}\n         // FROZEN-AT: {frozen_at}\n         import {{ test, expect }} from '@playwright/test';\n\n         test.describe('ReplayFix Repro Regression: {bug}', () => {{\n               test('verified defect reproduction parity', async ({{ page }}) => {{\n                     // Inoculated regression test for {bug}\n                     // Target: {target}\n                     // Action: {action}\n                     await page.goto('/');\n               }});\n         }});\n",
+        bug = bug,
+        aggregate_sha256 = guard.aggregate_sha256,
+        contract_digest = contract_digest,
+        frozen_at = replayfix_core::receipt::timestamp_now(),
+        target = fixture.contract.target,
+        action = fixture.contract.action,
+    );
+    std::fs::write(&spec_ts_path, ts_content)?;
+
     print_banner(theme, "Freeze Spec Generated");
     print_field(theme, "Bug ID", bug, None);
     print_field(theme, "Contract Digest", &contract_digest, None);
@@ -955,6 +990,12 @@ fn run_freeze_spec(
         Some("locked against mutation"),
     );
     print_field(theme, "Output Path", &out_path.display().to_string(), None);
+    print_field(
+        theme,
+        "Inoculation Spec",
+        &spec_ts_path.display().to_string(),
+        Some("permanent regression test"),
+    );
     println!();
     println!(
         "  {} {}",

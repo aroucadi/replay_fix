@@ -995,17 +995,7 @@ impl BlockPatcher {
         patch: &StructuredRepairPatch,
         freeze_guard: &TestFreezeGuard,
     ) -> Result<PatchOutcome> {
-        let safe_target = freeze_guard.validate_target_path(&patch.target_file)?;
-
-        if safe_target == "package.json" {
-            let lower_search = patch.search_block.to_ascii_lowercase();
-            let lower_replace = patch.replace_block.to_ascii_lowercase();
-            if lower_search.contains("test") || lower_replace.contains("test") {
-                return Err(CoreError::SecurityViolation(
-                    "TEST_MUTATION_PROHIBITED: package.json test scripts altered".to_string(),
-                ));
-            }
-        }
+        let safe_target = crate::diffguard::DiffGuard::validate_patch(patch, freeze_guard)?;
 
         let expected_clean = expected_target_file.trim().replace('\\', "/");
         if safe_target != expected_clean {

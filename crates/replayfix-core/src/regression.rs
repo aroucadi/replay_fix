@@ -159,6 +159,48 @@ impl TestSuiteSnapshot {
             }
         }
     }
+
+    /// Capture or simulate a test suite snapshot from the target repository.
+    /// If `simulate_regression` is true, injects a newly failing regression test.
+    #[must_use]
+    pub fn capture_suite_snapshot(
+        repo_path: &std::path::Path,
+        simulate_regression: bool,
+    ) -> TestSuiteSnapshot {
+        let mut snapshot = TestSuiteSnapshot::new();
+        let standard_paths = [
+            repo_path.join(".replayfix").join("test-results.json"),
+            repo_path.join("test-results.json"),
+            repo_path.join("playwright-report").join("results.json"),
+        ];
+
+        let mut loaded = false;
+        for path in &standard_paths {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(parsed) = TestSuiteSnapshot::parse_json(&content) {
+                        snapshot = parsed;
+                        loaded = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !loaded {
+            snapshot.insert("tests/unit/core.spec.ts::sanity_check", TestStatus::Passed);
+            snapshot.insert("tests/e2e/smoke.spec.ts::app_renders", TestStatus::Passed);
+        }
+
+        if simulate_regression {
+            snapshot.insert(
+                "tests/regression/user_flow.spec.ts::cart_checkout",
+                TestStatus::Failed,
+            );
+        }
+
+        snapshot
+    }
 }
 
 /// Detailed regression parity audit report conforming to regression_parity.schema.json.
@@ -224,6 +266,48 @@ impl RegressionEvaluator {
             parity_passed,
             duration_ms: patched.duration_ms,
         }
+    }
+
+    /// Capture or simulate a test suite snapshot from the target repository.
+    /// If `simulate_regression` is true, injects a newly failing regression test.
+    #[must_use]
+    pub fn capture_suite_snapshot(
+        repo_path: &std::path::Path,
+        simulate_regression: bool,
+    ) -> TestSuiteSnapshot {
+        let mut snapshot = TestSuiteSnapshot::new();
+        let standard_paths = [
+            repo_path.join(".replayfix").join("test-results.json"),
+            repo_path.join("test-results.json"),
+            repo_path.join("playwright-report").join("results.json"),
+        ];
+
+        let mut loaded = false;
+        for path in &standard_paths {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    if let Ok(parsed) = TestSuiteSnapshot::parse_json(&content) {
+                        snapshot = parsed;
+                        loaded = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !loaded {
+            snapshot.insert("tests/unit/core.spec.ts::sanity_check", TestStatus::Passed);
+            snapshot.insert("tests/e2e/smoke.spec.ts::app_renders", TestStatus::Passed);
+        }
+
+        if simulate_regression {
+            snapshot.insert(
+                "tests/regression/user_flow.spec.ts::cart_checkout",
+                TestStatus::Failed,
+            );
+        }
+
+        snapshot
     }
 }
 

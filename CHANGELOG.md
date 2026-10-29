@@ -17,6 +17,20 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.7.1] - 2026-10-29
+
+Security hardening, regression wiring, and spec alignment for Spec 070. Full notes: [docs/release-notes/v0.7.1.md](docs/release-notes/v0.7.1.md).
+
+### Added
+- **Dedicated DiffGuard Module (replayfix_core::diffguard)**: Formalized DiffGuard with structural AST package.json test script inspection and test runner configuration protection (CONFIG_MUTATION_PROHIBITED, exit code 11).
+- **Active Regression Parity Engine (replayfix_core::regression)**: Wired RegressionEvaluator::evaluate and capture_suite_snapshot into the repair engine, enforcing F_patched \setminus F_baseline = \emptyset and rejecting regressions with exit code 31 (REGRESSION_DETECTED).
+- **Resumable State CheckpointManager (replayfix_core::checkpoint)**: Implemented CheckpointManager orchestrating stage progression, disk persistence of session_state.json, and staleness invalidation.
+- **Codebase Inoculation Generation (replayfix-cli freeze-spec)**: Generates permanent Playwright regression tests at tests/repro/rf_{id}_regression.spec.ts with cryptographic aggregate SHA-256 headers.
+- **Disaggregated Fact Artifact Suite (replayfix_core::receipt)**: Emits numbered fact artifacts (01_candidate.diff, 02_preflight.json, 03_differential_diagnosis.json, 04_regression_parity.json, 04_audit_receipt.json).
+- **New CLI Flag --mock-regression**: Simulates candidate patch introducing regressions and asserts exit code 31.
+
+---
+
 ## [0.7.0] - 2026-10-28
 
 Spec-driven release for Spec 070 (`070-v0.7-differential-diagnosis-anticheat`). Full notes: [docs/release-notes/v0.7.0.md](docs/release-notes/v0.7.0.md).

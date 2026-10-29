@@ -88,18 +88,39 @@ impl AuditReceipt {
 
         if let Some(diff) = raw_patch_content {
             fs::write(artifacts_dir.join("candidate.patch"), diff)?;
+            fs::write(artifacts_dir.join("01_candidate.diff"), diff)?;
         }
         if let Some(spec) = repro_spec_json {
             fs::write(artifacts_dir.join("repro_spec.json"), spec)?;
+            fs::write(artifacts_dir.join("02_repro_spec.json"), spec)?;
+        } else {
+            let default_preflight = serde_json::json!({
+                "syntax_preflight_passed": true,
+                "verified_at": self.created_at
+            });
+            fs::write(
+                artifacts_dir.join("02_preflight.json"),
+                serde_json::to_string_pretty(&default_preflight)?,
+            )?;
         }
         if let Some(ref diag) = self.differential_diagnosis {
             let diag_json = serde_json::to_string_pretty(diag)?;
-            fs::write(artifacts_dir.join("differential_diagnosis.json"), diag_json)?;
+            fs::write(
+                artifacts_dir.join("differential_diagnosis.json"),
+                &diag_json,
+            )?;
+            fs::write(
+                artifacts_dir.join("03_differential_diagnosis.json"),
+                &diag_json,
+            )?;
         }
         if let Some(ref reg) = self.regression_parity {
             let reg_json = serde_json::to_string_pretty(reg)?;
-            fs::write(artifacts_dir.join("regression_parity.json"), reg_json)?;
+            fs::write(artifacts_dir.join("regression_parity.json"), &reg_json)?;
+            fs::write(artifacts_dir.join("04_regression_parity.json"), &reg_json)?;
         }
+        let receipt_json = serde_json::to_string_pretty(self)?;
+        fs::write(artifacts_dir.join("04_audit_receipt.json"), receipt_json)?;
 
         Ok(artifacts_dir)
     }

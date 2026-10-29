@@ -568,6 +568,16 @@ fn freeze_spec_subcommand_locks_files_and_generates_spec() {
     assert_eq!(spec["bug_id"], "RF-01");
     assert_eq!(spec["aggregate_sha256"].as_str().unwrap().len(), 64);
     assert_eq!(spec["contract_digest"].as_str().unwrap().len(), 64);
+
+    let repro_spec_ts = dir
+        .join("tests")
+        .join("repro")
+        .join("rf_01_regression.spec.ts");
+    assert!(repro_spec_ts.exists());
+    let ts_content = fs::read_to_string(&repro_spec_ts).unwrap();
+    assert!(ts_content.contains("REPLAYFIX-FROZEN-SPEC: RF-01"));
+    assert!(ts_content.contains("AGGREGATE-SHA256:"));
+    assert!(ts_content.contains("@playwright/test"));
 }
 
 #[test]
@@ -623,10 +633,44 @@ fn repro_run_with_clean_ref_and_verify_matrix() {
 
     // Verify disaggregated artifacts were written
     assert!(dir.join(".replayfix/artifacts/candidate.patch").exists());
+    assert!(dir.join(".replayfix/artifacts/01_candidate.diff").exists());
+    assert!(dir.join(".replayfix/artifacts/02_preflight.json").exists());
     assert!(dir
         .join(".replayfix/artifacts/differential_diagnosis.json")
         .exists());
     assert!(dir
+        .join(".replayfix/artifacts/03_differential_diagnosis.json")
+        .exists());
+    assert!(dir
         .join(".replayfix/artifacts/regression_parity.json")
         .exists());
+    assert!(dir
+        .join(".replayfix/artifacts/04_regression_parity.json")
+        .exists());
+    assert!(dir
+        .join(".replayfix/artifacts/04_audit_receipt.json")
+        .exists());
+}
+
+#[test]
+fn mock_regression_triggers_exit_31_and_triage_report() {
+    let dir = scratch("regression-detected");
+    let out = run(&dir, &["--mock-heal", "--mock-regression"]);
+
+    assert_eq!(
+        code(&out),
+        31,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let triage = json(&dir.join(".replayfix/triage_report.json"));
+    assert_eq!(triage["schema_version"], "0.7");
+    assert_eq!(triage["status"], "REGRESSION_DETECTED");
+    assert_eq!(triage["exit_code"], 31);
+    assert_eq!(triage["regression_parity"]["parity_passed"], false);
+    assert!(!triage["regression_parity"]["new_failures"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

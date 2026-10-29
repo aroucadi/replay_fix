@@ -141,6 +141,25 @@ fn describe_invalid(events: &[OracleEvent]) -> String {
     }
 }
 
+/// Resolve the 40-character commit hash of a git ref (e.g. main, HEAD) in `repo_path`.
+/// Returns fallback hash if git is unavailable or ref cannot be resolved.
+#[must_use]
+pub fn resolve_git_ref(repo_path: &Path, git_ref: &str) -> String {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", git_ref])
+        .current_dir(repo_path)
+        .output();
+    if let Ok(output) = out {
+        if output.status.success() {
+            let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                return sha;
+            }
+        }
+    }
+    "0000000000000000000000000000000000000000".to_string()
+}
+
 /// Options for live Playwright CDP browser execution and Spec 060 autonomous model repair.
 #[derive(Debug, Clone, Default)]
 pub struct LiveBrowserOptions {
@@ -152,6 +171,7 @@ pub struct LiveBrowserOptions {
     pub repair_mode: Option<RepairClientMode>,
     pub clean_ref: Option<String>,
     pub verify_matrix: bool,
+    pub mock_regression: bool,
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -210,6 +230,7 @@ impl MockHealer {
             gate2_contract,
             None,
             None,
+            false,
         );
         let _ = fs::remove_dir_all(&temp_repo);
         res
@@ -223,6 +244,16 @@ impl MockHealer {
         repo_path: &Path,
         extra_excludes: &[PathBuf],
     ) -> Result<HealOutcome> {
+        Self::run_in_repo_with_regression(fixture, diff, repo_path, extra_excludes, false)
+    }
+
+    pub fn run_in_repo_with_regression(
+        fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        mock_regression: bool,
+    ) -> Result<HealOutcome> {
         Self::run_in_repo_with_options(
             fixture,
             diff,
@@ -231,6 +262,7 @@ impl MockHealer {
             &fixture.contract,
             None,
             None,
+            mock_regression,
         )
     }
 
@@ -251,6 +283,7 @@ impl MockHealer {
             &fixture.contract,
             None,
             Some((model_slug, repair_mode)),
+            false,
         )
     }
 
@@ -673,14 +706,40 @@ impl MockHealer {
         // 10. Teardown the scratch sandbox cleanly.
         sandbox.teardown()?;
 
-        fsm.advance(Phase::Gate2Green)?;
-        let gate2_at = timestamp_now();
-
         let clean_ref_name = options
             .clean_ref
             .clone()
             .unwrap_or_else(|| "main".to_string());
-        let clean_ref_commit = "0000000000000000000000000000000000000000".to_string();
+        let clean_ref_commit = resolve_git_ref(repo_path, &clean_ref_name);
+
+        let baseline_snapshot =
+            crate::regression::RegressionEvaluator::capture_suite_snapshot(repo_path, false);
+        let patched_snapshot = crate::regression::RegressionEvaluator::capture_suite_snapshot(
+            repo_path,
+            options.mock_regression,
+        );
+        let parity =
+            crate::regression::RegressionEvaluator::evaluate(&baseline_snapshot, &patched_snapshot);
+
+        if !parity.parity_passed {
+            fsm.advance(Phase::Rejected)?;
+            let triage = TriageReport::with_substrate(
+                TriageStatus::RegressionDetected,
+                format!(
+                    "Regression detected: {} newly failing tests",
+                    parity.new_failures.join(", ")
+                ),
+                task_id,
+                SUBSTRATE_LIVE_BROWSER,
+                fsm.trace(),
+            )
+            .with_regression_parity(Some(parity.clone()));
+            return Ok(HealOutcome::Rejected(Box::new(triage)));
+        }
+
+        fsm.advance(Phase::Gate2Green)?;
+        let gate2_at = timestamp_now();
+
         let diag = crate::fsm::DifferentialMatrix::evaluate(
             task_id,
             &clean_ref_name,
@@ -689,23 +748,9 @@ impl MockHealer {
             crate::fsm::ReproExecutionResult::pass(0),
             crate::fsm::ReproExecutionResult::pass(0),
             crate::fsm::ReproExecutionResult::pass(0),
-            true,
+            parity.parity_passed,
             chrono::Utc::now().timestamp_millis() as u64,
         );
-        let parity = crate::regression::RegressionParityReport {
-            schema_version: "0.7".to_string(),
-            baseline_total_tests: 1,
-            patched_total_tests: 1,
-            baseline_failures: Vec::new(),
-            patched_failures: Vec::new(),
-            new_failures: Vec::new(),
-            missing_tests: Vec::new(),
-            baseline_skipped_count: 0,
-            patched_skipped_count: 0,
-            skipped_increase: 0,
-            parity_passed: true,
-            duration_ms: 0,
-        };
 
         Ok(HealOutcome::Verified(Box::new(AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
@@ -1204,6 +1249,7 @@ impl MockHealer {
         Ok((grounded, events))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_in_repo_with_options(
         fixture: &Fixture,
         diff: &str,
@@ -1212,6 +1258,7 @@ impl MockHealer {
         gate2_contract: &BehavioralContract,
         on_before_post_check: Option<&dyn Fn(&Path)>,
         autonomous_opts: Option<(&str, RepairClientMode)>,
+        mock_regression: bool,
     ) -> Result<HealOutcome> {
         let task_id = fixture.task_id;
         let mut fsm = PhaseMachine::new();
@@ -1426,11 +1473,37 @@ impl MockHealer {
         // 5. Teardown the scratch sandbox cleanly.
         sandbox.teardown()?;
 
+        let clean_ref_name = "main".to_string();
+        let clean_ref_commit = resolve_git_ref(repo_path, &clean_ref_name);
+
+        let baseline_snapshot =
+            crate::regression::RegressionEvaluator::capture_suite_snapshot(repo_path, false);
+        let patched_snapshot = crate::regression::RegressionEvaluator::capture_suite_snapshot(
+            repo_path,
+            mock_regression,
+        );
+        let parity =
+            crate::regression::RegressionEvaluator::evaluate(&baseline_snapshot, &patched_snapshot);
+
+        if !parity.parity_passed {
+            fsm.advance(Phase::Rejected)?;
+            let triage = TriageReport::with_substrate(
+                TriageStatus::RegressionDetected,
+                format!(
+                    "Regression detected: {} newly failing tests",
+                    parity.new_failures.join(", ")
+                ),
+                task_id,
+                SUBSTRATE,
+                fsm.trace(),
+            )
+            .with_regression_parity(Some(parity.clone()));
+            return Ok(HealOutcome::Rejected(Box::new(triage)));
+        }
+
         fsm.advance(Phase::Gate2Green)?;
         let gate2_at = timestamp_now();
 
-        let clean_ref_name = "main".to_string();
-        let clean_ref_commit = "0000000000000000000000000000000000000000".to_string();
         let diag = crate::fsm::DifferentialMatrix::evaluate(
             task_id,
             &clean_ref_name,
@@ -1439,23 +1512,9 @@ impl MockHealer {
             crate::fsm::ReproExecutionResult::pass(0),
             crate::fsm::ReproExecutionResult::pass(0),
             crate::fsm::ReproExecutionResult::pass(0),
-            true,
+            parity.parity_passed,
             chrono::Utc::now().timestamp_millis() as u64,
         );
-        let parity = crate::regression::RegressionParityReport {
-            schema_version: "0.7".to_string(),
-            baseline_total_tests: 1,
-            patched_total_tests: 1,
-            baseline_failures: Vec::new(),
-            patched_failures: Vec::new(),
-            new_failures: Vec::new(),
-            missing_tests: Vec::new(),
-            baseline_skipped_count: 0,
-            patched_skipped_count: 0,
-            skipped_increase: 0,
-            parity_passed: true,
-            duration_ms: 0,
-        };
 
         Ok(HealOutcome::Verified(Box::new(AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
@@ -1805,6 +1864,7 @@ mod tests {
             &f.contract,
             Some(&hook),
             None,
+            false,
         )
         .unwrap();
 
