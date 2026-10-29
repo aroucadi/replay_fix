@@ -2,17 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://replayfix.dev/schemas/v0.9/sweep_receipt.schema.json",
   "title": "SweepReceipt",
-  "description": "Benchmark sweep summary record covering RF-01 through RF-05 repair runs with Merkle root and Ed25519 attestation.",
+  "description": "Benchmark sweep summary record covering RF-01 through RF-05 repair runs with RFC 6962 Merkle root and Ed25519 attestation.",
   "type": "object",
   "required": [
     "schema_version",
-    "total_evaluated",
-    "total_verified",
-    "pass_rate",
-    "elapsed_wall_clock_ms",
+    "total_bugs",
+    "repaired_bugs",
+    "failed_bugs",
     "results",
     "merkle_root",
-    "attestation",
+    "ed25519_attestation",
+    "elapsed_wall_clock_ms",
     "created_at"
   ],
   "properties": {
@@ -20,48 +20,51 @@
       "type": "string",
       "const": "0.9"
     },
-    "total_evaluated": {
+    "total_bugs": {
       "type": "integer",
       "minimum": 0
     },
-    "total_verified": {
+    "repaired_bugs": {
       "type": "integer",
       "minimum": 0
     },
-    "pass_rate": {
-      "type": "number",
-      "minimum": 0.0,
-      "maximum": 1.0
-    },
-    "elapsed_wall_clock_ms": {
+    "failed_bugs": {
       "type": "integer",
       "minimum": 0
     },
     "results": {
-      "type": "array",
-      "items": {
+      "type": "object",
+      "additionalProperties": {
         "type": "object",
         "required": [
           "bug_id",
-          "verified",
-          "merkle_root",
-          "duration_ms"
+          "status",
+          "exit_code",
+          "target_path",
+          "elapsed_ms"
         ],
         "properties": {
           "bug_id": { "type": "string" },
-          "verified": { "type": "boolean" },
-          "merkle_root": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "duration_ms": { "type": "integer", "minimum": 0 },
+          "status": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "target_path": { "type": "string" },
+          "patch_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "elapsed_ms": { "type": "integer", "minimum": 0 },
           "error": { "type": "string" }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "merkle_root": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "attestation": {
+    "ed25519_attestation": {
       "$ref": "attestation.schema.json"
+    },
+    "elapsed_wall_clock_ms": {
+      "type": "integer",
+      "minimum": 0
     },
     "created_at": {
       "type": "string",
