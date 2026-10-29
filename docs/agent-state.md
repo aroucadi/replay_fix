@@ -1,8 +1,8 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.7.1` (`070-v0.7-differential-diagnosis-anticheat-hardening` — DiffGuard, Active Regression Wiring, CheckpointManager & Spec Inoculation)
-- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.7.1`.
+- **Active Milestone**: `v0.8.0` (`080-v0.8-observability-ingestion` — Observability, GitHub Ingestion, Human Confirmation Gate & Disaggregated Artifacts)
+- **Status**: Release Qualification Complete; ready for merge to `main` and tag `v0.8.0`.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
@@ -60,7 +60,13 @@
   - Real git ref resolution via `resolve_git_ref`.
   - Added CLI flag `--mock-regression` and integration test asserting exit code 31.
   - 174 automated tests passing (144 core unit tests, 28 CLI integration tests, 2 CLI unit tests); zero panic violations; zero clippy warnings.
-
+- [x] **v0.8.0 Observability Suite, GitHub Issue Ingestion & Human Confirmation Gate**:
+  - Playwright Trace Auto-Launcher (`--trace`) capturing `playwright.trace.zip` and spawning `npx playwright show-trace` detached, safely skipping in CI and non-interactive sessions.
+  - Live GitHub Issue Ingestion (`--issue <url>`) via strict regex, HTTPS curl/gh CLI fetch, untrusted `<UNTRUSTED_ISSUE_METADATA>` isolation, and automated reproduction step extraction into task manifests.
+  - Interactive Human Approval Gate (`--apply` / `--yes`) previewing syntax-highlighted ANSI unified diffs (+green, -red, @@ cyan) and prompting `[y/N]`, failing closed with exit code 13 (`NON_INTERACTIVE_REFUSAL`) in non-TTY sessions unless `--yes` is provided.
+  - Base worktree mutation (`UnifiedPatcher::apply_to_worktree`) applying verified and approved patches with path traversal defenses.
+  - Disaggregated fact artifacts persisted in `.replayfix/artifacts/` (`candidate.patch`, `approval_audit.json`, `issue_ingestion.json`, `differential_diagnosis.json`, `regression_parity.json`, `playwright.trace.zip`).
+  - 185 automated tests passing (152 core unit tests, 33 CLI integration tests); zero Clippy warnings; zero panics in production source.
 
 ## 3. Toolchain & Environment
 - Windows 11 (MSVC native), Rust 1.99.1, Node.js 24.19.0, Git 2.55, FFmpeg 15.2, Playwright 1.64.1 present and verified compatible by `replayfix doctor`.
@@ -68,11 +74,10 @@
 
 ## 4. Deferred Items (documented, not hidden)
 - `tracing_subscriber` is initialised but nothing logs yet; kept because later specs add structured logging.
-- Clean-branch (`clean_ref`) differential diagnosis and full pre-existing regression suite parity arrive in Spec 070.
 - Receipts are unsigned until Spec 090 (RFC 6962 Merkle tree + Ed25519 signature).
 
 ## 5. v1.0.0 Readiness
-- **Shipping status**: BLOCKED until Specs 070–090 are implemented and verified.
+- **Shipping status**: Progressing through roadmap. Next is Spec 090 (RFC 6962 Merkle receipt & benchmark suite).
 
 ## 6. Next Immediate Task
-- Advance to Spec 080: `080-v0.8-observability-github-ingestion`.
+- Advance to Spec 090: `090-v0.9-merkle-receipt-benchmark-suite`.

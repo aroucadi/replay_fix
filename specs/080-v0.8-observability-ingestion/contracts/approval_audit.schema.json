@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApprovalAudit",
+  "description": "Human confirmation gate audit record schema for ReplayFix",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "patch_sha256",
+    "files_modified",
+    "insertions",
+    "deletions",
+    "decision",
+    "mode",
+    "tty_detected"
+  ],
+  "properties": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "patch_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "files_modified": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "insertions": { "type": "integer", "minimum": 0 },
+    "deletions": { "type": "integer", "minimum": 0 },
+    "decision": {
+      "type": "string",
+      "enum": ["Approved", "Rejected"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "ManualAffirmative",
+        "AutoBypassFlag",
+        "NonInteractiveRejected",
+        "ManualNegative"
+      ]
+    },
+    "tty_detected": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

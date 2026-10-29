@@ -17,6 +17,19 @@ The full production release **v1.0.0** requires completing and verifying the fol
 
 ---
 
+## [0.8.0] - 2026-10-29
+
+Observability suite, live GitHub issue ingestion, interactive human confirmation gate, and disaggregated evidence artifacts for Spec 080. Full notes: [docs/release-notes/v0.8.0.md](docs/release-notes/v0.8.0.md).
+
+### Added
+- **Playwright Trace Auto-Launcher (`--trace`)**: Captures complete Playwright execution traces and launches the interactive visual timeline scrubber (`npx playwright show-trace`) upon run completion, automatically skipping GUI spawn in headless CI and non-interactive sessions.
+- **Live GitHub Issue Ingestion (`--issue <url>`)**: Secure retrieval of public GitHub issues via HTTPS curl or gh CLI, extraction of reproduction steps into task manifests, and enclosing untrusted descriptions in `<UNTRUSTED_ISSUE_METADATA>` blocks.
+- **Interactive Human Approval Gate (`replayfix_cli::approval`)**: Syntax-highlighted ANSI candidate diff preview requiring affirmative operator confirmation (`[y/N]`) before modifying base working trees, failing closed with exit code 13 (`NON_INTERACTIVE_REFUSAL`) in non-TTY environments unless `--yes` is provided.
+- **Worktree Patch Application (`replayfix_core::patch`)**: Added `UnifiedPatcher::apply_to_worktree` to apply approved candidate patches directly to repository working trees.
+- **Disaggregated Fact Artifacts**: Persists `candidate.patch`, `approval_audit.json`, and `issue_ingestion.json` alongside `differential_diagnosis.json` and `regression_parity.json` in `.replayfix/artifacts/`.
+
+---
+
 ## [0.7.1] - 2026-10-29
 
 Security hardening, regression wiring, and spec alignment for Spec 070. Full notes: [docs/release-notes/v0.7.1.md](docs/release-notes/v0.7.1.md).

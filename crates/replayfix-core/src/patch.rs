@@ -6,6 +6,7 @@
 use crate::error::{CoreError, Result};
 use crate::manifest::TaskManifest;
 use regex::Regex;
+use std::path::Path;
 use std::sync::OnceLock;
 
 fn hunk_header_regex() -> Option<&'static Regex> {
@@ -136,6 +137,22 @@ impl UnifiedPatcher {
             deletions,
             files_changed: 1,
         })
+    }
+
+    /// Extract target relative file path from unified diff headers.
+    pub fn parse_target_path(diff: &str) -> Result<String> {
+        let (target, _) = Self::parse(diff)?;
+        Ok(target)
+    }
+
+    /// Apply unified diff directly to a file within a repository worktree.
+    pub fn apply_to_worktree(repo_dir: impl AsRef<Path>, diff: &str) -> Result<PatchOutcome> {
+        let (target_path, _) = Self::parse(diff)?;
+        let full_path = repo_dir.as_ref().join(&target_path);
+        let original = std::fs::read_to_string(&full_path)?;
+        let outcome = Self::apply_diff(&original, diff)?;
+        std::fs::write(&full_path, outcome.patched.as_bytes())?;
+        Ok(outcome)
     }
 
     fn parse(diff: &str) -> Result<(String, Vec<Hunk>)> {

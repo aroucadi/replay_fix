@@ -674,3 +674,129 @@ fn mock_regression_triggers_exit_31_and_triage_report() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn test_trace_generates_zip_and_skips_gui_in_non_interactive() {
+    let dir = scratch("trace-export");
+    let out = run(&dir, &["--mock-heal", "--trace"]);
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Trace Export"));
+    assert!(stdout.contains("true"));
+    assert!(dir
+        .join(".replayfix/artifacts/playwright.trace.zip")
+        .exists());
+}
+
+#[test]
+fn test_issue_invalid_url_fails_with_exit_23() {
+    let dir = scratch("invalid-issue");
+    let out = run(
+        &dir,
+        &["--issue", "https://github.com/not/an/issue/pull/123"],
+    );
+
+    assert_eq!(code(&out), 23);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Invalid --issue URL"));
+}
+
+#[test]
+fn test_issue_ingestion_and_repro_success() {
+    let dir = scratch("issue-ingest-success");
+    let out = run(
+        &dir,
+        &[
+            "--issue",
+            "https://github.com/mock/repo/issues/101",
+            "--bug",
+            "RF-01",
+            "--mock-heal",
+        ],
+    );
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("GitHub Issue"));
+    assert!(stdout.contains("https://github.com/mock/repo/issues/101"));
+
+    let artifact = json(&dir.join(".replayfix/artifacts/issue_ingestion.json"));
+    assert_eq!(artifact["issue_ref"]["owner"], "mock");
+    assert_eq!(artifact["issue_ref"]["repo"], "repo");
+    assert_eq!(artifact["issue_ref"]["issue_number"], 101);
+    assert!(!artifact["extracted_steps"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn test_apply_in_non_interactive_without_yes_refuses_exit_13() {
+    let dir = scratch("apply-refusal");
+    let cart_file = dir.join("src/cart-summary.js");
+    fs::create_dir_all(cart_file.parent().unwrap()).unwrap();
+    fs::write(
+        &cart_file,
+        b"export function cartItemCount(cart) {\n  return cart.items.length;\n}\n",
+    )
+    .unwrap();
+
+    let out = run(&dir, &["--mock-heal", "--apply"]);
+
+    assert_eq!(code(&out), 13);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("non-interactive session without --yes flag"));
+
+    let audit = json(&dir.join(".replayfix/artifacts/approval_audit.json"));
+    assert_eq!(audit["decision"], "Rejected");
+    assert_eq!(audit["mode"], "NonInteractiveRejected");
+    assert_eq!(audit["tty_detected"], false);
+
+    // Verify target file was not modified
+    let content = fs::read_to_string(cart_file).unwrap();
+    assert!(content.contains("return cart.items.length;"));
+}
+
+#[test]
+fn test_apply_with_yes_approves_and_mutates_base_repo_exit_0() {
+    let dir = scratch("apply-confirmed");
+    let cart_file = dir.join("src/cart-summary.js");
+    fs::create_dir_all(cart_file.parent().unwrap()).unwrap();
+    fs::write(
+        &cart_file,
+        b"export function cartItemCount(cart) {\n  return cart.items.length;\n}\n",
+    )
+    .unwrap();
+
+    let out = run(&dir, &["--mock-heal", "--apply", "--yes"]);
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains(
+        "Candidate patch confirmed (AutoBypassFlag) and applied to base repository successfully."
+    ));
+
+    let audit = json(&dir.join(".replayfix/artifacts/approval_audit.json"));
+    assert_eq!(audit["decision"], "Approved");
+    assert_eq!(audit["mode"], "AutoBypassFlag");
+
+    assert!(dir.join(".replayfix/artifacts/candidate.patch").exists());
+
+    // Verify target file WAS successfully patched!
+    let content = fs::read_to_string(cart_file).unwrap();
+    assert!(content.contains("return cart.items?.length || 0;"));
+    assert!(!content.contains("return cart.items.length;"));
+}

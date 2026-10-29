@@ -10,6 +10,7 @@
     )
 )]
 
+pub mod artifacts;
 pub mod browser;
 pub mod checkpoint;
 pub mod diffguard;
@@ -19,6 +20,7 @@ pub mod engine;
 pub mod error;
 pub mod fixtures;
 pub mod fsm;
+pub mod ingestion;
 pub mod locator;
 pub mod manifest;
 pub mod patch;
@@ -28,9 +30,11 @@ pub mod process;
 pub mod receipt;
 pub mod regression;
 pub mod repair;
+pub mod trace;
 pub mod video;
 pub mod worktree;
 
+pub use artifacts::ArtifactStore;
 pub use browser::{BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer};
 pub use checkpoint::{
     CheckpointManager, CheckpointStage, SessionStateCheckpoint, StageArtifacts, CHECKPOINT_VERSION,
@@ -48,6 +52,11 @@ pub use fixtures::Fixture;
 pub use fsm::{
     CausalConfidence, DifferentialDiagnosisReport, DifferentialMatrix, DifferentialState, Phase,
     PhaseMachine, ReproExecutionResult,
+};
+pub use ingestion::{
+    build_untrusted_context_block, extract_repro_steps, ingest_issue, ingestion_to_manifest,
+    GitHubIssuePayload, GitHubIssueRef, GitHubLabel, GitHubUser, IngestionResult, IssueFetcher,
+    MockIssueFetcher, SystemIssueFetcher, MAX_ISSUE_PAYLOAD_BYTES,
 };
 pub use locator::{BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry, LocatorResolver};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
@@ -70,6 +79,7 @@ pub use repair::{
     MUSE_WONDER_10_SLUG, PROMPT_CACHE_KEY, PROMPT_CACHE_RETENTION,
     REASONING_ENCRYPTED_CONTENT_FIELD,
 };
+pub use trace::{is_ci_environment, launch_trace_viewer, TraceConfig, TraceLaunchOutcome};
 pub use video::{
     DetectionParams, FrameSet, GeometricCalibration, InteractionEvidence, RoiDiffer, VideoMetadata,
     VideoPreprocessor,
