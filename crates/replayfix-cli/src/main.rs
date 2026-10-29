@@ -14,14 +14,21 @@ pub mod approval;
 pub mod ui;
 
 use approval::{evaluate_approval_gate, write_approval_audit, ApprovalDecision, ApprovalMode};
+use replayfix_core::crypto::{
+    verify_attestation, AttestationRecord, TrustPolicy, VerificationOutcome,
+};
 use replayfix_core::ingestion::{
     ingest_issue, GitHubIssueRef, MockIssueFetcher, SystemIssueFetcher,
 };
+use replayfix_core::merkle::MerkleReceipt;
+use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
+use replayfix_core::sweep::{run_sweep, SweepOptions};
 use replayfix_core::trace::{is_ci_environment, launch_trace_viewer};
+use std::collections::HashSet;
+use std::fs;
 use std::io::IsTerminal;
 
 use clap::{Args, Parser, Subcommand};
-use replayfix_core::receipt::{write_audit_receipt, write_triage_report};
 use replayfix_core::{
     BoundingBox, CoreError, DependencyStatus, Doctor, DomCandidate, EnvironmentAdapter, Fixture,
     HealOutcome, LiveBrowserOptions, MockHealer, MuseModelConfig, Platform, RepairClientMode,
@@ -51,6 +58,8 @@ pub mod exit_codes {
     pub const REPAIR_REJECTED: i32 = 30;
     pub const REGRESSION_DETECTED: i32 = 31;
     pub const QUARANTINE_INVERTED_BASELINE: i32 = 32;
+    pub const RECEIPT_VERIFICATION_FAILED: i32 = 40;
+    pub const SWEEP_PARTIAL_FAILURE: i32 = 41;
 }
 
 /// Largest patch file accepted by `--mock-patch`.
@@ -224,6 +233,38 @@ enum Commands {
         /// Output destination path (default: .replayfix/specs/<BUG>.spec.json)
         #[arg(long)]
         output: Option<PathBuf>,
+    },
+    /// Verify cryptographic Merkle receipts and Ed25519 attestations
+    VerifyReceipt {
+        /// Path to receipt file or directory containing merkle_receipt.json / audit_receipt.json
+        path: PathBuf,
+        /// Optional trusted Ed25519 public key (hex) to enforce
+        #[arg(long)]
+        trusted_key: Option<String>,
+        /// Emit machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run benchmark sweep across MetaPulse defect suite (RF-01 to RF-05)
+    Sweep {
+        /// Comma-separated list of bug IDs to evaluate (default: RF-01,RF-02,RF-03,RF-04,RF-05)
+        #[arg(long)]
+        bugs: Option<String>,
+        /// Deterministic offline simulation mode
+        #[arg(long)]
+        mock_heal: bool,
+        /// Live Chromium browser via Playwright CDP
+        #[arg(long)]
+        live_browser: bool,
+        /// Base repository path (default: .)
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Output destination directory (default: .replayfix)
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
+        /// Emit machine-readable JSON output
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1101,7 +1142,7 @@ fn run_freeze_spec(
     }
 
     let spec_obj = serde_json::json!({
-        "schema_version": "0.8",
+        "schema_version": "0.9",
         "bug_id": bug,
         "contract_digest": contract_digest,
         "aggregate_sha256": guard.aggregate_sha256,
@@ -1161,6 +1202,311 @@ fn run_freeze_spec(
     Ok(())
 }
 
+fn handle_verify_receipt(
+    path: PathBuf,
+    trusted_key: Option<String>,
+    json_output: bool,
+    theme: &Theme,
+) -> ! {
+    let target_file = if path.is_dir() {
+        let candidates = [
+            path.join("artifacts").join("merkle_receipt.json"),
+            path.join("merkle_receipt.json"),
+            path.join("artifacts").join("04_audit_receipt.json"),
+            path.join("audit_receipt.json"),
+        ];
+        candidates
+            .into_iter()
+            .find(|p| p.exists())
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "  {} No receipt found in directory '{}'",
+                    theme.error(Symbols::CROSS),
+                    path.display()
+                );
+                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+            })
+    } else {
+        path
+    };
+
+    if !target_file.exists() {
+        eprintln!(
+            "  {} Receipt file '{}' does not exist",
+            theme.error(Symbols::CROSS),
+            target_file.display()
+        );
+        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+    }
+
+    let file_content = fs::read_to_string(&target_file).unwrap_or_else(|e| {
+        eprintln!(
+            "  {} Failed to read receipt '{}': {e}",
+            theme.error(Symbols::CROSS),
+            target_file.display()
+        );
+        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+    });
+
+    let json_val: serde_json::Value = serde_json::from_str(&file_content).unwrap_or_else(|e| {
+        eprintln!(
+            "  {} Malformed receipt JSON: {e}",
+            theme.error(Symbols::CROSS)
+        );
+        exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+    });
+
+    // Check if it is a MerkleReceipt directly or an AuditReceipt
+    let (merkle_receipt, attestation) = if json_val.get("inclusion_proofs").is_some() {
+        let mr: MerkleReceipt = serde_json::from_value(json_val.clone()).unwrap_or_else(|e| {
+            eprintln!(
+                "  {} Malformed Merkle receipt: {e}",
+                theme.error(Symbols::CROSS)
+            );
+            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+        });
+        let att = mr.attestation.clone().or_else(|| {
+            let att_path = target_file.parent()?.join("attestation.json");
+            fs::read_to_string(att_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+        });
+        (Some(mr), att)
+    } else {
+        let att = json_val
+            .get("attestation")
+            .and_then(|v| serde_json::from_value::<AttestationRecord>(v.clone()).ok())
+            .or_else(|| {
+                let att_path = target_file.parent()?.join("attestation.json");
+                fs::read_to_string(att_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            });
+        let mr = target_file
+            .parent()
+            .map(|p| p.join("merkle_receipt.json"))
+            .and_then(|p| fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<MerkleReceipt>(&s).ok());
+        (mr, att)
+    };
+
+    // 1. Verify Merkle inclusion proofs if present
+    if let Some(ref mr) = merkle_receipt {
+        match mr.verify_all() {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "  {} MERKLE_PROOF_INVALID: One or more inclusion proofs failed verification against root {}",
+                    theme.error(Symbols::CROSS),
+                    mr.merkle_root
+                );
+                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} MERKLE_PROOF_INVALID: Verification failed: {e}",
+                    theme.error(Symbols::CROSS)
+                );
+                exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+            }
+        }
+    }
+
+    // 2. Verify Attestation
+    let att = match attestation {
+        Some(a) => a,
+        None => {
+            eprintln!(
+                "  {} SIGNATURE_VERIFICATION_FAILED: Missing cryptographic attestation",
+                theme.error(Symbols::CROSS)
+            );
+            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+        }
+    };
+
+    let trust_policy = match trusted_key {
+        Some(key) => TrustPolicy::PinnedKeys(HashSet::from([key.to_lowercase()])),
+        None => TrustPolicy::AllowAny,
+    };
+
+    let (merkle_root, tree_size) = if let Some(ref mr) = merkle_receipt {
+        (mr.merkle_root.as_str(), mr.tree_size)
+    } else {
+        ("", 0)
+    };
+
+    let outcome = match verify_attestation(&att, merkle_root, tree_size, &trust_policy) {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!(
+                "  {} SIGNATURE_VERIFICATION_FAILED: {e}",
+                theme.error(Symbols::CROSS)
+            );
+            exit(exit_codes::RECEIPT_VERIFICATION_FAILED);
+        }
+    };
+
+    if json_output {
+        let out = serde_json::json!({
+            "status": "SUCCESS",
+            "verification_outcome": match outcome {
+                VerificationOutcome::VerifiedTrusted => "VERIFIED_TRUSTED",
+                VerificationOutcome::VerifiedUntrustedSigner => "VERIFIED_UNTRUSTED_SIGNER",
+            },
+            "public_key": att.public_key,
+            "merkle_root": merkle_root,
+            "tree_size": tree_size,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+    } else {
+        println!(
+            "  {} {}",
+            theme.success(Symbols::CHECK),
+            theme.bold("Receipt Cryptographically Verified:")
+        );
+        println!(
+            "    {} Status     : {}",
+            theme.muted(Symbols::STEP),
+            match outcome {
+                VerificationOutcome::VerifiedTrusted => theme.success("VERIFIED_TRUSTED"),
+                VerificationOutcome::VerifiedUntrustedSigner =>
+                    theme.warning("VERIFIED_UNTRUSTED_SIGNER (Untrusted Key)"),
+            }
+        );
+        println!(
+            "    {} Public Key : {}",
+            theme.muted(Symbols::STEP),
+            att.public_key
+        );
+        if !merkle_root.is_empty() {
+            println!(
+                "    {} Merkle Root: {}",
+                theme.muted(Symbols::STEP),
+                merkle_root
+            );
+            println!(
+                "    {} Tree Size  : {} leaf artifact(s)",
+                theme.muted(Symbols::STEP),
+                tree_size
+            );
+        }
+    }
+
+    exit(exit_codes::SUCCESS);
+}
+
+fn handle_sweep(
+    bugs: Option<String>,
+    mock_heal: bool,
+    live_browser: bool,
+    repo: String,
+    output: PathBuf,
+    json_output: bool,
+    theme: &Theme,
+) -> ! {
+    let bug_ids = match bugs {
+        Some(b) => b
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        None => vec![
+            "RF-01".to_string(),
+            "RF-02".to_string(),
+            "RF-03".to_string(),
+            "RF-04".to_string(),
+            "RF-05".to_string(),
+        ],
+    };
+
+    let options = SweepOptions {
+        bug_ids,
+        mock_heal,
+        live_browser,
+        output_dir: output,
+    };
+
+    let base_repo = Path::new(&repo);
+    if !base_repo.exists() {
+        eprintln!(
+            "  {} Base repository '{}' does not exist",
+            theme.error(Symbols::CROSS),
+            base_repo.display()
+        );
+        exit(exit_codes::USAGE_OR_INPUT_ERROR);
+    }
+
+    if !json_output {
+        print_banner(theme, "Benchmark Sweep");
+        println!(
+            "  {} Executing 5-bug benchmark sweep across MetaPulse defect scenarios...",
+            theme.info("SWEEP")
+        );
+    }
+
+    let receipt = match run_sweep(&options, base_repo) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  {} Sweep failed: {e}", theme.error(Symbols::CROSS));
+            exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
+        }
+    };
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&receipt).unwrap_or_default()
+        );
+    } else {
+        println!();
+        for (bug_id, res) in &receipt.results {
+            let (status_str, sym) = if res.exit_code == 0 {
+                (theme.success(&res.status), theme.success(Symbols::CHECK))
+            } else {
+                (theme.error(&res.status), theme.error(Symbols::CROSS))
+            };
+            println!(
+                "    {} [{}] {} ({}ms) -> {}",
+                sym, bug_id, status_str, res.elapsed_ms, res.target_path
+            );
+        }
+        println!();
+        println!("  {}", theme.muted(&"─".repeat(60)));
+        println!(
+            "  {} Sweep Complete: {}/{} bugs repaired in {}ms (benchmark target: <60,000ms)",
+            if receipt.failed_bugs == 0 {
+                theme.success(Symbols::CHECK)
+            } else {
+                theme.error(Symbols::CROSS)
+            },
+            receipt.repaired_bugs,
+            receipt.total_bugs,
+            receipt.elapsed_wall_clock_ms
+        );
+        println!(
+            "    {} Merkle Root : {}",
+            theme.muted(Symbols::STEP),
+            receipt.merkle_root
+        );
+        println!(
+            "    {} Attestation : Ed25519 ({})",
+            theme.muted(Symbols::STEP),
+            receipt.ed25519_attestation.public_key
+        );
+        println!(
+            "    {} Receipt     : {}",
+            theme.muted(Symbols::STEP),
+            options.output_dir.join("sweep_receipt.json").display()
+        );
+    }
+
+    if receipt.failed_bugs > 0 {
+        exit(exit_codes::SWEEP_PARTIAL_FAILURE);
+    } else {
+        exit(exit_codes::SUCCESS);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -1178,6 +1524,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
         Some(Commands::FreezeSpec { bug, repo, output }) => {
             run_freeze_spec(&bug, &repo, output, &stdout_theme)?;
+        }
+        Some(Commands::VerifyReceipt {
+            path,
+            trusted_key,
+            json,
+        }) => {
+            handle_verify_receipt(path, trusted_key, json, &stdout_theme);
+        }
+        Some(Commands::Sweep {
+            bugs,
+            mock_heal,
+            live_browser,
+            repo,
+            output,
+            json,
+        }) => {
+            handle_sweep(
+                bugs,
+                mock_heal,
+                live_browser,
+                repo,
+                output,
+                json,
+                &stdout_theme,
+            );
         }
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args, &stderr_theme);

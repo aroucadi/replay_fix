@@ -204,7 +204,7 @@ impl DifferentialMatrix {
         };
 
         DifferentialDiagnosisReport {
-            schema_version: "0.8".to_string(),
+            schema_version: "0.9".to_string(),
             bug_id: bug_id.to_string(),
             state,
             clean_ref: clean_ref.to_string(),

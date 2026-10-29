@@ -9,11 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Roadmap to v1.0.0
 
-The full production release **v1.0.0** requires completing and verifying the following sequential architectural specifications:
-- **Spec 060 (v0.6.0)**: Meta Muse Wonder bounded AST repair and localized patch synthesis.
-- **Spec 070 (v0.7.0)**: Differential diagnosis, SHA-256 test freezing, and 2-run stability pass.
-- **Spec 080 (v0.8.0)**: Observability suite, headed replay mode (`--headed`), and trace visualization.
-- **Spec 090 (v0.9.0 & v1.0.0)**: RFC 6962 Merkle tree audit receipt generation, Ed25519 signing, and 5-bug benchmark sweep on `MetaPulse`.
+The full production release **v1.0.0** follows the completion of Spec 090:
+- Final submission package, live video demo assets, and submission manifest.
+
+---
+
+## [0.9.0] - 2026-10-29
+
+RFC 6962 Merkle receipts, pure Ed25519 digital attestation, receipt verifier CLI (`verify-receipt`), authoritative 5-bug MetaPulse benchmark suite (`RF-01` to `RF-05`), tri-model competitive orchestration, and high-performance benchmark sweep CLI (`sweep`). Full notes: [docs/release-notes/v0.9.0.md](docs/release-notes/v0.9.0.md).
+
+### Added
+- **RFC 6962 Domain-Separated Merkle Trees (`replayfix-core::merkle`)**: Implements RFC 6962 compliant leaf ($0x00$) and internal node ($0x01$) hashing, deterministic power-of-2 binary tree construction, and reproducible audit path inclusion proofs for all disaggregated fact artifacts.
+- **Pure Ed25519 Digital Attestation (`replayfix-core::crypto`)**: Hardware-accelerated Ed25519 signing and verification via `ed25519-dalek` with versioned canonical payload binding (`REPLAYFIX-ATTESTATION:v0.9:...`), public-key trust policies (`AllowAny`, `PinnedKeys`), and fail-closed exit code 40 (`RECEIPT_VERIFICATION_FAILED`).
+- **Independent Receipt Verification CLI (`replayfix verify-receipt`)**: Universal CLI subcommand that verifies Merkle inclusion proofs, tree roots, and Ed25519 signatures across file and directory targets with optional `--trusted-key` enforcement.
+- **Five-Bug MetaPulse Benchmark Suite (`replayfix-core::fixtures`)**: Implemented complete test fixtures for `RF-01` through `RF-05` covering null dereferences, state arithmetic bugs, inventory underflow, lifecycle reset on navigation, and double-submit idempotency races with unified diff fixes and behavioral contracts.
+- **Tri-Model Orchestration & Pooling (`replayfix-core::repair`)**: `ModelPool` concurrent candidate dispatch across `muse-spark-1.3`, `muse-wonder-1.0`, and `muse-spark-1.3-contributor` with atomic cancellation upon first-verified-green qualification.
+- **High-Performance Benchmark Sweep CLI (`replayfix sweep`)**: Automated execution of `RF-01` through `RF-05` across isolated ephemeral scratch sandboxes, emitting `.replayfix/sweep_receipt.json` with aggregate pass/fail accounting, aggregate Merkle root, and digital signature in $< 2$ seconds ($< 60$s ceiling).
+
+### Changed
+- **Schema Version Harmonization (`0.9`)**: Bumped canonical `SCHEMA_VERSION` to `"0.9"` across receipts, triage reports, differential matrices, regression evaluators, and CLI spec generators.
+- **Disaggregated Artifact Pipeline (`replayfix-core::receipt`)**: Emits `merkle_receipt.json` and `attestation.json` alongside disaggregated stage artifacts.
 
 ---
 

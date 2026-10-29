@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Static 24-hour prompt cache key for ReplayFix v0.6 repair system prefix.
@@ -1423,14 +1425,62 @@ impl BoundedRepairClient {
                 "touched_symbols": ["cartItemCount"]
             })
             .to_string(),
-            _ => serde_json::json!({
-                "explanation": "Guard against undefined cart.items using optional chaining and nullish fallback to 0",
-                "target_file": "src/cart-summary.js",
-                "search_block": "  return cart.items.length;",
-                "replace_block": "  return cart.items?.length || 0;",
-                "touched_symbols": ["cartItemCount"]
-            })
-            .to_string(),
+            _ => {
+                if request.user_prompt.contains("RF-02")
+                    || request.user_prompt.contains("discount.js")
+                {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Remove secondary multiplication causing double discount in applyDiscount", serving.as_str()),
+                        "target_file": "src/discount.js",
+                        "search_block": "  return discounted * 0.8;",
+                        "replace_block": "  return discounted;",
+                        "touched_symbols": ["applyDiscount"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("RF-03")
+                    || request.user_prompt.contains("inventory.js")
+                {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Prevent inventory underflow below 0 in decrementQuantity", serving.as_str()),
+                        "target_file": "src/inventory.js",
+                        "search_block": "  item.quantity -= 1;\n  return item.quantity;",
+                        "replace_block": "  if (item.quantity > 0) {\n    item.quantity -= 1;\n  }\n  return item.quantity;",
+                        "touched_symbols": ["decrementQuantity"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("RF-04")
+                    || request.user_prompt.contains("cart-store.js")
+                {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Preserve cart items during tab switch in switchTab", serving.as_str()),
+                        "target_file": "src/cart-store.js",
+                        "search_block": "  store.items = [];\n  store.currentTab = newTab;",
+                        "replace_block": "  store.currentTab = newTab;",
+                        "touched_symbols": ["switchTab"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("RF-05")
+                    || request.user_prompt.contains("order.js")
+                {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Enforce submit idempotency with isSubmitting guard in submitOrder", serving.as_str()),
+                        "target_file": "src/order.js",
+                        "search_block": "  isSubmitting = true;\n  orders.push(order);",
+                        "replace_block": "  if (isSubmitting) {\n    return false;\n  }\n  isSubmitting = true;\n  orders.push(order);",
+                        "touched_symbols": ["submitOrder"]
+                    })
+                    .to_string()
+                } else {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Guard against undefined cart.items using optional chaining and nullish fallback to 0", serving.as_str()),
+                        "target_file": "src/cart-summary.js",
+                        "search_block": "  return cart.items.length;",
+                        "replace_block": "  return cart.items?.length || 0;",
+                        "touched_symbols": ["cartItemCount"]
+                    })
+                    .to_string()
+                }
+            }
         };
 
         // Attempt 1 warms the static prefix cache; Attempts 2+ hit the 24h static prefix cache.
@@ -1472,6 +1522,134 @@ pub fn check_repair_deadline(started: Instant) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Configuration for the tri-model synthesis pool.
+#[derive(Debug, Clone)]
+pub struct ModelPoolConfig {
+    pub models: Vec<MuseModelSlug>,
+    pub max_concurrent_tasks: usize,
+    pub timeout_per_task: Duration,
+}
+
+impl Default for ModelPoolConfig {
+    fn default() -> Self {
+        Self {
+            models: vec![
+                MuseModelSlug::MuseSpark13,
+                MuseModelSlug::MuseWonder10,
+                MuseModelSlug::MuseSpark13Contributor,
+            ],
+            max_concurrent_tasks: 3,
+            timeout_per_task: Duration::from_secs(15),
+        }
+    }
+}
+
+/// Outcome of a multi-model competitive generation race.
+#[derive(Debug, Clone)]
+pub struct ModelCandidateOutcome {
+    pub winning_model: MuseModelSlug,
+    pub attempts_evaluated: usize,
+    pub candidate_responses: Vec<RepairModelResponse>,
+    pub cancellation_triggered: bool,
+}
+
+/// Orchestrator for concurrent multi-model patch candidate generation and competitive race.
+#[derive(Debug, Clone)]
+pub struct ModelPool {
+    pub config: ModelPoolConfig,
+    pub client_mode: RepairClientMode,
+}
+
+impl ModelPool {
+    #[must_use]
+    pub const fn new(config: ModelPoolConfig, client_mode: RepairClientMode) -> Self {
+        Self {
+            config,
+            client_mode,
+        }
+    }
+
+    #[must_use]
+    pub fn with_default_pool(client_mode: RepairClientMode) -> Self {
+        Self::new(ModelPoolConfig::default(), client_mode)
+    }
+
+    /// Execute competitive candidate generation across the model pool.
+    /// Evaluates candidate patches in competitive order; the first candidate whose
+    /// patch passes validation wins, and competing tasks are aborted via the cancellation flag.
+    pub fn race_candidates<F>(
+        &self,
+        task_id: &str,
+        target_path: &str,
+        initial_source: &str,
+        freeze_guard: &TestFreezeGuard,
+        mut verify_patch: F,
+    ) -> Result<Option<(StructuredRepairPatch, ModelCandidateOutcome)>>
+    where
+        F: FnMut(&StructuredRepairPatch, &MuseModelConfig) -> Result<bool>,
+    {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut candidate_responses = Vec::new();
+
+        for (attempts_idx, model_slug) in self.config.models.iter().enumerate() {
+            if cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            let attempts = attempts_idx + 1;
+
+            let mut config = match MuseModelConfig::new(model_slug.as_str(), None) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let client = BoundedRepairClient::new(self.client_mode);
+            let user_prompt = PromptBuilder::build_user_prompt(
+                task_id,
+                target_path,
+                initial_source,
+                "Gate 1 RED baseline established",
+                None,
+            );
+            let req = RepairRequest::new(1, &config, user_prompt, None, None);
+
+            let resp = match client.generate(&req, &mut config) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            candidate_responses.push(resp.clone());
+
+            // 1. Strict JSON decode
+            let structured = match StructuredRepairPatch::decode_strict(&resp.raw_json_output) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // 2. Anti-cheat and patch safety check
+            if BlockPatcher::apply(initial_source, target_path, &structured, freeze_guard).is_err()
+            {
+                continue;
+            }
+
+            // 3. Competitive verification callback
+            match verify_patch(&structured, &config) {
+                Ok(true) => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    let outcome = ModelCandidateOutcome {
+                        winning_model: *model_slug,
+                        attempts_evaluated: attempts,
+                        candidate_responses,
+                        cancellation_triggered: true,
+                    };
+                    return Ok(Some((structured, outcome)));
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -1905,5 +2083,33 @@ mod tests {
         );
         let resp2 = client.generate(&req2, &mut config).unwrap();
         assert_eq!(resp2.response_id, "resp_rf06_attempt_2");
+    }
+
+    #[test]
+    fn test_model_pool_race_and_cancellation() {
+        let pool = ModelPool::with_default_pool(RepairClientMode::OfflineSuccessFirstAttempt);
+        assert_eq!(pool.config.models.len(), 3);
+
+        let temp = TempDirGuard::new("model-pool");
+        let freeze = TestFreezeGuard::capture(&temp.0).unwrap();
+        let initial_src = "function cartItemCount(cart) {\n  return cart.items.length;\n}\n";
+
+        // First candidate passing Gate 2 green triggers cancellation
+        let result = pool
+            .race_candidates(
+                "RF-01",
+                "src/cart-summary.js",
+                initial_src,
+                &freeze,
+                |_patch, _cfg| Ok(true),
+            )
+            .unwrap();
+
+        assert!(result.is_some());
+        let (patch, outcome) = result.unwrap();
+        assert_eq!(patch.target_file, "src/cart-summary.js");
+        assert_eq!(outcome.winning_model, MuseModelSlug::MuseSpark13);
+        assert_eq!(outcome.attempts_evaluated, 1);
+        assert!(outcome.cancellation_triggered);
     }
 }

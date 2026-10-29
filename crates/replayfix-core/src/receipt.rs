@@ -1,20 +1,23 @@
 //! Machine-readable terminal artifacts: audit receipts and triage reports.
 
 use crate::artifacts::ArtifactStore;
+use crate::crypto::{AttestationRecord, KeypairManager};
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::{DifferentialDiagnosisReport, Phase};
 use crate::locator::GroundingTelemetry;
+use crate::merkle::{EvidenceLeaf, MerkleTree};
 use crate::perception::VideoTelemetry;
 use crate::regression::RegressionParityReport;
 use crate::repair::{RepairTelemetry, TokenAccounting};
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub const SCHEMA_VERSION: &str = "0.8";
+pub const SCHEMA_VERSION: &str = "0.9";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
@@ -73,11 +76,16 @@ pub struct AuditReceipt {
     pub differential_diagnosis: Option<DifferentialDiagnosisReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression_parity: Option<RegressionParityReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merkle_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<AttestationRecord>,
     pub created_at: String,
 }
 
 impl AuditReceipt {
-    /// Write disaggregated stage artifacts into `<output_dir>/artifacts/`.
+    /// Write disaggregated stage artifacts into `<output_dir>/artifacts/` and compute RFC 6962
+    /// Merkle tree receipts and Ed25519 attestations.
     pub fn write_disaggregated_artifacts(
         &self,
         output_dir: &Path,
@@ -110,6 +118,75 @@ impl AuditReceipt {
             store.write_json_pretty("04_regression_parity.json", reg)?;
         }
         store.write_json_pretty("04_audit_receipt.json", self)?;
+
+        // Collect all written artifacts as Merkle evidence leaves
+        let mut leaves = Vec::new();
+        if let Ok(entries) = fs::read_dir(&artifacts_dir) {
+            let mut file_entries = Vec::new();
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.ends_with("merkle_receipt.json")
+                    && !name.ends_with("attestation.json")
+                    && entry.path().is_file()
+                {
+                    file_entries.push((name, entry.path()));
+                }
+            }
+            file_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+            for (filename, path) in file_entries {
+                if let Ok(bytes) = fs::read(&path) {
+                    let mut hasher = Sha256::new();
+                    hasher.update(&bytes);
+                    let content_sha256 = format!("{:x}", hasher.finalize());
+                    let size_bytes = bytes.len();
+                    let artifact_type =
+                        if filename.ends_with(".diff") || filename.ends_with(".patch") {
+                            "candidate_patch".to_string()
+                        } else if filename.contains("preflight") {
+                            "syntax_preflight".to_string()
+                        } else if filename.contains("repro_spec") {
+                            "repro_spec".to_string()
+                        } else if filename.contains("differential_diagnosis") {
+                            "differential_diagnosis".to_string()
+                        } else if filename.contains("regression_parity") {
+                            "regression_parity".to_string()
+                        } else if filename.contains("audit_receipt") {
+                            "audit_receipt".to_string()
+                        } else {
+                            "evidence_fact".to_string()
+                        };
+
+                    leaves.push(EvidenceLeaf {
+                        artifact_type,
+                        file_name: filename,
+                        content_sha256,
+                        size_bytes,
+                        timestamp: self.created_at.clone(),
+                    });
+                }
+            }
+        }
+
+        let tree = MerkleTree::new(leaves)?;
+        let mut merkle_receipt = tree.to_receipt()?;
+
+        let keypair = KeypairManager::generate();
+        let attestation = keypair.sign(
+            &self.schema_version,
+            &merkle_receipt.merkle_root,
+            merkle_receipt.tree_size,
+            &self.created_at,
+        )?;
+
+        merkle_receipt.attestation = Some(attestation.clone());
+
+        store.write_json_pretty("merkle_receipt.json", &merkle_receipt)?;
+        store.write_json_pretty("attestation.json", &attestation)?;
+
+        // Also write at top level of output_dir
+        let _ = write_json(output_dir, "merkle_receipt.json", &merkle_receipt);
+        let _ = write_json(output_dir, "attestation.json", &attestation);
 
         Ok(artifacts_dir)
     }
@@ -330,7 +407,7 @@ mod tests {
     #[test]
     fn test_triage_report_serializes_screaming_status_and_phases() {
         let json = serde_json::to_value(sample_triage()).unwrap();
-        assert_eq!(json["schema_version"], "0.8");
+        assert_eq!(json["schema_version"], "0.9");
         assert_eq!(json["status"], "REPAIR_NOOP_REJECTED");
         assert_eq!(json["exit_code"], 30);
         assert_eq!(
@@ -436,5 +513,111 @@ mod tests {
             let serialized = serde_json::to_string(&status).unwrap();
             assert_eq!(serialized, format!("\"{}\"", status.as_str()));
         }
+    }
+
+    #[test]
+    fn test_disaggregated_artifacts_merkle_and_attestation() {
+        let dir = scratch("disagg-merkle");
+        let receipt = AuditReceipt {
+            schema_version: SCHEMA_VERSION.to_string(),
+            status: "VERIFIED_REPAIRED".to_string(),
+            task_id: "RF-01".to_string(),
+            substrate: SUBSTRATE.to_string(),
+            disclaimer: DISCLAIMER.to_string(),
+            contract_id: "contract_rf01".to_string(),
+            contract_sha256: "abcdef".to_string(),
+            gate1: GateRecord {
+                observed_at: timestamp_now(),
+                verdict: GateVerdict::Red,
+                contract_sha256: "abcdef".to_string(),
+                events: vec![],
+            },
+            patch: PatchRecord {
+                target_path: "src/cart-summary.js".to_string(),
+                sha256: "123456".to_string(),
+                insertions: 1,
+                deletions: 1,
+                files_changed: 1,
+            },
+            gate2: GateRecord {
+                observed_at: timestamp_now(),
+                verdict: GateVerdict::Green,
+                contract_sha256: "abcdef".to_string(),
+                events: vec![],
+            },
+            phase_trace: vec![
+                Phase::Init,
+                Phase::Gate1Red,
+                Phase::Repair,
+                Phase::Gate2Green,
+            ],
+            base_tree_sha256: "base_sha".to_string(),
+            sandbox_tree_sha256: "sandbox_sha".to_string(),
+            base_repo_unmodified_verified: true,
+            ephemeral_port: 8080,
+            grounding_telemetry: None,
+            video_telemetry: None,
+            repair_telemetry: None,
+            token_accounting: None,
+            differential_diagnosis: None,
+            regression_parity: None,
+            merkle_root: None,
+            attestation: None,
+            created_at: timestamp_now(),
+        };
+
+        let diff = "diff --git a/src/cart-summary.js b/src/cart-summary.js\n--- a/src/cart-summary.js\n+++ b/src/cart-summary.js\n@@ -1 +1 @@\n";
+        let artifacts_dir = receipt
+            .write_disaggregated_artifacts(&dir, Some(diff), None)
+            .unwrap();
+
+        assert!(artifacts_dir.join("01_candidate.diff").exists());
+        assert!(artifacts_dir.join("02_preflight.json").exists());
+        assert!(artifacts_dir.join("04_audit_receipt.json").exists());
+        assert!(artifacts_dir.join("merkle_receipt.json").exists());
+        assert!(artifacts_dir.join("attestation.json").exists());
+        assert!(dir.join("merkle_receipt.json").exists());
+        assert!(dir.join("attestation.json").exists());
+
+        // Verify Merkle receipt
+        let receipt_data: crate::merkle::MerkleReceipt = serde_json::from_str(
+            &fs::read_to_string(artifacts_dir.join("merkle_receipt.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt_data.schema_version, "0.9");
+        assert!(receipt_data.tree_size >= 3);
+        assert!(receipt_data.verify_all().unwrap());
+
+        // Verify Attestation
+        let att: AttestationRecord = serde_json::from_str(
+            &fs::read_to_string(artifacts_dir.join("attestation.json")).unwrap(),
+        )
+        .unwrap();
+        let outcome = crate::crypto::verify_attestation(
+            &att,
+            &receipt_data.merkle_root,
+            receipt_data.tree_size,
+            &crate::crypto::TrustPolicy::AllowAny,
+        )
+        .unwrap();
+        assert_eq!(
+            outcome,
+            crate::crypto::VerificationOutcome::VerifiedUntrustedSigner
+        );
+
+        let pinned = std::collections::HashSet::from([att.public_key.clone()]);
+        let trusted_outcome = crate::crypto::verify_attestation(
+            &att,
+            &receipt_data.merkle_root,
+            receipt_data.tree_size,
+            &crate::crypto::TrustPolicy::PinnedKeys(pinned),
+        )
+        .unwrap();
+        assert_eq!(
+            trusted_outcome,
+            crate::crypto::VerificationOutcome::VerifiedTrusted
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -50,7 +50,7 @@ fn mock_heal_verifies_and_writes_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.8");
+    assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
     assert_eq!(receipt["gate2"]["verdict"], "GREEN");
@@ -86,7 +86,7 @@ fn live_browser_verifies_and_writes_cdp_grounding_receipt() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.8");
+    assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["gate1"]["verdict"], "RED");
@@ -119,7 +119,7 @@ fn live_browser_ambiguous_grounding_exits_22_with_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.8");
+    assert_eq!(triage["schema_version"], "0.9");
     assert_eq!(triage["status"], "AMBIGUOUS_GROUNDING");
     assert_eq!(triage["exit_code"], 22);
     assert_eq!(triage["substrate"], "playwright-cdp");
@@ -133,7 +133,7 @@ fn noop_patch_is_rejected_with_triage_report() {
     assert_eq!(code(&out), 30);
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.8");
+    assert_eq!(triage["schema_version"], "0.9");
     assert_eq!(triage["status"], "REPAIR_NOOP_REJECTED");
     assert_eq!(triage["exit_code"], 30);
     assert!(!dir.join(".replayfix/audit_receipt.json").exists());
@@ -380,7 +380,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.8");
+    assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
     assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
@@ -428,7 +428,7 @@ fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
     );
 
     let receipt = json(&dir.join("out-retry/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.8");
+    assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(
         receipt["repair_telemetry"]["requested_model"],
         "muse-spark-1.3"
@@ -476,7 +476,7 @@ fn mock_failing_repair_exits_21_with_quarantine_triage_report() {
     );
 
     let triage = json(&dir.join("out-quarantine/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.8");
+    assert_eq!(triage["schema_version"], "0.9");
     assert_eq!(triage["status"], "QUARANTINE_REPAIR_FAILED");
     assert_eq!(triage["exit_code"], 21);
     assert_eq!(triage["repair_telemetry"]["attempts_used"], 3);
@@ -564,7 +564,7 @@ fn freeze_spec_subcommand_locks_files_and_generates_spec() {
 
     assert!(out_file.exists());
     let spec = json(&out_file);
-    assert_eq!(spec["schema_version"], "0.8");
+    assert_eq!(spec["schema_version"], "0.9");
     assert_eq!(spec["bug_id"], "RF-01");
     assert_eq!(spec["aggregate_sha256"].as_str().unwrap().len(), 64);
     assert_eq!(spec["contract_digest"].as_str().unwrap().len(), 64);
@@ -598,7 +598,7 @@ fn mock_pkg_test_mutation_is_rejected_as_security_violation_exit_11() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.8");
+    assert_eq!(triage["schema_version"], "0.9");
     assert_eq!(triage["status"], "SECURITY_VIOLATION");
     assert_eq!(triage["exit_code"], 11);
 }
@@ -619,7 +619,7 @@ fn repro_run_with_clean_ref_and_verify_matrix() {
     );
 
     let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
-    assert_eq!(receipt["schema_version"], "0.8");
+    assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(
         receipt["differential_diagnosis"]["state"],
@@ -665,7 +665,7 @@ fn mock_regression_triggers_exit_31_and_triage_report() {
     );
 
     let triage = json(&dir.join(".replayfix/triage_report.json"));
-    assert_eq!(triage["schema_version"], "0.8");
+    assert_eq!(triage["schema_version"], "0.9");
     assert_eq!(triage["status"], "REGRESSION_DETECTED");
     assert_eq!(triage["exit_code"], 31);
     assert_eq!(triage["regression_parity"]["parity_passed"], false);
@@ -800,4 +800,107 @@ fn test_apply_with_yes_approves_and_mutates_base_repo_exit_0() {
     let content = fs::read_to_string(cart_file).unwrap();
     assert!(content.contains("return cart.items?.length || 0;"));
     assert!(!content.contains("return cart.items.length;"));
+}
+
+fn run_cmd(dir: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("failed to launch replayfix")
+}
+
+#[test]
+fn test_merkle_receipt_generated_and_verified_exit_0() {
+    let dir = scratch("merkle-verify-ok");
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(code(&out), 0);
+
+    let artifacts = dir.join(".replayfix/artifacts");
+    assert!(artifacts.join("merkle_receipt.json").exists());
+    assert!(artifacts.join("attestation.json").exists());
+
+    // Verify via CLI
+    let verify_out = run_cmd(&dir, &["verify-receipt", ".replayfix", "--json"]);
+    assert_eq!(code(&verify_out), 0);
+    let v_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&verify_out.stdout)).unwrap();
+    assert_eq!(v_json["status"], "SUCCESS");
+    assert!(!v_json["public_key"].as_str().unwrap().is_empty());
+    assert!(!v_json["merkle_root"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn test_verify_receipt_tampered_fails_exit_40() {
+    let dir = scratch("merkle-tamper");
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(code(&out), 0);
+
+    let mr_path = dir.join(".replayfix/artifacts/merkle_receipt.json");
+    let mut mr_val: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&mr_path).unwrap()).unwrap();
+    // Tamper with root
+    mr_val["merkle_root"] =
+        serde_json::json!("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+    fs::write(&mr_path, serde_json::to_vec_pretty(&mr_val).unwrap()).unwrap();
+
+    let verify_out = run_cmd(&dir, &["verify-receipt", mr_path.to_str().unwrap()]);
+    assert_eq!(code(&verify_out), 40);
+}
+
+#[test]
+fn test_verify_receipt_pinned_key_mismatch_fails_exit_40() {
+    let dir = scratch("merkle-untrusted");
+    let out = run(&dir, &["--mock-heal"]);
+    assert_eq!(code(&out), 0);
+
+    let mr_path = dir.join(".replayfix/artifacts/merkle_receipt.json");
+    let verify_out = run_cmd(
+        &dir,
+        &[
+            "verify-receipt",
+            mr_path.to_str().unwrap(),
+            "--trusted-key",
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        ],
+    );
+    assert_eq!(code(&verify_out), 40);
+}
+
+#[test]
+fn test_sweep_all_five_bugs_cli() {
+    let dir = scratch("sweep-cli");
+    let out = run_cmd(
+        &dir,
+        &[
+            "sweep",
+            "--mock-heal",
+            "--repo",
+            dir.to_str().unwrap(),
+            "--output",
+            ".replayfix",
+            "--json",
+        ],
+    );
+
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let sweep_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(sweep_json["schema_version"], "0.9");
+    assert_eq!(sweep_json["total_bugs"], 5);
+    assert_eq!(sweep_json["repaired_bugs"], 5);
+    assert_eq!(sweep_json["failed_bugs"], 0);
+    assert!(sweep_json["elapsed_wall_clock_ms"].as_u64().unwrap() < 60_000);
+
+    // Each bug has its own receipt
+    for bug in &["RF-01", "RF-02", "RF-03", "RF-04", "RF-05"] {
+        assert!(dir
+            .join(format!(".replayfix/{bug}/audit_receipt.json"))
+            .exists());
+    }
 }

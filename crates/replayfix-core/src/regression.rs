@@ -253,7 +253,7 @@ impl RegressionEvaluator {
             new_failures.is_empty() && missing_tests.is_empty() && skipped_increase <= 0;
 
         RegressionParityReport {
-            schema_version: "0.8".to_string(),
+            schema_version: "0.9".to_string(),
             baseline_total_tests: baseline.total_count(),
             patched_total_tests: patched.total_count(),
             baseline_failures: f_baseline.into_iter().collect(),

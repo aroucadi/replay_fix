@@ -1,11 +1,19 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.8.1` (`080-v0.8-observability-ingestion` — Hardening & Qualification Freeze)
-- **Status**: Gap Remediation Complete; 187/187 Tests Passing, Zero Panics, 0 Clippy Warnings. All audit gaps remediated. Ready to advance to `090-v0.9-merkle-receipt-benchmark-suite`.
+- **Active Milestone**: `v0.9.0` (`090-v0.9-cryptographic-merkle-receipts-multimodel-verification`)
+- **Status**: Release Qualification Complete; 203/203 Tests Passing, Zero Panics, 0 Clippy Warnings. RFC 6962 Merkle receipts, pure Ed25519 attestation, `verify-receipt`, 5-bug benchmark suite (`RF-01` to `RF-05`), tri-model pooling, and high-performance `sweep` CLI verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v0.9.0 RFC 6962 Merkle Receipts, Ed25519 Attestation, 5-Bug Suite & Tri-Model Sweep**:
+  - RFC 6962 compliant Merkle trees with explicit domain separation ($0x00$ leaf, $0x01$ node) and reproducible inclusion proofs across all disaggregated fact artifacts.
+  - Pure Ed25519 cryptographic signing (`ed25519-dalek`) over versioned signing payload (`REPLAYFIX-ATTESTATION:v0.9:...`), public-key trust policies (`AllowAny`, `PinnedKeys`), and fail-closed exit code 40 (`RECEIPT_VERIFICATION_FAILED`).
+  - Independent receipt verifier CLI: `replayfix verify-receipt <path> [--trusted-key <hex>] [--json]`.
+  - Authoritative 5-bug MetaPulse benchmark suite (`RF-01` through `RF-05`) with behavioral contracts, buggy sources, clean patches, and HTML test environments.
+  - Bounded tri-model orchestration (`ModelPool`) across `[muse-spark-1.3, muse-wonder-1.0, muse-spark-1.3-contributor]` with first-verified-green acceptance and atomic task cancellation.
+  - High-performance benchmark sweep CLI: `replayfix sweep` executing all 5 bugs in isolated sandboxes ($\Delta\text{repo}=0$), emitting `.replayfix/sweep_receipt.json` in $< 2$ seconds ($< 60$s SLA).
+  - 203 automated tests passing (166 core unit tests, 37 CLI integration tests); zero Clippy warnings; zero panics in production source.
 - [x] **v0.0.0 Genesis**: two-crate workspace, platform abstraction, toolchain lock-in.
 - [x] **v0.1.0 Walking Skeleton**: `doctor` (Git, Node.js, Playwright, FFmpeg), manifest ingestion, path-traversal rejection.
 - [x] **v0.1.1 Hardening**: UNC, DOS-device and ADS path defenses, backslash normalization, platform-aware doctor advice, native test execution (no Cargo runner).

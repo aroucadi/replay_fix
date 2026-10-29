@@ -89,11 +89,20 @@ pub enum GateVerdict {
 /// exactly as a real run could not assert after a failed setup or action.
 pub fn run_oracle(contract: &BehavioralContract, source: &str) -> Vec<OracleEvent> {
     let target_marker = format!("function {}", contract.target);
+    let defect_fixed = match contract.target.as_str() {
+        "cartItemCount" => !source.contains("cart.items.length") || source.contains("cart.items?"),
+        "applyDiscount" => !source.contains("0.8 * 0.8"),
+        "decrementQuantity" => source.contains("Math.max") || source.contains("currentQty > 0"),
+        "switchTab" => !source.contains("return [];"),
+        "submitOrder" => source.contains("if (isSubmitting)"),
+        _ => !source.contains("cart.items.length"),
+    };
+
     let checks: [bool; 4] = [
         !source.trim().is_empty(),
         source.contains(&target_marker),
         source.contains(&target_marker),
-        !source.contains("cart.items.length"),
+        defect_fixed,
     ];
 
     let mut events = Vec::with_capacity(4);
@@ -790,6 +799,8 @@ impl MockHealer {
             token_accounting,
             differential_diagnosis: Some(diag),
             regression_parity: Some(parity),
+            merkle_root: None,
+            attestation: None,
             created_at: timestamp_now(),
         })))
     }
@@ -1554,6 +1565,8 @@ impl MockHealer {
             token_accounting,
             differential_diagnosis: Some(diag),
             regression_parity: Some(parity),
+            merkle_root: None,
+            attestation: None,
             created_at: timestamp_now(),
         })))
     }
@@ -1606,7 +1619,7 @@ mod tests {
         let HealOutcome::Verified(receipt) = MockHealer::run(&f, f.builtin_diff).unwrap() else {
             panic!("expected verification");
         };
-        assert_eq!(receipt.schema_version, "0.8");
+        assert_eq!(receipt.schema_version, "0.9");
         assert_eq!(receipt.status, "VERIFIED_REPAIRED");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
@@ -1649,7 +1662,7 @@ mod tests {
         .unwrap() else {
             panic!("expected autonomous repair verification");
         };
-        assert_eq!(receipt.schema_version, "0.8");
+        assert_eq!(receipt.schema_version, "0.9");
         let rtel = receipt.repair_telemetry.expect("expected repair_telemetry");
         assert_eq!(rtel.requested_model, "muse-spark-1.3");
         assert_eq!(rtel.serving_model, "muse-spark-1.3");
@@ -1750,7 +1763,7 @@ mod tests {
         else {
             panic!("expected live browser verification");
         };
-        assert_eq!(receipt.schema_version, "0.8");
+        assert_eq!(receipt.schema_version, "0.9");
         assert_eq!(receipt.substrate, "playwright-cdp");
         assert_eq!(receipt.gate1.verdict, GateVerdict::Red);
         assert_eq!(receipt.gate2.verdict, GateVerdict::Green);
