@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v0.9/attestation.schema.json",
+  "title": "AttestationRecord",
+  "description": "RFC 8032 Pure Ed25519 digital attestation binding a Merkle receipt root, tree size, schema version, and timestamp.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "algorithm",
+    "public_key",
+    "signature",
+    "signing_payload",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.9"
+    },
+    "algorithm": {
+      "type": "string",
+      "const": "Ed25519"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Hexadecimal 32-byte Ed25519 public key."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$",
+      "description": "Hexadecimal 64-byte Ed25519 signature over signing_payload."
+    },
+    "signing_payload": {
+      "type": "string",
+      "pattern": "^REPLAYFIX-ATTESTATION:v0\\.9:0\\.9:[0-9a-f]{64}:[0-9]+:.+$",
+      "description": "Domain-separated canonical signing payload: REPLAYFIX-ATTESTATION:v0.9:<schema_version>:<merkle_root>:<tree_size>:<created_at>"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 UTC timestamp when attestation was created."
+    }
+  },
+  "additionalProperties": false
+}

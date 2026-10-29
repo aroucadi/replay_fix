@@ -14,18 +14,28 @@ Example:
 
 ---
 
-## 2. Attestation Schema
+## 2. Attestation Schema (`contracts/attestation.schema.json`)
 
 ```json
 {
-  "title": "Ed25519Attestation",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttestationRecord",
   "type": "object",
-  "required": ["public_key", "signature", "signing_payload", "algorithm"],
+  "required": [
+    "schema_version",
+    "algorithm",
+    "public_key",
+    "signature",
+    "signing_payload",
+    "created_at"
+  ],
   "properties": {
+    "schema_version": { "type": "string", "const": "0.9" },
+    "algorithm": { "type": "string", "const": "Ed25519" },
     "public_key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "signature": { "type": "string", "pattern": "^[0-9a-f]{128}$" },
     "signing_payload": { "type": "string" },
-    "algorithm": { "type": "string", "const": "Ed25519" }
+    "created_at": { "type": "string", "format": "date-time" }
   }
 }
 ```
@@ -34,9 +44,10 @@ Example:
 
 ## 3. Trust & Verification Outcomes
 
-| Condition | Status | Exit Code |
-|---|---|---|
-| Valid signature, trusted public key | `VERIFIED_TRUSTED` | 0 |
-| Valid signature, untrusted public key (no `--trusted-key` pin) | `VERIFIED_UNTRUSTED_SIGNER` | 0 (Warning logged) |
-| Invalid signature / corrupted payload | `SIGNATURE_VERIFICATION_FAILED` | 40 |
-| Tampered Merkle leaf / invalid proof | `MERKLE_PROOF_INVALID` | 40 |
+| Condition | Status | Exit Code | Action |
+|---|---|---|---|
+| Valid signature, trusted public key | `VERIFIED_TRUSTED` | 0 | Success; authorized execution authority. |
+| Valid signature, untrusted public key (no `--trusted-key` pin) | `VERIFIED_UNTRUSTED_SIGNER` | 0 | Warning logged; valid signature but untrusted signer. |
+| Invalid signature / corrupted payload | `SIGNATURE_VERIFICATION_FAILED` | 40 | Fail-closed; cryptographic mismatch. |
+| Signer public key not present in pinned `--trusted-key` | `SIGNATURE_VERIFICATION_FAILED` | 40 | Fail-closed; unauthorized signer. |
+| Tampered Merkle leaf / invalid proof | `MERKLE_PROOF_INVALID` | 40 | Fail-closed; evidence integrity violated. |

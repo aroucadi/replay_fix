@@ -304,15 +304,35 @@ impl MerkleReceipt {
         let mut root_arr = [0u8; 32];
         root_arr.copy_from_slice(&root_bytes);
 
-        for leaf in &self.leaves {
-            let proof = self.inclusion_proofs.get(&leaf.file_name).ok_or_else(|| {
-                CoreError::SecurityViolation(format!(
-                    "Missing inclusion proof for leaf '{}'",
-                    leaf.file_name
-                ))
-            })?;
-
+        for (idx, leaf) in self.leaves.iter().enumerate() {
             let leaf_hash = leaf.leaf_hash()?;
+            let leaf_hash_hex = to_hex(&leaf_hash);
+
+            // Resilient lookup strategy:
+            // 1. Primary canonical key: file_name ("01_candidate.diff")
+            // 2. Interop key: 0-indexed leaf position string ("0", "1", ...)
+            // 3. Interop key: hex-encoded leaf hash
+            // 4. Interop key: content SHA-256
+            let proof = self
+                .inclusion_proofs
+                .get(&leaf.file_name)
+                .or_else(|| self.inclusion_proofs.get(&idx.to_string()))
+                .or_else(|| self.inclusion_proofs.get(&leaf_hash_hex))
+                .or_else(|| self.inclusion_proofs.get(&leaf.content_sha256))
+                .ok_or_else(|| {
+                    CoreError::SecurityViolation(format!(
+                        "Missing inclusion proof for leaf '{}' (index {}, leaf hash {})",
+                        leaf.file_name, idx, leaf_hash_hex
+                    ))
+                })?;
+
+            if proof.leaf_index != idx {
+                return Err(CoreError::SecurityViolation(format!(
+                    "Inclusion proof leaf_index {} does not match leaf position {}",
+                    proof.leaf_index, idx
+                )));
+            }
+
             let valid = proof.verify(&leaf_hash, &root_arr)?;
             if !valid {
                 return Ok(false);
@@ -441,5 +461,111 @@ mod tests {
             let receipt = tree.to_receipt().unwrap();
             assert!(receipt.verify_all().unwrap());
         }
+    }
+
+    #[test]
+    fn test_evidence_leaf_canonical_bytes_order_invariance() {
+        let leaf_direct = EvidenceLeaf {
+            artifact_type: "candidate_patch".to_string(),
+            file_name: "01_candidate.diff".to_string(),
+            content_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
+            size_bytes: 42,
+            timestamp: "2026-10-29T16:00:00.000Z".to_string(),
+        };
+
+        // Permuted/reversed property order in raw JSON
+        let raw_reversed = r#"{
+            "timestamp": "2026-10-29T16:00:00.000Z",
+            "size_bytes": 42,
+            "file_name": "01_candidate.diff",
+            "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "artifact_type": "candidate_patch"
+        }"#;
+        let leaf_deserialized: EvidenceLeaf = serde_json::from_str(raw_reversed).unwrap();
+
+        let bytes_direct = leaf_direct.canonical_bytes().unwrap();
+        let bytes_deserialized = leaf_deserialized.canonical_bytes().unwrap();
+        assert_eq!(bytes_direct, bytes_deserialized);
+        assert_eq!(
+            leaf_direct.leaf_hash().unwrap(),
+            leaf_deserialized.leaf_hash().unwrap()
+        );
+
+        // Exact RFC 8785 canonical string representation (UTF-16 key sort, compact delimiters)
+        let expected_canonical = r#"{"artifact_type":"candidate_patch","content_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","file_name":"01_candidate.diff","size_bytes":42,"timestamp":"2026-10-29T16:00:00.000Z"}"#;
+        assert_eq!(String::from_utf8(bytes_direct).unwrap(), expected_canonical);
+    }
+
+    #[test]
+    fn test_inclusion_proofs_alternative_key_lookups() {
+        let leaves = vec![
+            dummy_leaf("01_candidate.diff", "hash1"),
+            dummy_leaf("02_preflight.json", "hash2"),
+            dummy_leaf("03_audit_receipt.json", "hash3"),
+        ];
+        let tree = MerkleTree::new(leaves.clone()).unwrap();
+        let base_receipt = tree.to_receipt().unwrap();
+        assert!(base_receipt.verify_all().unwrap());
+
+        // 1. Interop: Proofs keyed by index string ("0", "1", "2")
+        let mut index_keyed = base_receipt.clone();
+        index_keyed.inclusion_proofs.clear();
+        for (i, leaf) in leaves.iter().enumerate() {
+            let proof = base_receipt
+                .inclusion_proofs
+                .get(&leaf.file_name)
+                .unwrap()
+                .clone();
+            index_keyed.inclusion_proofs.insert(i.to_string(), proof);
+        }
+        assert!(index_keyed.verify_all().unwrap());
+
+        // 2. Interop: Proofs keyed by hex leaf hash
+        let mut hash_keyed = base_receipt.clone();
+        hash_keyed.inclusion_proofs.clear();
+        for leaf in &leaves {
+            let proof = base_receipt
+                .inclusion_proofs
+                .get(&leaf.file_name)
+                .unwrap()
+                .clone();
+            let leaf_hex = leaf.leaf_hash_hex().unwrap();
+            hash_keyed.inclusion_proofs.insert(leaf_hex, proof);
+        }
+        assert!(hash_keyed.verify_all().unwrap());
+
+        // 3. Interop: Proofs keyed by content_sha256
+        let mut content_keyed = base_receipt.clone();
+        content_keyed.inclusion_proofs.clear();
+        for leaf in &leaves {
+            let proof = base_receipt
+                .inclusion_proofs
+                .get(&leaf.file_name)
+                .unwrap()
+                .clone();
+            content_keyed
+                .inclusion_proofs
+                .insert(leaf.content_sha256.clone(), proof);
+        }
+        assert!(content_keyed.verify_all().unwrap());
+
+        // 4. Tampered index mismatch: proof leaf_index != idx
+        let mut tampered_index = base_receipt.clone();
+        let mut mismatched_proof = tampered_index
+            .inclusion_proofs
+            .get("01_candidate.diff")
+            .unwrap()
+            .clone();
+        mismatched_proof.leaf_index = 999;
+        tampered_index
+            .inclusion_proofs
+            .insert("01_candidate.diff".to_string(), mismatched_proof);
+        assert!(tampered_index.verify_all().is_err());
+
+        // 5. Missing proof fail-closed
+        let mut missing_proof = base_receipt.clone();
+        missing_proof.inclusion_proofs.remove("01_candidate.diff");
+        assert!(missing_proof.verify_all().is_err());
     }
 }

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v0.9/merkle_receipt.schema.json",
+  "title": "MerkleReceipt",
+  "description": "RFC 6962 cryptographic Merkle receipt binding disaggregated evidence leaves with inclusion proofs and optional Ed25519 attestation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tree_size",
+    "merkle_root",
+    "leaves",
+    "inclusion_proofs"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.9"
+    },
+    "tree_size": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "merkle_root": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "leaves": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EvidenceLeaf"
+      }
+    },
+    "inclusion_proofs": {
+      "type": "object",
+      "description": "Inclusion proofs indexed canonically by leaf file_name, or by index string or leaf hash hex.",
+      "additionalProperties": {
+        "$ref": "#/$defs/MerkleInclusionProof"
+      }
+    },
+    "attestation": {
+      "$ref": "attestation.schema.json"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "EvidenceLeaf": {
+      "type": "object",
+      "description": "Single RFC 8785 canonical evidence fact committed to the Merkle tree.",
+      "required": [
+        "artifact_type",
+        "file_name",
+        "content_sha256",
+        "size_bytes",
+        "timestamp"
+      ],
+      "properties": {
+        "artifact_type": {
+          "type": "string",
+          "enum": [
+            "candidate_patch",
+            "syntax_preflight",
+            "repro_spec",
+            "differential_diagnosis",
+            "regression_parity",
+            "audit_receipt",
+            "evidence_fact"
+          ]
+        },
+        "file_name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_.-]+$"
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "MerkleInclusionProof": {
+      "type": "object",
+      "description": "RFC 6962 audit path verifying a single leaf hash against the Merkle root.",
+      "required": [
+        "leaf_index",
+        "tree_size",
+        "audit_path"
+      ],
+      "properties": {
+        "leaf_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tree_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "audit_path": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
