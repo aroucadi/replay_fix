@@ -13,8 +13,8 @@ Get-Content release/v1.0.0/SHA256SUMS.txt | ForEach-Object {
 
 ## 2. Verify Packaged Receipts Using the Signed Production Binary
 ```powershell
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe verify-receipt release/v1.0.0/examples/sanitized-receipts/act3_verified/audit_receipt.json --json
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe verify-receipt release/v1.0.0/examples/sanitized-receipts/act3_sweep/sweep_receipt.json --json
+./release/v1.0.0/binaries/windows-x64/replayfix.exe verify-receipt release/v1.0.0/examples/sanitized-receipts/act3_verified/audit_receipt.json --json
+./release/v1.0.0/binaries/windows-x64/replayfix.exe verify-receipt release/v1.0.0/examples/sanitized-receipts/act3_sweep/sweep_receipt.json --json
 ```
 
 ## 3. Run the Full Automated Workspace Test & Panic Audit Suite

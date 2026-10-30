@@ -1,4 +1,4 @@
-//! Terminal UI design tokens, color policies, output modes, and rendering architecture for FixTream CLI.
+//! Terminal UI design tokens, color policies, output modes, and rendering architecture for ReplayFix CLI.
 //!
 //! Implements a 10/10 production-grade CLI interaction layer inspired by Cargo, Git, and Claude Code:
 //! - Three explicit output modes: Human, Quiet, and Machine.
@@ -208,7 +208,7 @@ pub fn print_banner(theme: &Theme, title: &str) {
     }
     let bar = "─".repeat(60);
     println!("{}", theme.muted(&bar));
-    println!("  {} {}", theme.brand("FixTream //"), theme.bold(title));
+    println!("  {} {}", theme.brand("ReplayFix //"), theme.bold(title));
     println!("{}", theme.muted(&bar));
 }
 

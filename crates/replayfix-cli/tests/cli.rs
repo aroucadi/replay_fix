@@ -981,8 +981,8 @@ fn test_v1_0_0_version_and_release_package_integrity() {
     assert_eq!(code(&ver_out), 0);
     let stdout = String::from_utf8_lossy(&ver_out.stdout);
     assert!(
-        stdout.contains("1.0.0"),
-        "Expected version 1.0.0 in --version output, got: {stdout}"
+        stdout.contains("replayfix 1.0.0"),
+        "Expected 'replayfix 1.0.0' in --version output, got: {stdout}"
     );
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -998,7 +998,73 @@ fn test_v1_0_0_version_and_release_package_integrity() {
     assert!(rel_dir
         .join("demo/captions/replayfix-v1.0.0-demo.vtt")
         .exists());
-    assert!(rel_dir.join("documentation/HACKATHON_SUBMISSION.md").exists());
+    assert!(rel_dir
+        .join("documentation/HACKATHON_SUBMISSION.md")
+        .exists());
     assert!(rel_dir.join("QUALIFICATION_REPORT.md").exists());
     assert!(rel_dir.join("SHA256SUMS.txt").exists());
+
+    // 1. Verify every single entry in release/v1.0.0/SHA256SUMS.txt matches on-disk SHA-256
+    let sums_raw = fs::read_to_string(rel_dir.join("SHA256SUMS.txt")).unwrap();
+    let mut verified_files = 0usize;
+    for line in sums_raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.splitn(2, "  ").collect();
+        assert_eq!(parts.len(), 2, "Malformed SHA256SUMS line: {line}");
+        let expected_sha = parts[0].trim();
+        let rel_path = parts[1].trim();
+        assert!(
+            !rel_path.ends_with(".key"),
+            "Private key file must never be packaged in release/v1.0.0: {rel_path}"
+        );
+        let full_path = rel_dir.join(rel_path);
+        assert!(
+            full_path.exists(),
+            "Missing packaged file: {}",
+            full_path.display()
+        );
+        let actual_sha = replayfix_core::digest::sha256_hex(&fs::read(&full_path).unwrap());
+        assert_eq!(
+            actual_sha, expected_sha,
+            "SHA-256 mismatch on packaged file '{rel_path}'"
+        );
+        verified_files += 1;
+    }
+    assert!(
+        verified_files >= 20,
+        "Expected >= 20 files in SHA256SUMS.txt"
+    );
+
+    // 2. Verify binaries/windows-x64/SHA256SUMS.txt matches binaries/windows-x64/replayfix.exe
+    let bin_sums = fs::read_to_string(rel_dir.join("binaries/windows-x64/SHA256SUMS.txt")).unwrap();
+    let bin_expected_sha = bin_sums.split_whitespace().next().unwrap();
+    let bin_actual_sha = replayfix_core::digest::sha256_hex(
+        &fs::read(rel_dir.join("binaries/windows-x64/replayfix.exe")).unwrap(),
+    );
+    assert_eq!(bin_actual_sha, bin_expected_sha);
+
+    // 3. Verify demo-evidence-manifest.json hashes match physical artifacts
+    let demo_manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(rel_dir.join("demo/demo-evidence-manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        demo_manifest["production_binary"]["sha256"]
+            .as_str()
+            .unwrap(),
+        bin_actual_sha
+    );
+    for act in demo_manifest["acts"].as_array().unwrap() {
+        for (art_path, expected_hash_val) in act["evidence_artifacts"].as_object().unwrap() {
+            let expected_h = expected_hash_val.as_str().unwrap();
+            let actual_h =
+                replayfix_core::digest::sha256_hex(&fs::read(repo_root.join(art_path)).unwrap());
+            assert_eq!(
+                actual_h, expected_h,
+                "Demo manifest artifact hash mismatch for '{art_path}'"
+            );
+        }
+    }
 }

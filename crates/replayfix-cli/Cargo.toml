@@ -3,7 +3,7 @@ name = "replayfix-cli"
 version = "1.0.0"
 edition = "2021"
 authors = ["ReplayFix Contributors"]
-description = "FixTream CLI — Deterministic verification and repair harness"
+description = "ReplayFix CLI — Deterministic verification and repair harness"
 license = "MIT"
 
 [[bin]]

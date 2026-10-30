@@ -3,7 +3,7 @@
 See [docs/release-notes/v1.0.0.md](../../docs/release-notes/v1.0.0.md) for the full repository release notes.
 
 ## Package Contents (`release/v1.0.0/`)
-- `binaries/windows-x64/replayfix.exe`: Optimized (`3.86 MB`) and Authenticode-signed Windows 11 x64 production executable (`SHA-256: f799f0f1f4182b2fc3d0e9a4871aae1bb68fec6399db0a519f0f7325c6ca7f74`).
+- `binaries/windows-x64/replayfix.exe`: Optimized (`3.86 MB`) and Authenticode-signed Windows 11 x64 production executable (`SHA-256: 90b11e3860a3c5b33b450ab16680b9d4e80b2b4273bab83c202220f275a57115`).
 - `binaries/windows-x64/SIGNATURE-VERIFICATION.txt` & `SHA256SUMS.txt`: Cryptographic binary verification records.
 - `proof-portal/proof_viewer.html`: Air-gapped single-file Judge Proof Portal (`default-src 'none'; connect-src 'none'`).
 - `demo/replayfix-v1.0.0-demo.mp4`: Synchronized 180.0s (`1920x1080`, `30fps`, H.264/AAC) Three-Act demonstration video, WebVTT captions (`demo/captions/replayfix-v1.0.0-demo.vtt`), and `demo/demo-evidence-manifest.json`.

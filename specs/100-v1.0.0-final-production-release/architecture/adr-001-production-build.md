@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-ReplayFix v1.0.0 requires an optimized production binary (`[profile.release]`) with `opt-level = 3`, `lto = true`, `codegen-units = 1`, and `panic = "abort"`. We must verify that `panic = "abort"` does not endanger repository immutability ($\Delta	ext{repo}=0$) or leave orphaned child processes or corrupted artifacts.
+ReplayFix v1.0.0 requires an optimized production binary (`[profile.release]`) with `opt-level = 3`, `lto = true`, `codegen-units = 1`, and `panic = "abort"`. We must verify that `panic = "abort"` does not endanger repository immutability ($\Delta\text{repo}=0$) or leave orphaned child processes or corrupted artifacts.
 
 ## Decision
 Approve `opt-level = 3`, `lto = true`, `codegen-units = 1`, and `panic = "abort"` in the workspace root `Cargo.toml` for three reasons:

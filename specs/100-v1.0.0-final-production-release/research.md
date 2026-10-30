@@ -4,7 +4,7 @@
 - **Decision**: Retain `panic = "abort"` in `[profile.release]`.
 - **Rationale**:
   1. Production code across `replayfix-core` and `replayfix-cli` is compiled with `#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::todo, clippy::unimplemented, clippy::unreachable))]` and audited by `scripts/check-panics.ps1` (`0` violations).
-  2. All file mutations use two-phase atomic writes (`.tmp.<pid>.<counter>` $ightarrow$ `fs::rename`), so an abrupt process termination can never leave half-written JSON receipts or corrupted repository files.
+  2. All file mutations use two-phase atomic writes (`.tmp.<pid>.<counter>` $\rightarrow$ `fs::rename`), so an abrupt process termination can never leave half-written JSON receipts or corrupted repository files.
   3. Eliminating unwinding tables reduces binary footprint and prevents unwind-based control-flow side effects.
 
 ## 2. Windows 11 Authenticode & Smart App Control (`os error 4551`)

@@ -7,5 +7,5 @@
 4. `cargo clippy --workspace --all-targets --all-features -- -D warnings` -> Exit `0` (0 warnings)
 5. `cargo test --workspace` -> 100% pass rate
 6. `cargo build --release --workspace` -> Exit `0`
-7. `Get-AuthenticodeSignature release/v1.0.0/binaries/windows-x64/replayfix.exe` -> `Status: Valid`
+7. `Get-AuthenticodeSignature release/v1.0.0/binaries/windows-x64/replayfix.exe` -> Valid digital signature from `CN=ReplayFix Local Developer` (Thumbprint `14FAB92131428EC6302B7D025E3611AC32BEE8F8`)
 8. `SHA256SUMS.txt` verification -> 100% match across all packaged files

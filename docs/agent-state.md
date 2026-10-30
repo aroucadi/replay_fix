@@ -2,7 +2,7 @@
 
 ## 1. Project Phase & Active Task
 - **Active Milestone**: `v1.0.0` (`100-v1.0.0-final-production-release` — Final Production Release & Hackathon Submission)
-- **Status**: Production Release Qualification Complete; 223/223 Tests Passing, Zero Panics, 0 Clippy Warnings. Optimized LTO release binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode signature verification, 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) + `demo-evidence-manifest.json` + WebVTT captions, offline `proof_viewer.html`, and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package verified.
+- **Status**: Production Release Qualification Complete; 224/224 Tests Passing, Zero Panics, 0 Clippy Warnings. Optimized LTO release binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode signature verification, 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) + `demo-evidence-manifest.json` + WebVTT captions, offline `proof_viewer.html`, and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence

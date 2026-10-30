@@ -5,9 +5,9 @@
   "baseline_commit": "81d5c64",
   "production_binary": {
     "path": "release/v1.0.0/binaries/windows-x64/replayfix.exe",
-    "sha256": "f799f0f1f4182b2fc3d0e9a4871aae1bb68fec6399db0a519f0f7325c6ca7f74",
+    "sha256": "90b11e3860a3c5b33b450ab16680b9d4e80b2b4273bab83c202220f275a57115",
     "size_bytes": 3858304,
-    "version_output": "fixtream 1.0.0"
+    "version_output": "replayfix 1.0.0"
   },
   "video": {
     "file": "release/v1.0.0/demo/replayfix-v1.0.0-demo.mp4",
@@ -76,7 +76,7 @@
         "release/v1.0.0/examples/sanitized-receipts/act3_verified/audit_receipt.json": "3324a8e77c890d3b36e19a99ed1ee0e8a178c1315f3cb8ebbdc6041df02c4d1b",
         "release/v1.0.0/examples/sanitized-receipts/act3_verified/merkle_receipt.json": "33bb102201143943f7fae71f01490a4d98d8b66e2c589baa9bf674303a30a536",
         "release/v1.0.0/examples/sanitized-receipts/act3_sweep/sweep_receipt.json": "e2c31494a128a200180b33628a707bf0e1da2d8eeaed865fc94c2eb3ac5cb2a1",
-        "release/v1.0.0/proof-portal/proof_viewer.html": "verified_offline_portal"
+        "release/v1.0.0/proof-portal/proof_viewer.html": "9affc351b9b2581493d52ebafb4fbfe26a53f3f63e26cf48e6f1064399cd29e5"
       }
     }
   ]

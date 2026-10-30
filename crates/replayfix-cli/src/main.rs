@@ -64,9 +64,9 @@ const MAX_PATCH_BYTES: u64 = 1024 * 1024;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "fixtream",
+    name = "replayfix",
     version,
-    about = "FixTream CLI — Deterministic verification, causal reproduction, and repair harness"
+    about = "ReplayFix CLI — Deterministic verification, causal reproduction, and repair harness"
 )]
 struct Cli {
     /// Control colored terminal output: auto, always, never

@@ -2,22 +2,22 @@
 
 ## 1. Check Environment Health (`doctor`)
 ```powershell
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe doctor
+./release/v1.0.0/binaries/windows-x64/replayfix.exe doctor
 ```
 
 ## 2. Run Autonomous Causal Repair on `RF-01`
 ```powershell
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe run --bug RF-01 --mock-heal --output-dir .replayfix/rf01
+./release/v1.0.0/binaries/windows-x64/replayfix.exe run --bug RF-01 --mock-heal --output-dir .replayfix/rf01
 ```
 
 ## 3. Cryptographically Verify the Generated Receipt (`verify-receipt`)
 ```powershell
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe verify-receipt .replayfix/rf01/audit_receipt.json --json
+./release/v1.0.0/binaries/windows-x64/replayfix.exe verify-receipt .replayfix/rf01/audit_receipt.json --json
 ```
 
 ## 4. Run the Five-Bug MetaPulse Benchmark Sweep (`RF-01`..`RF-05`)
 ```powershell
-.elease\v1.0.0\binaries\windows-x64eplayfix.exe sweep --mock-heal --output .replayfix/sweep
+./release/v1.0.0/binaries/windows-x64/replayfix.exe sweep --mock-heal --output .replayfix/sweep
 ```
 
 ## 5. Open the Offline Judge Proof Portal (`proof_viewer.html`)
