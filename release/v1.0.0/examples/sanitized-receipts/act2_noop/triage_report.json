@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.9",
+  "status": "REPAIR_NOOP_REJECTED",
+  "exit_code": 30,
+  "reason": "The candidate patch is empty; a repair must change the source",
+  "task_id": "RF-01",
+  "substrate": "mock-static-oracle",
+  "phase_trace": [
+    "INIT",
+    "GATE1_RED",
+    "REPAIR",
+    "REJECTED"
+  ],
+  "created_at": "2026-10-30T15:21:28.195Z"
+}

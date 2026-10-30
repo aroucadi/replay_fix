@@ -29,6 +29,7 @@ pub const DEMO_PRESET_PUBLIC_SEED_HEX: &str =
 pub enum PortalVerificationVerdict {
     VerifiedGenuine,
     SignatureValidSignerUntrusted,
+    PolicyQualificationFailed,
     IntegrityCheckFailed,
     UnsignedReceipt,
     UnsupportedProtocolVersion,
@@ -41,6 +42,7 @@ impl PortalVerificationVerdict {
         match self {
             Self::VerifiedGenuine => "VERIFIED GENUINE",
             Self::SignatureValidSignerUntrusted => "SIGNATURE VALID — SIGNER UNTRUSTED",
+            Self::PolicyQualificationFailed => "POLICY QUALIFICATION FAILED",
             Self::IntegrityCheckFailed => "INTEGRITY CHECK FAILED",
             Self::UnsignedReceipt => "UNSIGNED RECEIPT",
             Self::UnsupportedProtocolVersion => "UNSUPPORTED PROTOCOL VERSION",
@@ -130,6 +132,13 @@ pub fn evaluate_portal_receipt_bytes(
         return (
             PortalVerificationVerdict::MalformedReceipt,
             format!("JSON nesting depth exceeds maximum ({MAX_PORTAL_JSON_DEPTH})"),
+        );
+    }
+
+    if let Some(dup_key) = check_duplicate_json_keys(raw_str) {
+        return (
+            PortalVerificationVerdict::MalformedReceipt,
+            format!("Duplicate JSON object key '{dup_key}' rejected before parsing"),
         );
     }
 
@@ -237,12 +246,31 @@ pub fn evaluate_portal_receipt_bytes(
             );
         }
 
-        return verify_portal_attestation(
+        let (att_verdict, att_msg) = verify_portal_attestation(
             &sweep.ed25519_attestation,
             &sweep.merkle_root,
             sweep.total_bugs,
             pinned_keys,
         );
+        if att_verdict != PortalVerificationVerdict::VerifiedGenuine {
+            return (att_verdict, att_msg);
+        }
+
+        let any_case_failed = sweep
+            .results
+            .values()
+            .any(|r| r.exit_code != 0 || r.status != "VERIFIED_REPAIRED");
+        if sweep.failed_bugs > 0 || sweep.repaired_bugs != sweep.total_bugs || any_case_failed {
+            return (
+                PortalVerificationVerdict::PolicyQualificationFailed,
+                format!(
+                    "SWEEP_PARTIAL_FAILURE: Cryptographic signature is valid and trusted, but sweep only repaired {}/{} bugs ({} failed)",
+                    sweep.repaired_bugs, sweep.total_bugs, sweep.failed_bugs
+                ),
+            );
+        }
+
+        return (att_verdict, att_msg);
     }
 
     // Case 3: Standalone AuditReceipt
@@ -288,7 +316,40 @@ pub fn evaluate_portal_receipt_bytes(
             );
         }
 
-        return verify_portal_attestation(&att, &merkle_root, tree_size, pinned_keys);
+        let (att_verdict, att_msg) =
+            verify_portal_attestation(&att, &merkle_root, tree_size, pinned_keys);
+        if att_verdict != PortalVerificationVerdict::VerifiedGenuine {
+            return (att_verdict, att_msg);
+        }
+
+        let status_ok = val
+            .get("status")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s == "VERIFIED_REPAIRED");
+        let repo_clean = val
+            .get("base_repo_unmodified_verified")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let gate2_green = val
+            .get("gate2")
+            .and_then(|g| g.get("verdict"))
+            .and_then(|v| v.as_str())
+            .is_none_or(|v| v == "GREEN");
+        let parity_ok = val
+            .get("regression_parity")
+            .and_then(|r| r.get("parity_preserved"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        if !status_ok || !repo_clean || !gate2_green || !parity_ok {
+            return (
+                PortalVerificationVerdict::PolicyQualificationFailed,
+                "Cryptographic attestation is valid and trusted, but deterministic gate or regression parity policy failed"
+                    .to_string(),
+            );
+        }
+
+        return (att_verdict, att_msg);
     }
 
     (
@@ -362,6 +423,100 @@ fn check_json_depth(raw: &str) -> usize {
         }
     }
     max_depth
+}
+
+enum JsonScope {
+    Object {
+        keys: HashSet<String>,
+        expecting_key: bool,
+    },
+    Array,
+}
+
+/// Detect duplicate JSON object keys in raw JSON text before `serde_json::from_str::<Value>`
+/// silently overwrites earlier keys.
+fn check_duplicate_json_keys(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    let mut stack: Vec<JsonScope> = Vec::new();
+    let mut i = 0usize;
+
+    while i < len {
+        let b = bytes[i];
+        match b {
+            b'"' => {
+                let start = i;
+                i += 1;
+                let mut esc = false;
+                while i < len {
+                    let c = bytes[i];
+                    if esc {
+                        esc = false;
+                    } else if c == b'\\' {
+                        esc = true;
+                    } else if c == b'"' {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i >= len {
+                    return None;
+                }
+                let end = i;
+                i += 1;
+
+                // Check if we are in an Object scope expecting a key and followed by ':'
+                let is_obj_key = matches!(
+                    stack.last(),
+                    Some(JsonScope::Object {
+                        expecting_key: true,
+                        ..
+                    })
+                );
+                if is_obj_key {
+                    let mut j = i;
+                    while j < len && matches!(bytes[j], b' ' | b'\t' | b'\r' | b'\n') {
+                        j += 1;
+                    }
+                    if j < len && bytes[j] == b':' {
+                        let key_str = serde_json::from_str::<String>(&raw[start..=end])
+                            .unwrap_or_else(|_| raw[start + 1..end].to_string());
+                        if let Some(JsonScope::Object {
+                            keys,
+                            expecting_key,
+                        }) = stack.last_mut()
+                        {
+                            if !keys.insert(key_str.clone()) {
+                                return Some(key_str);
+                            }
+                            *expecting_key = false;
+                        }
+                    }
+                }
+                continue;
+            }
+            b'{' => {
+                stack.push(JsonScope::Object {
+                    keys: HashSet::new(),
+                    expecting_key: true,
+                });
+            }
+            b'[' => {
+                stack.push(JsonScope::Array);
+            }
+            b'}' | b']' => {
+                let _ = stack.pop();
+            }
+            b',' => {
+                if let Some(JsonScope::Object { expecting_key, .. }) = stack.last_mut() {
+                    *expecting_key = true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn contains_forbidden_prototype_keys(val: &serde_json::Value) -> bool {
@@ -575,6 +730,7 @@ pub fn validate_portal_html_contract(html_path: &Path) -> Result<()> {
     for state_label in [
         "VERIFIED GENUINE",
         "SIGNATURE VALID — SIGNER UNTRUSTED",
+        "POLICY QUALIFICATION FAILED",
         "INTEGRITY CHECK FAILED",
         "UNSIGNED RECEIPT",
         "UNSUPPORTED PROTOCOL VERSION",
@@ -705,6 +861,30 @@ mod tests {
         let deep_json = format!("{}{}{}", "{".repeat(40), "\"a\":1", "}".repeat(40));
         let (v_deep, _) = evaluate_portal_receipt_bytes(deep_json.as_bytes(), &pinned);
         assert_eq!(v_deep, PortalVerificationVerdict::MalformedReceipt);
+
+        // Duplicate JSON object keys rejected before serde_json Map overwrites them
+        let dup_json = br#"{"schema_version":"0.9","schema_version":"0.8","tree_size":1}"#;
+        let (v_dup, msg_dup) = evaluate_portal_receipt_bytes(dup_json, &pinned);
+        assert_eq!(v_dup, PortalVerificationVerdict::MalformedReceipt);
+        assert!(msg_dup.contains("Duplicate JSON object key"));
+    }
+
+    #[test]
+    fn test_portal_policy_qualification_failed_on_partial_sweep_or_failed_regression() {
+        let presets = PortalDemoPresets::generate().unwrap();
+        let pinned = HashSet::from([presets.trusted_public_key_hex.clone()]);
+
+        // Partial sweep with valid signature and pinned key -> POLICY QUALIFICATION FAILED
+        let mut partial_sweep = presets.five_bug_sweep_receipt.clone();
+        partial_sweep.repaired_bugs = 4;
+        partial_sweep.failed_bugs = 1;
+        let partial_bytes = serde_json::to_vec(&partial_sweep).unwrap();
+        let (v_partial, msg_partial) = evaluate_portal_receipt_bytes(&partial_bytes, &pinned);
+        assert_eq!(
+            v_partial,
+            PortalVerificationVerdict::PolicyQualificationFailed
+        );
+        assert!(msg_partial.contains("SWEEP_PARTIAL_FAILURE"));
     }
 
     #[test]
@@ -796,6 +976,23 @@ assert.strictEqual(r6.verdict, "UNSUPPORTED PROTOCOL VERSION");
 // 8. Prototype Pollution -> MALFORMED RECEIPT
 const r7 = engine.evaluateReceiptObject('{"schema_version":"0.9","__proto__":{"x":1}}', pinned);
 assert.strictEqual(r7.verdict, "MALFORMED RECEIPT");
+
+// 9. Duplicate JSON object keys -> MALFORMED RECEIPT
+const r8 = engine.evaluateReceiptObject('{"schema_version":"0.9","schema_version":"0.8"}', pinned);
+assert.strictEqual(r8.verdict, "MALFORMED RECEIPT");
+assert(r8.reason.includes("Duplicate JSON object key"));
+
+// 10. Partial Sweep with valid signature & pinned key -> POLICY QUALIFICATION FAILED
+const partialSweep = JSON.parse(JSON.stringify(engine.PRESETS.five_bug_sweep_receipt));
+partialSweep.repaired_bugs = 4;
+partialSweep.failed_bugs = 1;
+const r9 = engine.evaluateReceiptObject(JSON.stringify(partialSweep), pinned);
+assert.strictEqual(r9.verdict, "POLICY QUALIFICATION FAILED");
+
+// 11. Empty Merkle tree with wrong root -> INTEGRITY CHECK FAILED
+const badEmpty = { schema_version: "0.9", tree_size: 0, merkle_root: "00".repeat(32), leaves: [], inclusion_proofs: {} };
+const r10 = engine.evaluateReceiptObject(JSON.stringify(badEmpty), pinned);
+assert.strictEqual(r10.verdict, "INTEGRITY CHECK FAILED");
 
 console.log("PORTAL_JS_PARITY_OK");
 "#;

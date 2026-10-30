@@ -1,0 +1,132 @@
+{
+  "schema_version": "0.9",
+  "status": "VERIFIED_REPAIRED",
+  "task_id": "RF-01",
+  "substrate": "mock-static-oracle",
+  "disclaimer": "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.",
+  "contract_id": "RF-01-cart-count",
+  "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+  "gate1": {
+    "observed_at": "2026-10-30T15:21:27.027Z",
+    "verdict": "RED",
+    "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": false
+      }
+    ]
+  },
+  "patch": {
+    "target_path": "src/cart-summary.js",
+    "sha256": "2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c",
+    "insertions": 1,
+    "deletions": 1,
+    "files_changed": 1
+  },
+  "gate2": {
+    "observed_at": "2026-10-30T15:21:27.371Z",
+    "verdict": "GREEN",
+    "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": true
+      }
+    ]
+  },
+  "phase_trace": [
+    "INIT",
+    "GATE1_RED",
+    "REPAIR",
+    "GATE2_GREEN"
+  ],
+  "base_tree_sha256": "697541a7bfcae00bc08e87939506ac5cc25ec9f18a005f80f15913d636bf6fee",
+  "sandbox_tree_sha256": "3cb1afeecd749677be282df1dfd2fb8fe5e6e83c3f0a075774011e096e66e35a",
+  "base_repo_unmodified_verified": true,
+  "ephemeral_port": 52389,
+  "differential_diagnosis": {
+    "schema_version": "0.9",
+    "bug_id": "RF-01",
+    "state": "CAUSAL_DEFECT_CONFIRMED",
+    "clean_ref": "main",
+    "clean_ref_commit": "81d5c64a981c85331c9c3e3703035c5db704b6c2",
+    "baseline_result": {
+      "passed": false,
+      "exit_code": 1,
+      "error_message": "Gate 1 Red baseline defect reproduced"
+    },
+    "clean_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "patched_run1_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "patched_run2_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "regression_parity_passed": true,
+    "causal_confidence": "HIGH",
+    "summary": "Causal defect confirmed: baseline reproduced, clean reference healthy, patch verified stable 2x with zero regressions",
+    "timestamp_epoch_ms": 1793373687371
+  },
+  "regression_parity": {
+    "schema_version": "0.9",
+    "baseline_total_tests": 2,
+    "patched_total_tests": 2,
+    "baseline_failures": [],
+    "patched_failures": [],
+    "new_failures": [],
+    "missing_tests": [],
+    "baseline_skipped_count": 0,
+    "patched_skipped_count": 0,
+    "skipped_increase": 0,
+    "parity_passed": true,
+    "duration_ms": 0
+  },
+  "merkle_root": "24a236abd932058cae838a920123a68d8726b87bd9ed76386d24cf9b56b13683",
+  "attestation": {
+    "schema_version": "0.9",
+    "algorithm": "Ed25519",
+    "public_key": "b954c7bb6a0820a7b14f0b94b75b9edd0c9a1b1094e2643320e97ba6362047ea",
+    "signature": "ffe409132233cf871565c5db48eb9bac53a68dc61175fba353a6b22ce3bafe1abc5d32bbf7d769731b1551f68bb61f5ee2e3c46bde921deb6a31d2c90b20e005",
+    "signing_payload": "REPLAYFIX-ATTESTATION:v0.9:0.9:24a236abd932058cae838a920123a68d8726b87bd9ed76386d24cf9b56b13683:8:2026-10-30T15:21:27.371Z",
+    "created_at": "2026-10-30T15:21:27.371Z"
+  },
+  "created_at": "2026-10-30T15:21:27.371Z"
+}

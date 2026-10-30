@@ -1,0 +1,7 @@
+--- a/src/inventory.js
++++ b/src/inventory.js
+@@ -1,3 +1,3 @@
+ export function decrementQuantity(currentQty) {
+-  return currentQty - 1;
++  return Math.max(0, currentQty - 1);
+ }

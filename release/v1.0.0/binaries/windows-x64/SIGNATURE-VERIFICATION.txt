@@ -1,0 +1,25 @@
+# Windows 11 Authenticode Signature Verification Ledger — ReplayFix v1.0.0
+
+## 1. Binary Identity
+- **Executable Path**: `release/v1.0.0/binaries/windows-x64/replayfix.exe`
+- **Target Architecture**: `x86_64-pc-windows-msvc` (Windows 11 / Windows 10 64-bit)
+- **File Size**: `3,858,304` bytes (`3.68 MB`; reduced by `66.09%` from `11,377,664` byte debug build via `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`)
+- **Signed File SHA-256**: `f799f0f1f4182b2fc3d0e9a4871aae1bb68fec6399db0a519f0f7325c6ca7f74`
+- **CLI Version Output**: `fixtream 1.0.0`
+
+## 2. Authenticode Signing Certificate Details
+- **Signing Script**: `powershell -ExecutionPolicy Bypass -File scripts/sign-binary.ps1 target/release/replayfix.exe`
+- **Signer Subject**: `CN=ReplayFix Local Developer`
+- **Signer Issuer**: `CN=ReplayFix Local Developer`
+- **Certificate Serial Number**: `547D66CC0212A1B64D5C37310353D4B1`
+- **Certificate Thumbprint (SHA-1)**: `14FAB92131428EC6302B7D025E3611AC32BEE8F8`
+- **Validity Period**: `2026-10-26 18:16:51` to `2028-10-26 18:26:51`
+- **Private Key Storage**: Isolated in Windows DPAPI `Cert:\CurrentUser\My` (never exported to disk or repository)
+- **Public Trust Store**: Registered in `Cert:\CurrentUser\TrustedPublisher`
+
+## 3. Observed `Get-AuthenticodeSignature` Output & Smart App Control (`os error 4551`) Distinction
+- **Cryptographic Signature Integrity**: Present and intact (`SignerCertificate` embedded in PE Authenticode table).
+- **WinVerifyTrust Chain Status**: `Get-AuthenticodeSignature` reports `UnknownError` (`A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider`) because `scripts/setup-dev-cert.ps1` intentionally installs the certificate into `Cert:\CurrentUser\TrustedPublisher` without modifying `Cert:\CurrentUser\Root` (which would trigger an interactive Windows modal elevation prompt).
+- **Windows 11 Execution & Smart App Control Behavior**:
+  1. **Local Execution**: Confirmed working (`.elease\v1.0.0\binaries\windows-x64eplayfix.exe --version`, `doctor`, `run`, `verify-receipt`, and `sweep` all execute with Exit Code `0`).
+  2. **Third-Party Windows 11 Machines with Smart App Control (SAC)**: Because `CN=ReplayFix Local Developer` is a local developer certificate rather than a public EV/OV Certificate Authority certificate with Microsoft Intelligent Security Graph (ISG) cloud reputation, a third-party Windows 11 user downloading the binary on a machine with SAC in Enforce mode should run `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev-cert.ps1` and `.\scripts\sign-binary.ps1` locally (or build from source with `cargo build --release`).

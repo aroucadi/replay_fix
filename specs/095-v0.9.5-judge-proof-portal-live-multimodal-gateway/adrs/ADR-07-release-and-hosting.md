@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-`proof_viewer.html` is designed to be opened directly from a local checkout (`file://`) or hosted as a static artifact (e.g., GitHub Pages / Devpost review), and must include representative, sanitized example receipts (`RF-01` single audit receipt, `RF-01..RF-05` sweep receipt, and a tampered adversarial receipt) so judges can test all verification states immediately or drop their own files.
+`proof_viewer.html` is designed to be opened directly from a local checkout (`file://`) or hosted as a static artifact (e.g., GitHub Pages / Meta Hackathon review), and must include representative, sanitized example receipts (`RF-01` single audit receipt, `RF-01..RF-05` sweep receipt, and a tampered adversarial receipt) so judges can test all verification states immediately or drop their own files.
 
 ## Decision
 1. **Sanitized Embedded Demo Presets + Drag-and-Drop File Importer**:

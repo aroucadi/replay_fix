@@ -1,0 +1,10 @@
+--- a/src/discount.js
++++ b/src/discount.js
+@@ -1,6 +1,6 @@
+ export function applyDiscount(subtotal, coupon) {
+   if (coupon === 'SAVE20') {
+-    return subtotal * 0.8 * 0.8;
++    return subtotal * 0.8;
+   }
+   return subtotal;
+ }

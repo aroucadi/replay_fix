@@ -1,0 +1,123 @@
+{
+  "schema_version": "0.9",
+  "status": "VERIFIED_REPAIRED",
+  "task_id": "RF-03",
+  "substrate": "mock-static-oracle",
+  "disclaimer": "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.",
+  "contract_id": "RF-03-inventory-underflow",
+  "contract_sha256": "e2e8c9c20def7b8462d722f0111cb8d848b302fbab9ecc930425f798cd4f2fea",
+  "gate1": {
+    "observed_at": "2026-10-30T15:18:38.663Z",
+    "verdict": "RED",
+    "contract_sha256": "e2e8c9c20def7b8462d722f0111cb8d848b302fbab9ecc930425f798cd4f2fea",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": false
+      }
+    ]
+  },
+  "patch": {
+    "target_path": "src/inventory.js",
+    "sha256": "00dfcf7dce42cf6ea700e09a6b75f8baf681e7689986c0b7bc704c89b79a5b51",
+    "insertions": 1,
+    "deletions": 1,
+    "files_changed": 1
+  },
+  "gate2": {
+    "observed_at": "2026-10-30T15:18:39.000Z",
+    "verdict": "GREEN",
+    "contract_sha256": "e2e8c9c20def7b8462d722f0111cb8d848b302fbab9ecc930425f798cd4f2fea",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": true
+      }
+    ]
+  },
+  "phase_trace": [
+    "INIT",
+    "GATE1_RED",
+    "REPAIR",
+    "GATE2_GREEN"
+  ],
+  "base_tree_sha256": "963362666f17a47f93363617c2847b968daf57b16295833fe974a29c1a10d120",
+  "sandbox_tree_sha256": "754622abf23aab43279d8b82aa082773ced53d9679c3bd20db265bb35872f8f1",
+  "base_repo_unmodified_verified": true,
+  "ephemeral_port": 63435,
+  "differential_diagnosis": {
+    "schema_version": "0.9",
+    "bug_id": "RF-03",
+    "state": "CAUSAL_DEFECT_CONFIRMED",
+    "clean_ref": "main",
+    "clean_ref_commit": "0000000000000000000000000000000000000000",
+    "baseline_result": {
+      "passed": false,
+      "exit_code": 1,
+      "error_message": "Gate 1 Red baseline defect reproduced"
+    },
+    "clean_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "patched_run1_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "patched_run2_result": {
+      "passed": true,
+      "exit_code": 0
+    },
+    "regression_parity_passed": true,
+    "causal_confidence": "HIGH",
+    "summary": "Causal defect confirmed: baseline reproduced, clean reference healthy, patch verified stable 2x with zero regressions",
+    "timestamp_epoch_ms": 1793373519000
+  },
+  "regression_parity": {
+    "schema_version": "0.9",
+    "baseline_total_tests": 2,
+    "patched_total_tests": 2,
+    "baseline_failures": [],
+    "patched_failures": [],
+    "new_failures": [],
+    "missing_tests": [],
+    "baseline_skipped_count": 0,
+    "patched_skipped_count": 0,
+    "skipped_increase": 0,
+    "parity_passed": true,
+    "duration_ms": 0
+  },
+  "created_at": "2026-10-30T15:18:39.000Z"
+}

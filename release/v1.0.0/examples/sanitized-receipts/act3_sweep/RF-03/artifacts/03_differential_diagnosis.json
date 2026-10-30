@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.9",
+  "bug_id": "RF-03",
+  "state": "CAUSAL_DEFECT_CONFIRMED",
+  "clean_ref": "main",
+  "clean_ref_commit": "0000000000000000000000000000000000000000",
+  "baseline_result": {
+    "passed": false,
+    "exit_code": 1,
+    "error_message": "Gate 1 Red baseline defect reproduced"
+  },
+  "clean_result": {
+    "passed": true,
+    "exit_code": 0
+  },
+  "patched_run1_result": {
+    "passed": true,
+    "exit_code": 0
+  },
+  "patched_run2_result": {
+    "passed": true,
+    "exit_code": 0
+  },
+  "regression_parity_passed": true,
+  "causal_confidence": "HIGH",
+  "summary": "Causal defect confirmed: baseline reproduced, clean reference healthy, patch verified stable 2x with zero regressions",
+  "timestamp_epoch_ms": 1793373519000
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.9",
+  "algorithm": "Ed25519",
+  "public_key": "68f80539a9acca67e9eb1ece9a079413c26011a02f0621ffb1a645163148fb0b",
+  "signature": "1c78fbd4799c8f961160368547b58782b8c962da8864afe2b5636c167a146b13f015022d606461086d7789034b222043c5e90f4e7919e2d3fda39ec132813308",
+  "signing_payload": "REPLAYFIX-ATTESTATION:v0.9:0.9:d0ca4d8cf9a0eb75df535f28ea9b6335d9ded3ad61290b59f714e73869c2416e:8:2026-10-30T15:18:41.884Z",
+  "created_at": "2026-10-30T15:18:41.884Z"
+}

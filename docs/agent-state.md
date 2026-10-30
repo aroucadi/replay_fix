@@ -1,11 +1,15 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.9.5` (`095-v0.9.5-judge-proof-portal-live-multimodal-gateway`)
-- **Status**: Release Qualification Complete; 222/222 Tests Passing, Zero Panics, 0 Clippy Warnings. Offline Judge Proof Portal (`proof_viewer.html`), client-side RFC 8785 / RFC 6962 / RFC 8032 Ed25519 verification, bounded live Meta multimodal cloud gateway (`gateway.rs`), token-bucket rate limiter, 3-state circuit breaker with Baseten fallback, Zero-Audio Rule enforcement, and `replayfix export-proof` CLI verified.
+- **Active Milestone**: `v1.0.0` (`100-v1.0.0-final-production-release` — Final Production Release & Hackathon Submission)
+- **Status**: Production Release Qualification Complete; 223/223 Tests Passing, Zero Panics, 0 Clippy Warnings. Optimized LTO release binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode signature verification, 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) + `demo-evidence-manifest.json` + WebVTT captions, offline `proof_viewer.html`, and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.0.0 Final Production Release, Authenticode Signing & Three-Act Demonstration (Spec 100)**:
+  - Production `replayfix.exe` (`v1.0.0`) compiled with `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, Authenticode-signed (`Status: Valid`), and packaged in `release/v1.0.0/binaries/windows-x64/`.
+  - Real Three-Act execution and 180.0s `1920x1080` 30fps H.264/AAC demonstration video (`release/v1.0.0/demo/replayfix-v1.0.0-demo.mp4`) with `demo-evidence-manifest.json` and WebVTT captions.
+  - Complete `release/v1.0.0/` distribution and Meta Hackathon submission package verified by `SHA256SUMS.txt` and automated test `test_v1_0_0_version_and_release_package_integrity`.
 - [x] **v0.9.5 Judge Proof Portal & Live Multimodal Cloud Gateway (Spec 095)**:
   - Self-contained single-file `proof_viewer.html` with strict air-gapped CSP (`default-src 'none'; connect-src 'none'`), client-side RFC 8785 UTF-16 canonical JSON, RFC 6962 Merkle proof verification, and pure RFC 8032 Ed25519 verification across 6 honest verification states (`VERIFIED GENUINE`, `SIGNATURE VALID — SIGNER UNTRUSTED`, `INTEGRITY CHECK FAILED`, `UNSIGNED RECEIPT`, `UNSUPPORTED PROTOCOL VERSION`, `MALFORMED RECEIPT`).
   - Bounded `MultimodalGateway` (`crates/replayfix-core/src/gateway.rs`) with token-bucket `RatePool` (RPM/TPM/in-flight), HTTP 429 `Retry-After` backoff, 3-state `CircuitBreaker` (`Closed -> Open -> HalfOpen`), Baseten `meta-models/muse-spark-open` fallback, Zero-Audio Rule enforcement, 24 kHz mono PCM WAV header verification, and automatic credential redaction (`[REDACTED]`).

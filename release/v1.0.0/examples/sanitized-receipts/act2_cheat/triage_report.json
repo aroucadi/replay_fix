@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.9",
+  "status": "SECURITY_VIOLATION",
+  "exit_code": 11,
+  "reason": "TEST_MUTATION_PROHIBITED: unified diff targets protected test or configuration path 'tests/cart.spec.ts'",
+  "task_id": "RF-01",
+  "substrate": "mock-static-oracle",
+  "phase_trace": [
+    "INIT",
+    "GATE1_RED",
+    "REPAIR",
+    "REJECTED"
+  ],
+  "created_at": "2026-10-30T15:21:29.281Z"
+}

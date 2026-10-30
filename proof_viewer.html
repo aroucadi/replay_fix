@@ -772,6 +772,57 @@
       if (rawText.includes('"__proto__"') || rawText.includes('"prototype"') || rawText.includes('"constructor"')) {
         throw new Error("Forbidden prototype-pollution key (__proto__, prototype, or constructor) detected");
       }
+      const dupKey = checkDuplicateJsonKeys(rawText);
+      if (dupKey !== null) {
+        throw new Error(`Duplicate JSON object key '${dupKey}' rejected before parsing`);
+      }
+    }
+
+    function checkDuplicateJsonKeys(raw) {
+      const stack = [];
+      let i = 0;
+      const len = raw.length;
+      while (i < len) {
+        const ch = raw.charCodeAt(i);
+        if (ch === 34) {
+          const start = i;
+          i++;
+          let esc = false;
+          while (i < len) {
+            const c = raw.charCodeAt(i);
+            if (esc) esc = false;
+            else if (c === 92) esc = true;
+            else if (c === 34) break;
+            i++;
+          }
+          if (i >= len) return null;
+          const end = i;
+          i++;
+          const top = stack.length > 0 ? stack[stack.length - 1] : null;
+          if (top && top.type === "obj" && top.expectingKey) {
+            let j = i;
+            while (j < len && (raw.charCodeAt(j) === 32 || raw.charCodeAt(j) === 9 || raw.charCodeAt(j) === 10 || raw.charCodeAt(j) === 13)) j++;
+            if (j < len && raw.charCodeAt(j) === 58) {
+              const keyStr = raw.slice(start + 1, end);
+              if (top.keys.has(keyStr)) return keyStr;
+              top.keys.add(keyStr);
+              top.expectingKey = false;
+            }
+          }
+          continue;
+        } else if (ch === 123) {
+          stack.push({ type: "obj", keys: new Set(), expectingKey: true });
+        } else if (ch === 91) {
+          stack.push({ type: "arr" });
+        } else if (ch === 125 || ch === 93) {
+          stack.pop();
+        } else if (ch === 44) {
+          const top = stack.length > 0 ? stack[stack.length - 1] : null;
+          if (top && top.type === "obj") top.expectingKey = true;
+        }
+        i++;
+      }
+      return null;
     }
 
     function evaluateReceiptObject(rawText, pinnedKeySet) {
@@ -797,6 +848,15 @@
       if (obj.inclusion_proofs && Array.isArray(obj.leaves)) {
         if (obj.tree_size !== obj.leaves.length) {
           return { verdict: "INTEGRITY CHECK FAILED", reason: `tree_size (${obj.tree_size}) != leaves.length (${obj.leaves.length})`, obj };
+        }
+        if (obj.tree_size === 0) {
+          if (Object.keys(obj.inclusion_proofs).length > 0 || String(obj.merkle_root).toLowerCase() !== EMPTY_TREE_ROOT) {
+            return { verdict: "INTEGRITY CHECK FAILED", reason: "Empty MerkleReceipt root mismatch or unexpected inclusion proofs", obj, leafDetails: [], layer1: true, layer2: false, layer3: false, layer4: false };
+          }
+          if (!obj.attestation) {
+            return { verdict: "UNSIGNED RECEIPT", reason: "Empty MerkleReceipt verified, but unsigned", obj, leafDetails: [], layer1: true, layer2: true, layer3: false, layer4: false };
+          }
+          return verifyAttestationAndTrust(obj.attestation, obj.merkle_root, 0, pinnedKeySet, obj, []);
         }
         const seenNames = new Set();
         const leafDetails = [];
@@ -849,7 +909,17 @@
         if (!obj.ed25519_attestation) {
           return { verdict: "UNSIGNED RECEIPT", reason: "Sweep receipt contains no Ed25519 attestation", obj, layer1: true, layer2: true, layer3: false, layer4: false };
         }
-        return verifyAttestationAndTrust(obj.ed25519_attestation, obj.merkle_root, obj.total_bugs, pinnedKeySet, obj, []);
+        const attRes = verifyAttestationAndTrust(obj.ed25519_attestation, obj.merkle_root, obj.total_bugs, pinnedKeySet, obj, []);
+        if (attRes.verdict !== "VERIFIED GENUINE") return attRes;
+        const anyCaseFailed = bugKeys.some(k => obj.results[k].exit_code !== 0 || obj.results[k].status !== "VERIFIED_REPAIRED");
+        if (obj.failed_bugs > 0 || obj.repaired_bugs !== obj.total_bugs || anyCaseFailed) {
+          return {
+            verdict: "POLICY QUALIFICATION FAILED",
+            reason: `SWEEP_PARTIAL_FAILURE: Cryptographic signature is valid and trusted, but sweep only repaired ${obj.repaired_bugs}/${obj.total_bugs} bugs (${obj.failed_bugs} failed)`,
+            obj, leafDetails: [], layer1: true, layer2: true, layer3: true, layer4: false
+          };
+        }
+        return attRes;
       }
 
       // Case C: Standalone AuditReceipt
@@ -859,7 +929,20 @@
         }
         const parts = String(obj.attestation.signing_payload || "").split(":");
         const treeSize = parts.length >= 6 ? parseInt(parts[4], 10) : 0;
-        return verifyAttestationAndTrust(obj.attestation, obj.merkle_root, treeSize, pinnedKeySet, obj, []);
+        const attRes = verifyAttestationAndTrust(obj.attestation, obj.merkle_root, treeSize, pinnedKeySet, obj, []);
+        if (attRes.verdict !== "VERIFIED GENUINE") return attRes;
+        const statusOk = obj.status === "VERIFIED_REPAIRED";
+        const repoClean = obj.base_repo_unmodified_verified !== false;
+        const gate2Green = !obj.gate2 || obj.gate2.verdict === "GREEN";
+        const parityOk = !obj.regression_parity || obj.regression_parity.parity_preserved !== false;
+        if (!statusOk || !repoClean || !gate2Green || !parityOk) {
+          return {
+            verdict: "POLICY QUALIFICATION FAILED",
+            reason: "Cryptographic attestation is valid and trusted, but deterministic gate or regression parity policy failed",
+            obj, leafDetails: [], layer1: true, layer2: true, layer3: true, layer4: false
+          };
+        }
+        return attRes;
       }
 
       return { verdict: "MALFORMED RECEIPT", reason: "Unrecognized receipt structure" };

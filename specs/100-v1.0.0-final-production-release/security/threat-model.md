@@ -1,0 +1,9 @@
+# Threat Model: Spec 100 — Production Binary, Authenticode Signing, Demo & Release Package
+
+| Threat ID | Asset | Attacker Capability | Trust Boundary | Preventive Control | Detection Mechanism | Residual Risk |
+|---|---|---|---|---|---|---|
+| **TM-100-01** | Production Binary (`replayfix.exe`) | Modifies binary post-build or post-signing | Build Output $ightarrow$ User Machine | Authenticode signature (`Set-AuthenticodeSignature`) + `SHA256SUMS.txt` | `Get-AuthenticodeSignature` reports `HashMismatch` / `NotValid`; SHA-256 mismatch | Negligible |
+| **TM-100-02** | Developer Private Signing Key | Attempts to extract private key from repository or release zip | Workstation $ightarrow$ Public Repo | Private key stored exclusively in Windows DPAPI `Cert:\CurrentUser\My`; never exported to disk | Git status & release archive scan confirming zero `.pfx`/`.key` files | Negligible |
+| **TM-100-03** | Smart App Control Trust Claim | Misleading documentation claiming self-signed cert bypasses SAC globally | Documentation $ightarrow$ End User | Explicit distinction in `SECURITY.md` & `SIGNATURE-VERIFICATION.txt` between local `TrustedPublisher` and public CA ISG reputation | Independent cold review of release docs | Negligible |
+| **TM-100-04** | Demo Evidence Integrity | Video shows fabricated output not matching real CLI execution | Demo Video $ightarrow$ Judge | `demo-evidence-manifest.json` binds every act to real `v1.0.0` CLI runs and SHA-256 digests in `examples/sanitized-receipts/` | `replayfix verify-receipt` on packaged receipts | Negligible |
+| **TM-100-05** | Public Release Package | Accidental inclusion of API keys or sensitive issue payloads | Workspace $ightarrow$ `release/v1.0.0/` | Automated secret/token scan across all files in `release/v1.0.0/` | Release qualification test `test_v1_release_package_completeness_and_sanitization` | Negligible |

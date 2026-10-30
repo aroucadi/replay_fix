@@ -1,0 +1,25 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:15.000
+[ACT 1 — GROUNDED DEFECT] ReplayFix v1.0.0 begins with a real, reproducible defect in RF-01 (src/cart-summary.js), where clicking Refresh Cart wipes the shopping cart items array.
+
+00:00:15.000 --> 00:00:30.000
+ReplayFix probes the bug video (1280x720), extracts the 120x120px optical-flow ROI keyframe, snaps the click hotspot via Meta SAM 3.1 (<|box;69,133,181,200|>) to (160, 120), and grounds the Playwright ariaSnapshot locator.
+
+00:00:30.000 --> 00:00:45.000
+Inside an ephemeral scratch sandbox with Delta-Repo = 0 verified, Gate 1 (RED) deterministically reproduces the failure (BehavioralContract SHA-256: 400bc991f224) and locks TestFreezeGuard.
+
+00:00:45.000 --> 00:01:07.000
+[ACT 2 — CHEATING & NO-OP TRAP REJECTION] When a candidate patch is empty or a no-op (--mock-patch noop), ReplayFix rejects it fail-closed with REPAIR_NOOP_REJECTED (Exit Code 30) and emits triage_report.json.
+
+00:01:07.000 --> 00:01:30.000
+When a malicious or hallucinated patch attempts to modify tests/cart.spec.ts or package.json test scripts, TestFreezeGuard and DiffGuard block it immediately with TEST_MUTATION_PROHIBITED (Exit Code 11).
+
+00:01:30.000 --> 00:02:00.000
+[ACT 3 — AUTONOMOUS CAUSAL REPAIR & CRYPTOGRAPHIC PROOF] Bounded Meta Muse repair synthesizes a surgical AST patch to src/cart-summary.js, passes node --check syntax preflight, and passes 2 consecutive Gate 2 (GREEN) runs plus 100% active regression parity.
+
+00:02:00.000 --> 00:02:30.000
+ReplayFix executes the 5-bug MetaPulse benchmark sweep (RF-01 through RF-05) in 6.87 seconds (< 60s SLA), binding all disaggregated evidence leaves into an RFC 6962 Merkle tree signed with pure RFC 8032 Ed25519.
+
+00:02:30.000 --> 00:03:00.000
+Finally, replayfix verify-receipt and the air-gapped Judge Proof Portal (proof_viewer.html) independently verify all 4 cryptographic trust layers offline: VERIFIED GENUINE.

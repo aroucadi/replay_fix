@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.9",
+  "total_bugs": 5,
+  "repaired_bugs": 5,
+  "failed_bugs": 0,
+  "results": {
+    "RF-01": {
+      "bug_id": "RF-01",
+      "status": "VERIFIED_REPAIRED",
+      "exit_code": 0,
+      "target_path": "src/cart-summary.js",
+      "patch_sha256": "2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c",
+      "elapsed_ms": 828
+    },
+    "RF-02": {
+      "bug_id": "RF-02",
+      "status": "VERIFIED_REPAIRED",
+      "exit_code": 0,
+      "target_path": "src/discount.js",
+      "patch_sha256": "168086f55ee2b5f561b2ef53307cda001878734cf69168ec9d6a7a6646758867",
+      "elapsed_ms": 1103
+    },
+    "RF-03": {
+      "bug_id": "RF-03",
+      "status": "VERIFIED_REPAIRED",
+      "exit_code": 0,
+      "target_path": "src/inventory.js",
+      "patch_sha256": "00dfcf7dce42cf6ea700e09a6b75f8baf681e7689986c0b7bc704c89b79a5b51",
+      "elapsed_ms": 1018
+    },
+    "RF-04": {
+      "bug_id": "RF-04",
+      "status": "VERIFIED_REPAIRED",
+      "exit_code": 0,
+      "target_path": "src/cart-store.js",
+      "patch_sha256": "3713734e835e0d9ad617120167e02f4b3b5fff71f7357cf5aeb1b42c72b949fa",
+      "elapsed_ms": 1179
+    },
+    "RF-05": {
+      "bug_id": "RF-05",
+      "status": "VERIFIED_REPAIRED",
+      "exit_code": 0,
+      "target_path": "src/order.js",
+      "patch_sha256": "52f43c2abdd461cfa386662065a6b7e80eafdea079c6ba6518df534571e1dd93",
+      "elapsed_ms": 1314
+    }
+  },
+  "merkle_root": "75dc9d2b7d5beead9042765ce85fd65acb1b031a2ccc352d189acc851066ab00",
+  "ed25519_attestation": {
+    "schema_version": "0.9",
+    "algorithm": "Ed25519",
+    "public_key": "90fc6a5b7305b895222bd0300fecbe7cab735c0d10a6b5ba54c2b453104dc840",
+    "signature": "d861b9dc5d901accb2a68eb42b08d8f3e30139a8152ee967e7c4cdf2cf1ea9970cf134f5873ab1b55a95be0eae97b14e2c3c9ad30531bd7e2e4f807c8554c408",
+    "signing_payload": "REPLAYFIX-ATTESTATION:v0.9:0.9:75dc9d2b7d5beead9042765ce85fd65acb1b031a2ccc352d189acc851066ab00:5:2026-10-30T15:18:42.248Z",
+    "created_at": "2026-10-30T15:18:42.248Z"
+  },
+  "elapsed_wall_clock_ms": 6867,
+  "created_at": "2026-10-30T15:18:42.248Z"
+}

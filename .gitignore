@@ -21,6 +21,8 @@ blob-report/
 *.patch
 audit_receipt.json
 triage_report.json
+!release/v1.0.0/**
+release/v1.0.0/**/*.key
 
 # Node.js & Package Managers
 node_modules/

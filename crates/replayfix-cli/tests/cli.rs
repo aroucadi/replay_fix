@@ -973,3 +973,32 @@ fn test_export_proof_bundle_cli() {
     assert_eq!(out_json["status"], "SUCCESS");
     assert!(dir.join(".replayfix/proof/demo_presets.json").exists());
 }
+
+#[test]
+fn test_v1_0_0_version_and_release_package_integrity() {
+    let dir = scratch("v1-version");
+    let ver_out = run_cmd(&dir, &["--version"]);
+    assert_eq!(code(&ver_out), 0);
+    let stdout = String::from_utf8_lossy(&ver_out.stdout);
+    assert!(
+        stdout.contains("1.0.0"),
+        "Expected version 1.0.0 in --version output, got: {stdout}"
+    );
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let rel_dir = repo_root.join("release/v1.0.0");
+    assert!(rel_dir.join("proof-portal/proof_viewer.html").exists());
+    assert!(rel_dir.join("demo/replayfix-v1.0.0-demo.mp4").exists());
+    assert!(rel_dir.join("demo/demo-evidence-manifest.json").exists());
+    assert!(rel_dir
+        .join("demo/captions/replayfix-v1.0.0-demo.vtt")
+        .exists());
+    assert!(rel_dir.join("documentation/HACKATHON_SUBMISSION.md").exists());
+    assert!(rel_dir.join("QUALIFICATION_REPORT.md").exists());
+    assert!(rel_dir.join("SHA256SUMS.txt").exists());
+}

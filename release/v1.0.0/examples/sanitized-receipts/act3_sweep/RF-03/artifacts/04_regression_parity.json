@@ -1,0 +1,14 @@
+{
+  "schema_version": "0.9",
+  "baseline_total_tests": 2,
+  "patched_total_tests": 2,
+  "baseline_failures": [],
+  "patched_failures": [],
+  "new_failures": [],
+  "missing_tests": [],
+  "baseline_skipped_count": 0,
+  "patched_skipped_count": 0,
+  "skipped_increase": 0,
+  "parity_passed": true,
+  "duration_ms": 0
+}

@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] - Roadmap to v1.0.0
+## [1.0.0] - 2026-10-30
 
-The full production release **v1.0.0** follows the completion of Spec 095 (`v0.9.5` release qualification):
-- Final submission package, live video demo assets, and submission manifest.
+**Grand Finale — Final Production Release & Hackathon Submission (`Spec 100`)**: Optimized LTO production Rust binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode code signing and verification, synchronized 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) with `demo-evidence-manifest.json` and WebVTT captions, updated comprehensive documentation (`README.md`), and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package. Full notes: [docs/release-notes/v1.0.0.md](docs/release-notes/v1.0.0.md).
+
+### Added
+- **Production Distribution & Authenticode Signing (`release/v1.0.0/binaries/windows-x64/`)**:
+  - Compiled `replayfix.exe` (`v1.0.0`) with `[profile.release]` (`opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`), signed via `scripts/sign-binary.ps1`, and verified with `Get-AuthenticodeSignature` (`SIGNATURE-VERIFICATION.txt` & `SHA256SUMS.txt`).
+- **Synchronized Three-Act Judge Demonstration (`release/v1.0.0/demo/`)**:
+  - Generated 180.0-second (`1920x1080`, `30fps`, H.264/AAC) 3-act video `replayfix-v1.0.0-demo.mp4`, WebVTT captions (`captions/replayfix-v1.0.0-demo.vtt`), and `demo-evidence-manifest.json` grounded in real `v1.0.0` executions of Act 1 (Grounded Defect `RF-01`), Act 2 (No-Op `Exit 30` & Cheating `Exit 11` rejection), and Act 3 (Verified Repair, 5-Bug Sweep & `proof_viewer.html`).
+- **Complete Submission & Documentation Suite (`release/v1.0.0/`, `README.md`)**:
+  - Authored `INSTALLATION.md`, `QUICKSTART.md`, `SECURITY.md`, `VERIFICATION.md`, `HACKATHON_SUBMISSION.md`, `RELEASE_NOTES.md`, and `QUALIFICATION_REPORT.md`, and updated root `README.md` for `v1.0.0`.
 
 ---
 
