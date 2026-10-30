@@ -21,6 +21,7 @@ pub mod engine;
 pub mod error;
 pub mod fixtures;
 pub mod fsm;
+pub mod gateway;
 pub mod ingestion;
 pub mod locator;
 pub mod manifest;
@@ -28,6 +29,7 @@ pub mod merkle;
 pub mod patch;
 pub mod perception;
 pub mod platform;
+pub mod portal;
 pub mod process;
 pub mod receipt;
 pub mod regression;
@@ -60,6 +62,15 @@ pub use fsm::{
     CausalConfidence, DifferentialDiagnosisReport, DifferentialMatrix, DifferentialState, Phase,
     PhaseMachine, ReproExecutionResult,
 };
+pub use gateway::{
+    align_transcript_with_keyframes, validate_wav_audio, CircuitBreaker, CircuitState,
+    GatewayConfig, GatewayProvenance, GatewayProvider, GatewayRequest, GatewayResponse,
+    KeyframeAlignment, ModelRole, MultimodalGateway, RatePool, TranscriptSegment, TransportOutcome,
+    WavAudioMetadata, BASETEN_FALLBACK_ENDPOINT, BASETEN_MUSE_SPARK_OPEN_SLUG,
+    DEFAULT_ALIGNMENT_TOLERANCE_MS, DEFAULT_CIRCUIT_COOLDOWN_MS, DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
+    DEFAULT_GATEWAY_TIMEOUT_MS, DEFAULT_MAX_RETRIES, MAX_AUDIO_DURATION_MS,
+    META_RESPONSES_ENDPOINT,
+};
 pub use ingestion::{
     build_untrusted_context_block, extract_repro_steps, ingest_issue, ingestion_to_manifest,
     GitHubIssuePayload, GitHubIssueRef, GitHubLabel, GitHubUser, IngestionResult, IssueFetcher,
@@ -74,6 +85,12 @@ pub use perception::{
     VideoTelemetry, ASR_MODEL_SLUG, SAM_MODEL_SLUG,
 };
 pub use platform::{EphemeralPort, OsFamily, Platform};
+pub use portal::{
+    evaluate_portal_receipt_bytes, export_proof_bundle, validate_and_map_sam_box,
+    validate_portal_html_contract, PortalDemoPresets, PortalVerificationVerdict,
+    ValidatedSpatialOverlay, DEMO_PRESET_PUBLIC_SEED_HEX, MAX_PORTAL_JSON_DEPTH,
+    MAX_PORTAL_RECEIPT_BYTES,
+};
 pub use receipt::{
     AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
 };

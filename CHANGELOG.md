@@ -9,8 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Roadmap to v1.0.0
 
-The full production release **v1.0.0** follows the completion of Spec 090 (`v0.9.1` release qualification):
+The full production release **v1.0.0** follows the completion of Spec 095 (`v0.9.5` release qualification):
 - Final submission package, live video demo assets, and submission manifest.
+
+---
+
+## [0.9.5] - 2026-10-30
+
+Spec 095 — Offline Judge Proof Portal (`proof_viewer.html`), Client-Side RFC 8785 / RFC 6962 / RFC 8032 Cryptographic Verifier, Bounded Live Meta Multimodal Cloud Gateway (`replayfix-core::gateway`), Token-Bucket Rate Limiter, 3-State Circuit Breaker with Baseten Open-Weight Fallback, Zero-Audio Rule Enforcement, and `replayfix export-proof` CLI. Full notes: [docs/release-notes/v0.9.5.md](docs/release-notes/v0.9.5.md).
+
+### Added
+- **Self-Contained Offline Judge Proof Portal (`proof_viewer.html`, `replayfix-core::portal`)**:
+  - Single-file zero-dependency HTML5/CSS3/ES2022 proof inspector with strict air-gapped CSP (`default-src 'none'; connect-src 'none'`).
+  - Client-side RFC 8785 UTF-16 canonical JSON serializer, RFC 6962 SHA-256 leaf (`0x00`) and internal node (`0x01`) Merkle verifier, and pure RFC 8032 Ed25519 signature verifier.
+  - Six honest verification states (`VERIFIED GENUINE`, `SIGNATURE VALID — SIGNER UNTRUSTED`, `INTEGRITY CHECK FAILED`, `UNSIGNED RECEIPT`, `UNSUPPORTED PROTOCOL VERSION`, `MALFORMED RECEIPT`).
+  - Interactive inspector tabs for Merkle Proof Exploration, Ed25519 Attestation & Pinned Trust Store, Multimodal Video/DOM/SAM 3.1 Spatial Grounding, Unified Diff & Active Regression Parity ($F_{\text{patched}} \setminus F_{\text{baseline}} = \emptyset$), and 5-Bug Benchmark Sweep (`RF-01`..`RF-05`).
+- **Bounded Live Multimodal Cloud Gateway (`replayfix-core::gateway`)**:
+  - `MultimodalGateway` supporting Meta Model API (`muse-wonder-1.0`, `muse-spark-1.3`, `sam-3-1`, `muse-voice-transcribe-1.0`) and Baseten fallback (`meta-models/muse-spark-open`).
+  - Token-bucket `RatePool` (RPM/TPM/in-flight), HTTP 429 `Retry-After` + exponential backoff with jitter, 3-state `CircuitBreaker` (`Closed`, `Open`, `HalfOpen`), Zero-Audio Rule enforcement, 24 kHz mono WAV validation, and credential redaction (`[REDACTED]`).
+- **CLI Proof Exporter (`replayfix-cli`)**: Added `replayfix export-proof [--output <dir>] [--json]`.
 
 ---
 

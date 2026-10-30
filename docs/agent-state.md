@@ -1,11 +1,16 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v0.9.1` (`090-v0.9-cryptographic-merkle-receipts-multimodel-verification` — Zero-Trust Qualification & Hardening)
-- **Status**: Release Qualification Complete; 209/209 Tests Passing, Zero Panics, 0 Clippy Warnings. 4-layer cryptographic receipt verification (including Layer 1 on-disk artifact hash/size verification), RFC 8785 UTF-16 canonical JSON sorting, strict RFC 6962 proof invariants, persistent/env Ed25519 key provisioning, 5-bug benchmark sweep (`RF-01` to `RF-05`), and bounded concurrent tri-model pooling verified.
+- **Active Milestone**: `v0.9.5` (`095-v0.9.5-judge-proof-portal-live-multimodal-gateway`)
+- **Status**: Release Qualification Complete; 222/222 Tests Passing, Zero Panics, 0 Clippy Warnings. Offline Judge Proof Portal (`proof_viewer.html`), client-side RFC 8785 / RFC 6962 / RFC 8032 Ed25519 verification, bounded live Meta multimodal cloud gateway (`gateway.rs`), token-bucket rate limiter, 3-state circuit breaker with Baseten fallback, Zero-Audio Rule enforcement, and `replayfix export-proof` CLI verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v0.9.5 Judge Proof Portal & Live Multimodal Cloud Gateway (Spec 095)**:
+  - Self-contained single-file `proof_viewer.html` with strict air-gapped CSP (`default-src 'none'; connect-src 'none'`), client-side RFC 8785 UTF-16 canonical JSON, RFC 6962 Merkle proof verification, and pure RFC 8032 Ed25519 verification across 6 honest verification states (`VERIFIED GENUINE`, `SIGNATURE VALID — SIGNER UNTRUSTED`, `INTEGRITY CHECK FAILED`, `UNSIGNED RECEIPT`, `UNSUPPORTED PROTOCOL VERSION`, `MALFORMED RECEIPT`).
+  - Bounded `MultimodalGateway` (`crates/replayfix-core/src/gateway.rs`) with token-bucket `RatePool` (RPM/TPM/in-flight), HTTP 429 `Retry-After` backoff, 3-state `CircuitBreaker` (`Closed -> Open -> HalfOpen`), Baseten `meta-models/muse-spark-open` fallback, Zero-Audio Rule enforcement, 24 kHz mono PCM WAV header verification, and automatic credential redaction (`[REDACTED]`).
+  - `replayfix export-proof` CLI subcommand and cross-language Node.js parity test executing `proof_viewer.html`'s embedded JS cryptographic engine against Rust vectors.
+  - 222 automated tests passing (182 core unit tests, 40 CLI integration tests); zero Clippy warnings; zero panics in production source.
 - [x] **v0.9.1 Independent Zero-Trust Audit Remediation & Cryptographic Hardening**:
   - 4-Layer Zero-Trust verification in `AuditReceipt::verify_receipt_and_attestation`: verifies on-disk artifact files (`01_candidate.diff`, `02_preflight.json`, `03_differential_diagnosis.json`, `04_regression_parity.json`, `04_audit_receipt.json`) against committed `EvidenceLeaf` `content_sha256` and `size_bytes`, cross-checks top-level `audit_receipt.json` against `04_audit_receipt.json`, fails closed (`Exit 40`) if `merkle_receipt.json` is missing or any artifact is tampered with on disk, and verifies `sweep_receipt.json` against per-bug receipts.
   - Strict RFC 6962 `MerkleReceipt::verify_all` invariants (`tree_size == leaves.len()`, `proof.tree_size == tree_size`, `proof.leaf_index == idx`, unique leaf `file_name`, and empty remaining `audit_path` at `size == 1`).

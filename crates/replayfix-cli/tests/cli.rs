@@ -954,3 +954,22 @@ fn test_verify_receipt_deleted_merkle_receipt_fails_exit_40() {
     let stderr = String::from_utf8_lossy(&verify_out.stderr);
     assert!(stderr.contains("MERKLE_PROOF_INVALID"));
 }
+
+#[test]
+fn test_export_proof_bundle_cli() {
+    let dir = scratch("export-proof");
+    let out = run_cmd(
+        &dir,
+        &["export-proof", "--output", ".replayfix/proof", "--json"],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(out_json["status"], "SUCCESS");
+    assert!(dir.join(".replayfix/proof/demo_presets.json").exists());
+}

@@ -18,6 +18,7 @@ use replayfix_core::crypto::{TrustPolicy, VerificationOutcome};
 use replayfix_core::ingestion::{
     ingest_issue, GitHubIssueRef, MockIssueFetcher, SystemIssueFetcher,
 };
+use replayfix_core::portal::export_proof_bundle;
 use replayfix_core::receipt::{write_triage_report, AuditReceipt};
 use replayfix_core::sweep::{run_sweep, SweepOptions};
 use replayfix_core::trace::{is_ci_environment, launch_trace_viewer};
@@ -255,6 +256,15 @@ enum Commands {
         /// Base repository path (default: .)
         #[arg(long, default_value = ".")]
         repo: String,
+        /// Output destination directory (default: .replayfix)
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
+        /// Emit machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export Judge Proof Portal bundle and deterministic cryptographic demo presets
+    ExportProof {
         /// Output destination directory (default: .replayfix)
         #[arg(long, default_value = ".replayfix")]
         output: PathBuf,
@@ -1381,6 +1391,38 @@ fn handle_sweep(
     }
 }
 
+fn handle_export_proof(output: PathBuf, json_output: bool, theme: &Theme) -> ! {
+    let repo_root = Path::new(".");
+    if let Err(e) = export_proof_bundle(repo_root, &output) {
+        eprintln!(
+            "  {} Failed to export proof bundle: {e}",
+            theme.error(Symbols::CROSS)
+        );
+        exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
+    }
+    let presets_path = output.join("demo_presets.json");
+    if json_output {
+        let out = serde_json::json!({
+            "status": "SUCCESS",
+            "output_dir": output.display().to_string(),
+            "presets_file": presets_path.display().to_string(),
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+    } else {
+        println!(
+            "  {} {}",
+            theme.success(Symbols::CHECK),
+            theme.bold("Judge Proof Bundle Exported:")
+        );
+        println!(
+            "    {} Presets : {}",
+            theme.muted(Symbols::STEP),
+            presets_path.display()
+        );
+    }
+    exit(exit_codes::SUCCESS);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
@@ -1423,6 +1465,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 json,
                 &stdout_theme,
             );
+        }
+        Some(Commands::ExportProof { output, json }) => {
+            handle_export_proof(output, json, &stdout_theme);
         }
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args, &stderr_theme);
