@@ -5,6 +5,7 @@
 .agents/
 .agent/
 AGENTS.md
+ROADMAP.md
 
 # Rust Build Artifacts
 target/

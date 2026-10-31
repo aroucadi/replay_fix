@@ -914,12 +914,52 @@ impl MetaGatewayClient {
         }
     }
 
+    /// Encode binary bytes (PNG keyframe crop or 24 kHz mono WAV audio) as standard RFC 4648 Base64.
+    #[must_use]
+    pub fn encode_base64(input: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+        for chunk in input.chunks(3) {
+            let b0 = chunk[0];
+            let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+            let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+            let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
+            out.push(TABLE[((n >> 18) & 0x3F) as usize] as char);
+            out.push(TABLE[((n >> 12) & 0x3F) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(TABLE[((n >> 6) & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(TABLE[(n & 0x3F) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+        out
+    }
+
     /// Dispatch a live authenticated HTTPS POST request to the configured Meta AI endpoint
     /// with 30s connect timeout, 90s read timeout, `<UNTRUSTED_DOM_CONTEXT>` escaping,
     /// and exponential backoff on HTTP 429/503.
     pub fn send_live_https(
         &self,
         request: &GatewayRequest,
+        untrusted_dom_context: Option<&str>,
+    ) -> Result<GatewayResponse> {
+        self.send_live_https_with_image(request, None, untrusted_dom_context)
+    }
+
+    /// Dispatch a live authenticated HTTPS POST request with optional PNG/JPEG frame bytes
+    /// (for `sam-3.1` segmentation or `muse-spark-1.3` / `Llama-3.2-11B-Vision` multimodal perception)
+    /// or 24 kHz mono WAV audio bytes (for `muse-voice-transcribe-1.0`).
+    /// Fails closed if the endpoint is unreachable or returns an error.
+    pub fn send_live_https_with_image(
+        &self,
+        request: &GatewayRequest,
+        image_bytes: Option<&[u8]>,
         untrusted_dom_context: Option<&str>,
     ) -> Result<GatewayResponse> {
         request.validate()?;
@@ -939,17 +979,34 @@ impl MetaGatewayClient {
                 CoreError::ModelApiError(format!("Failed to build rustls HTTPS client: {e}"))
             })?;
 
-        let payload = serde_json::json!({
-            "model": request.requested_model,
-            "input": fenced_prompt,
-            "reasoning": request.reasoning_effort.as_ref().map(|eff| serde_json::json!({ "effort": eff })),
-        });
+        let image_b64 = image_bytes.map(Self::encode_base64);
+        let audio_b64 = request.audio_wav_bytes.as_deref().map(Self::encode_base64);
+
+        let build_payload = |model_slug: &str| -> serde_json::Value {
+            let mut obj = serde_json::json!({
+                "model": model_slug,
+                "input": fenced_prompt,
+            });
+            if let Some(ref eff) = request.reasoning_effort {
+                obj["reasoning"] = serde_json::json!({ "effort": eff });
+            }
+            if let Some(ref img) = image_b64 {
+                obj["image_base64"] = serde_json::Value::String(img.clone());
+                obj["image_sha256"] = serde_json::json!(request.image_sha256);
+            }
+            if let Some(ref aud) = audio_b64 {
+                obj["audio_wav_base64"] = serde_json::Value::String(aud.clone());
+                obj["audio_encoding"] = serde_json::Value::String("PCM_24KHZ".to_string());
+            }
+            obj
+        };
 
         let max_attempts = self.config.max_retries.saturating_add(1);
         let mut last_err = String::new();
 
         for attempt in 0..max_attempts {
             let start = std::time::Instant::now();
+            let payload = build_payload(&request.requested_model);
             let resp_res = http_client
                 .post(&self.base_url)
                 .bearer_auth(api_key)
@@ -965,55 +1022,15 @@ impl MetaGatewayClient {
                                 "Malformed JSON from Meta AI gateway: {e}"
                             ))
                         })?;
-                        let output_text = body_val
-                            .get("output_text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let serving_model = body_val
-                            .get("model")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or(&request.requested_model)
-                            .to_string();
-                        let input_tokens = body_val
-                            .get("usage")
-                            .and_then(|u| u.get("input_tokens"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(request.estimated_tokens);
-                        let output_tokens = body_val
-                            .get("usage")
-                            .and_then(|u| u.get("output_tokens"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let cached_tokens = body_val
-                            .get("usage")
-                            .and_then(|u| u.get("cached_tokens"))
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let slug = MuseModelSlug::parse(&serving_model)
-                            .unwrap_or(MuseModelSlug::MuseSpark13);
-                        let cost_nanos = TokenAccounting::usage_nanos(
-                            slug,
-                            input_tokens,
-                            cached_tokens,
-                            output_tokens,
-                            0,
+                        return Self::parse_live_json_response(
+                            &body_val,
+                            request,
+                            GatewayProvider::MetaAi,
+                            false,
+                            attempt,
+                            start.elapsed().as_millis() as u64,
+                            fingerprint,
                         );
-                        return Ok(GatewayResponse {
-                            provider: GatewayProvider::MetaAi,
-                            provenance: GatewayProvenance::LiveProvider,
-                            requested_model: request.requested_model.clone(),
-                            serving_model,
-                            output_text,
-                            input_tokens,
-                            output_tokens,
-                            cached_tokens,
-                            cost_nanos,
-                            latency_ms: start.elapsed().as_millis() as u64,
-                            retries_attempted: attempt,
-                            fallback_triggered: false,
-                            request_fingerprint_sha256: fingerprint,
-                        });
                     } else if status == 401 || status == 403 {
                         return Err(CoreError::ModelApiError(format!(
                             "GATEWAY_AUTH_FAILED: HTTP {status} from {}",
@@ -1042,9 +1059,110 @@ impl MetaGatewayClient {
             }
         }
 
+        // If primary attempts failed and a fallback model + fallback API key/endpoint is configured, try live fallback
+        if let Some(fallback_slug) = Self::fallback_model_for(&request.requested_model) {
+            if let Some(ref fb_key) = self.config.baseten_api_key {
+                let start = std::time::Instant::now();
+                let fb_payload = build_payload(fallback_slug);
+                if let Ok(resp) = http_client
+                    .post(&self.config.baseten_fallback_url)
+                    .bearer_auth(fb_key)
+                    .json(&fb_payload)
+                    .send()
+                {
+                    if resp.status().as_u16() == 200 {
+                        if let Ok(body_val) = resp.json::<serde_json::Value>() {
+                            return Self::parse_live_json_response(
+                                &body_val,
+                                request,
+                                GatewayProvider::BasetenFallback,
+                                true,
+                                max_attempts,
+                                start.elapsed().as_millis() as u64,
+                                fingerprint,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         Err(CoreError::ModelApiError(format!(
             "GATEWAY_LIVE_REQUEST_FAILED after {max_attempts} attempts: {last_err}"
         )))
+    }
+
+    fn parse_live_json_response(
+        body_val: &serde_json::Value,
+        request: &GatewayRequest,
+        provider: GatewayProvider,
+        fallback_triggered: bool,
+        retries_attempted: u32,
+        latency_ms: u64,
+        fingerprint: String,
+    ) -> Result<GatewayResponse> {
+        let output_text = body_val
+            .get("output_text")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                body_val
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|m| m.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|v| v.as_str())
+            })
+            .or_else(|| body_val.get("text").and_then(|v| v.as_str()))
+            .or_else(|| body_val.get("transcript").and_then(|v| v.as_str()))
+            .ok_or_else(|| {
+                CoreError::ModelApiError(
+                    "Live gateway JSON response missing 'output_text', 'choices[0].message.content', or 'transcript'"
+                        .to_string(),
+                )
+            })?
+            .to_string();
+
+        let serving_model = body_val
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&request.requested_model)
+            .to_string();
+        let input_tokens = body_val
+            .get("usage")
+            .and_then(|u| u.get("input_tokens").or_else(|| u.get("prompt_tokens")))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(request.estimated_tokens);
+        let output_tokens = body_val
+            .get("usage")
+            .and_then(|u| {
+                u.get("output_tokens")
+                    .or_else(|| u.get("completion_tokens"))
+            })
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let cached_tokens = body_val
+            .get("usage")
+            .and_then(|u| u.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let slug = MuseModelSlug::parse(&serving_model).unwrap_or(MuseModelSlug::MuseSpark13);
+        let cost_nanos =
+            TokenAccounting::usage_nanos(slug, input_tokens, cached_tokens, output_tokens, 0);
+        Ok(GatewayResponse {
+            provider,
+            provenance: GatewayProvenance::LiveProvider,
+            requested_model: request.requested_model.clone(),
+            serving_model,
+            output_text,
+            input_tokens,
+            output_tokens,
+            cached_tokens,
+            cost_nanos,
+            latency_ms,
+            retries_attempted,
+            fallback_triggered,
+            request_fingerprint_sha256: fingerprint,
+        })
     }
 }
 
