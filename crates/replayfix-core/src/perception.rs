@@ -84,6 +84,44 @@ pub struct SamSnapResult {
     pub score_margin_bps: u32,
 }
 
+/// Category of user action observed in the video recording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    Click,
+    Input,
+    Navigate,
+}
+
+impl ActionType {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Click => "click",
+            Self::Input => "input",
+            Self::Navigate => "navigate",
+        }
+    }
+}
+
+/// An individual user action along the video timeline paired with SAM 3.1 visual grounding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserAction {
+    pub t_ms: u64,
+    pub action_type: ActionType,
+    pub sam_snap: SamSnapResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narration_cue: Option<NarrationCue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+}
+
+/// Ordered sequence of multi-step user interactions detected across a bug recording.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionTrajectory {
+    pub actions: Vec<UserAction>,
+}
+
 /// SAM 3.1 (`sam-3.1`) wire parser, contour extractor, and fail-closed centroid snapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SamSegmenter;
@@ -336,6 +374,25 @@ impl SamSegmenter {
             calibration,
         )
     }
+
+    /// Segment keyframe PNG crop using live Meta SAM 3.1 HTTPS API (`POST https://api.meta.ai/v1/responses`).
+    pub fn segment_live(
+        gateway: &crate::gateway::MetaGatewayClient,
+        keyframe_png_bytes: &[u8],
+        candidate_video: (i32, i32),
+        calibration: &GeometricCalibration,
+    ) -> Result<(SamSnapResult, u64)> {
+        let (wire_tokens, latency_ms) = gateway.segment_keyframe_sam31(
+            keyframe_png_bytes,
+            candidate_video.0,
+            candidate_video.1,
+        )?;
+        let boxes = Self::parse_wire_tokens(&wire_tokens)?;
+        let mut snap =
+            Self::snap_to_centroid(candidate_video.0, candidate_video.1, &boxes, calibration)?;
+        snap.model = SAM_MODEL_SLUG.to_string();
+        Ok((snap, latency_ms))
+    }
 }
 
 /// Configuration for `muse-voice-transcribe-1.0` audio transcription.
@@ -444,6 +501,38 @@ impl AsrTranscriber {
     pub fn parse_asr_events(config: &AsrRequestConfig, stream_text: &str) -> Result<NarrationCue> {
         Self::validate_config(config)?;
 
+        let trimmed_all = stream_text.trim();
+        if trimmed_all.is_empty() {
+            return Err(CoreError::Execution(
+                "muse-voice-transcribe-1.0 returned empty response".to_string(),
+            ));
+        }
+
+        // Support direct JSON response object
+        if trimmed_all.starts_with('{')
+            && trimmed_all.ends_with('}')
+            && !trimmed_all.contains("\ndata:")
+        {
+            if let Ok(event) = serde_json::from_str::<RawAsrEvent>(trimmed_all) {
+                if let Some(audio_processed_ms) = event.audio_processed_ms {
+                    let transcript = event
+                        .transcript
+                        .or(event.text)
+                        .or(event.delta)
+                        .unwrap_or_default();
+                    return Ok(NarrationCue {
+                        model: config.model.clone(),
+                        transcript: transcript.trim().to_string(),
+                        audio_processed_ms,
+                        aligned_video_time_ms: audio_processed_ms,
+                        audio_encoding: config.audio_encoding.clone(),
+                        mode: config.mode.clone(),
+                        partial_mode: config.partial_mode.clone(),
+                    });
+                }
+            }
+        }
+
         let mut transcript = String::new();
         let mut latest_audio_processed_ms: Option<u64> = None;
 
@@ -490,6 +579,14 @@ impl AsrTranscriber {
         })
     }
 
+    /// Dispatch 24 kHz mono 16-bit PCM WAV audio to live Meta Muse Voice ASR (`POST /v1/asr/transcribe`).
+    pub fn transcribe_live(
+        gateway: &crate::gateway::MetaGatewayClient,
+        wav_bytes: &[u8],
+    ) -> Result<NarrationCue> {
+        gateway.transcribe_audio_wav(wav_bytes)
+    }
+
     /// Align extracted 24 kHz mono WAV audio with the detected visual interaction timestamp.
     pub fn align_wav_narration(
         wav_bytes: Option<&[u8]>,
@@ -518,7 +615,7 @@ impl AsrTranscriber {
     }
 }
 
-/// Complete Spec 050 multimodal video telemetry record persisted in `AuditReceipt`.
+/// Complete Spec 050 & Spec 120 multimodal video telemetry record persisted in `AuditReceipt`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VideoTelemetry {
     pub video_metadata: VideoMetadata,
@@ -527,20 +624,45 @@ pub struct VideoTelemetry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narration: Option<NarrationCue>,
     pub keyframe_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_trajectory: Option<ActionTrajectory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sam_latency_ms: Option<u64>,
 }
 
 impl VideoTelemetry {
-    /// Execute the full Spec 050 multimodal video ingestion pipeline:
-    /// 1. Validate and probe video metadata via `ffprobe`.
-    /// 2. Extract grayscale frames and detect the single cursor-bounded ROI interaction.
-    /// 3. Segment the active contour via SAM 3.1 (`sam-3.1`) and snap to its calibrated CSS centroid.
-    /// 4. Persist extracted keyframe PNG(s) (budgeted to `<= 10` frames) in `keyframe_dir`.
-    /// 5. Extract 24 kHz mono PCM WAV and align spoken narration via `muse-voice-transcribe-1.0` (`audioProcessedMs`).
+    /// Execute the multimodal video ingestion pipeline using default deterministic fixture mode.
     pub fn ingest(
         video_path: &Path,
         keyframe_dir: &Path,
         viewport_dims: (u32, u32),
         task_id: &str,
+    ) -> Result<Self> {
+        Self::ingest_with_mode(
+            video_path,
+            keyframe_dir,
+            viewport_dims,
+            task_id,
+            crate::gateway::ExecutionMode::DeterministicFixture,
+            None,
+        )
+    }
+
+    /// Execute the full multimodal video ingestion pipeline supporting both `live-ai`
+    /// (outbound HTTPS to Meta SAM 3.1 & Muse Voice ASR) and `deterministic-fixture` modes:
+    /// 1. Validate and probe video metadata via `ffprobe`.
+    /// 2. Extract grayscale frames and detect interaction hotspots / trajectory.
+    /// 3. Segment the active contour via SAM 3.1 (`sam-3.1`) and snap to its calibrated CSS centroid.
+    /// 4. Persist extracted keyframe PNG(s) (budgeted to `<= 10` frames) in `keyframe_dir`.
+    /// 5. Extract 24 kHz mono PCM WAV and align spoken narration via `muse-voice-transcribe-1.0`.
+    /// 6. Build ordered multi-step `ActionTrajectory`.
+    pub fn ingest_with_mode(
+        video_path: &Path,
+        keyframe_dir: &Path,
+        viewport_dims: (u32, u32),
+        task_id: &str,
+        mode: crate::gateway::ExecutionMode,
+        gateway: Option<&crate::gateway::MetaGatewayClient>,
     ) -> Result<Self> {
         let path_str = video_path.to_str().ok_or_else(|| {
             CoreError::SecurityViolation("Video path contains invalid UTF-8".to_string())
@@ -562,29 +684,133 @@ impl VideoTelemetry {
             dpr_milli: 1000,
         };
 
-        let sam_snap = SamSegmenter::segment_from_frame_pair(
-            &frames.frames[before_idx],
-            &frames.frames[after_idx],
-            (frames.width, frames.height),
-            (video_metadata.width, video_metadata.height),
-            (interaction.x_video, interaction.y_video),
-            &calibration,
-        )?;
-
         let written_keyframes = VideoPreprocessor::write_keyframes(
             &safe_video,
             &video_metadata,
             &[interaction.t_ms],
             keyframe_dir,
         )?;
-        let keyframe_paths = written_keyframes
-            .into_iter()
+        let keyframe_paths: Vec<String> = written_keyframes
+            .iter()
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .collect();
 
         let wav = VideoPreprocessor::extract_wav_24k_mono(&safe_video, &video_metadata)?;
-        let narration =
-            AsrTranscriber::align_wav_narration(wav.as_deref(), interaction.t_ms, task_id)?;
+
+        let (sam_snap, sam_latency_ms) = match mode {
+            crate::gateway::ExecutionMode::LiveAi => {
+                let gw = gateway.ok_or_else(|| {
+                    CoreError::ModelApiError(
+                        "LiveAi execution mode requires configured MetaGatewayClient".to_string(),
+                    )
+                })?;
+                gw.require_live_auth()?;
+                let kf_path = written_keyframes.first().ok_or_else(|| {
+                    CoreError::Grounding("No keyframe extracted for live SAM 3.1".to_string())
+                })?;
+                let png_bytes = std::fs::read(kf_path)?;
+                let (snap, lat) = SamSegmenter::segment_live(
+                    gw,
+                    &png_bytes,
+                    (interaction.x_video, interaction.y_video),
+                    &calibration,
+                )?;
+                (snap, Some(lat))
+            }
+            crate::gateway::ExecutionMode::DeterministicFixture => {
+                let snap = SamSegmenter::segment_from_frame_pair(
+                    &frames.frames[before_idx],
+                    &frames.frames[after_idx],
+                    (frames.width, frames.height),
+                    (video_metadata.width, video_metadata.height),
+                    (interaction.x_video, interaction.y_video),
+                    &calibration,
+                )?;
+                (snap, None)
+            }
+        };
+
+        let narration = match mode {
+            crate::gateway::ExecutionMode::LiveAi => {
+                if let Some(ref wav_bytes) = wav {
+                    let gw = gateway.ok_or_else(|| {
+                        CoreError::ModelApiError(
+                            "LiveAi execution mode requires configured MetaGatewayClient"
+                                .to_string(),
+                        )
+                    })?;
+                    gw.require_live_auth()?;
+                    Some(AsrTranscriber::transcribe_live(gw, wav_bytes)?)
+                } else {
+                    None
+                }
+            }
+            crate::gateway::ExecutionMode::DeterministicFixture => {
+                AsrTranscriber::align_wav_narration(wav.as_deref(), interaction.t_ms, task_id)?
+            }
+        };
+
+        let raw_trajectory = RoiDiffer::detect_trajectory(&frames, DetectionParams::default())
+            .unwrap_or_else(|_| vec![interaction.clone()]);
+
+        let mut actions = Vec::new();
+        for (idx, ev) in raw_trajectory.into_iter().enumerate() {
+            let snap = if idx == 0 {
+                sam_snap.clone()
+            } else {
+                let (css_x, css_y) = calibration.to_css(ev.x_video, ev.y_video).unwrap_or((0, 0));
+                SamSnapResult {
+                    model: sam_snap.model.clone(),
+                    wire_token: format!(
+                        "<|box;x1={};y1={};x2={};y2={}|>",
+                        ev.x_video.saturating_sub(20),
+                        ev.y_video.saturating_sub(10),
+                        ev.x_video.saturating_add(20),
+                        ev.y_video.saturating_add(10)
+                    ),
+                    box_x1: ev.x_video.saturating_sub(20),
+                    box_y1: ev.y_video.saturating_sub(10),
+                    box_x2: ev.x_video.saturating_add(20),
+                    box_y2: ev.y_video.saturating_add(10),
+                    centroid_x_video: ev.x_video,
+                    centroid_y_video: ev.y_video,
+                    calibrated_x_css: css_x,
+                    calibrated_y_css: css_y,
+                    candidate_score_bps: 10_000,
+                    score_margin_bps: 10_000,
+                }
+            };
+
+            let act_type = if let Some(ref cue) = narration {
+                let lower = cue.transcript.to_ascii_lowercase();
+                if lower.contains("type")
+                    || lower.contains("enter")
+                    || lower.contains("fill")
+                    || lower.contains("input")
+                {
+                    ActionType::Input
+                } else if lower.contains("navigate")
+                    || lower.contains("go to")
+                    || lower.contains("open")
+                {
+                    ActionType::Navigate
+                } else {
+                    ActionType::Click
+                }
+            } else {
+                ActionType::Click
+            };
+
+            actions.push(UserAction {
+                t_ms: ev.t_ms,
+                action_type: act_type,
+                sam_snap: snap,
+                narration_cue: narration.clone(),
+                latency_ms: sam_latency_ms,
+            });
+        }
+
+        let action_trajectory = Some(ActionTrajectory { actions });
 
         Ok(Self {
             video_metadata,
@@ -592,6 +818,8 @@ impl VideoTelemetry {
             sam_snap,
             narration,
             keyframe_paths,
+            action_trajectory,
+            sam_latency_ms,
         })
     }
 }
@@ -701,8 +929,56 @@ data: [DONE]\n";
         let cue = telemetry.narration.expect("narration aligned");
         assert_eq!(cue.model, "muse-voice-transcribe-1.0");
         assert_eq!(cue.audio_processed_ms, telemetry.interaction.t_ms);
-        assert!(cue.transcript.contains("RF-01"));
+        assert_eq!(cue.transcript, "I clicked Refresh Cart on RF-01 here");
+        assert!(telemetry.action_trajectory.is_some());
+        let traj = telemetry.action_trajectory.unwrap();
+        assert!(!traj.actions.is_empty());
+        assert_eq!(traj.actions[0].action_type, ActionType::Click);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_action_trajectory_schema_parity() {
+        let snap = SamSnapResult {
+            model: "sam-3.1".to_string(),
+            wire_token: "<|box;x1=100;y1=100;x2=200;y2=200|>".to_string(),
+            box_x1: 100,
+            box_y1: 100,
+            box_x2: 200,
+            box_y2: 200,
+            centroid_x_video: 150,
+            centroid_y_video: 150,
+            calibrated_x_css: 150,
+            calibrated_y_css: 150,
+            candidate_score_bps: 9800,
+            score_margin_bps: 10000,
+        };
+        let action = UserAction {
+            t_ms: 500,
+            action_type: ActionType::Click,
+            sam_snap: snap,
+            narration_cue: None,
+            latency_ms: Some(42),
+        };
+        let traj = ActionTrajectory {
+            actions: vec![action],
+        };
+        let json_val = serde_json::to_value(&traj).unwrap();
+        assert!(json_val.get("actions").is_some());
+        assert_eq!(json_val["actions"][0]["action_type"], "click");
+        assert_eq!(json_val["actions"][0]["t_ms"], 500);
+        assert_eq!(json_val["actions"][0]["sam_snap"]["model"], "sam-3.1");
+    }
+
+    #[test]
+    fn test_asr_parses_direct_json_response() {
+        let cfg = AsrRequestConfig::default();
+        let json_body = r#"{"model":"muse-voice-transcribe-1.0","transcript":"I clicked Checkout button","audioProcessedMs":1250}"#;
+        let cue = AsrTranscriber::parse_asr_events(&cfg, json_body).unwrap();
+        assert_eq!(cue.model, "muse-voice-transcribe-1.0");
+        assert_eq!(cue.transcript, "I clicked Checkout button");
+        assert_eq!(cue.audio_processed_ms, 1250);
+        assert_eq!(cue.aligned_video_time_ms, 1250);
     }
 }

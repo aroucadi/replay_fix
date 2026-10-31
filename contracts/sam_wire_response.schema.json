@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.2/sam_wire_response.schema.json",
+  "title": "SamWireResponse",
+  "type": "object",
+  "required": ["model", "wire_token", "box_x1", "box_y1", "box_x2", "box_y2", "centroid_x_video", "centroid_y_video", "calibrated_x_css", "calibrated_y_css"],
+  "properties": {
+    "model": { "type": "string", "const": "sam-3.1" },
+    "wire_token": { "type": "string", "pattern": "^<\\|box;x1=[0-9]+;y1=[0-9]+;x2=[0-9]+;y2=[0-9]+\\|>" },
+    "box_x1": { "type": "integer", "minimum": 0 },
+    "box_y1": { "type": "integer", "minimum": 0 },
+    "box_x2": { "type": "integer", "minimum": 1 },
+    "box_y2": { "type": "integer", "minimum": 1 },
+    "centroid_x_video": { "type": "integer", "minimum": 0 },
+    "centroid_y_video": { "type": "integer", "minimum": 0 },
+    "calibrated_x_css": { "type": "integer", "minimum": 0 },
+    "calibrated_y_css": { "type": "integer", "minimum": 0 },
+    "candidate_score_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "score_margin_bps": { "type": "integer", "minimum": 2500, "maximum": 10000 }
+  },
+  "additionalProperties": false
+}

@@ -1330,6 +1330,8 @@ pub enum RepairClientMode {
     /// Deterministic offline fixture that attempts to alter test scripts in `package.json`
     /// to test surgical script immutability enforcement.
     OfflineAttemptPackageJsonTestScriptMutation,
+    /// Live outbound HTTPS inference via `MetaGatewayClient` and `META_API_KEY`.
+    LiveEndpoint,
 }
 
 impl RepairClientMode {
@@ -1342,6 +1344,7 @@ impl RepairClientMode {
             | Self::OfflineFallbackOnRateLimit
             | Self::OfflineAttemptTestMutation
             | Self::OfflineAttemptPackageJsonTestScriptMutation => "deterministic-offline-fixture",
+            Self::LiveEndpoint => "live-meta-muse-api",
         }
     }
 }
@@ -1373,6 +1376,61 @@ impl BoundedRepairClient {
                 "DELIBERATION_CONTINUITY_ERROR: retry attempt {attempt} is missing \
                  previous_response_id or reasoning.encrypted_content"
             )));
+        }
+
+        if self.mode == RepairClientMode::LiveEndpoint {
+            let gateway_cfg = crate::gateway::GatewayConfig::default();
+            let gateway_client = crate::gateway::MetaGatewayClient::new(gateway_cfg);
+            gateway_client.require_live_auth()?;
+
+            let prompt = format!(
+                "You are an expert autonomous software repair engineer.\n\
+                 Repair the following bug defect in the repository:\n\
+                 Prompt Cache Key: {}\n\
+                 Bug Prompt: {}\n\
+                 Output a single JSON object with EXACTLY these 5 fields:\n\
+                 {{\n  \"explanation\": \"...\",\n  \"target_file\": \"...\",\n  \"search_block\": \"...\",\n  \"replace_block\": \"...\",\n  \"touched_symbols\": [\"...\"]\n}}\n\
+                 Do not wrap in markdown fences. Output raw JSON only.",
+                request.prompt_cache_key,
+                request.user_prompt,
+            );
+
+            let req = crate::gateway::GatewayRequest {
+                role: crate::gateway::ModelRole::DeepReasoning,
+                requested_model: config.serving_model.as_str().to_string(),
+                prompt,
+                reasoning_effort: Some("high".to_string()),
+                estimated_tokens: 2048,
+                include_audio: false,
+                audio_wav_bytes: None,
+                image_sha256: None,
+            };
+
+            let resp = gateway_client.send_live_https(&req, None)?;
+            let trimmed = resp.output_text.trim();
+            let clean_json = if let Some(stripped) = trimmed.strip_prefix("```json") {
+                stripped.strip_suffix("```").unwrap_or(stripped).trim()
+            } else if let Some(stripped) = trimmed.strip_prefix("```") {
+                stripped.strip_suffix("```").unwrap_or(stripped).trim()
+            } else {
+                trimmed
+            };
+
+            return Ok(RepairModelResponse {
+                response_id: format!("live_resp_{attempt}"),
+                serving_model: config.serving_model,
+                fallback_used: resp.fallback_triggered,
+                raw_json_output: clean_json.to_string(),
+                encrypted_content: sha256_hex(clean_json.as_bytes()),
+                usage: TokenAccounting::from_usage(
+                    config.serving_model,
+                    resp.input_tokens,
+                    resp.cached_tokens,
+                    resp.output_tokens,
+                    0,
+                    resp.latency_ms,
+                ),
+            });
         }
 
         let mut fallback_used = false;

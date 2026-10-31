@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.2/asr_event_stream.schema.json",
+  "title": "AsrEventStream",
+  "type": "object",
+  "required": ["model", "transcript", "audio_processed_ms", "aligned_video_time_ms", "audio_encoding", "mode", "partial_mode"],
+  "properties": {
+    "model": { "type": "string", "const": "muse-voice-transcribe-1.0" },
+    "transcript": { "type": "string", "minLength": 1 },
+    "audio_processed_ms": { "type": "integer", "minimum": 0 },
+    "aligned_video_time_ms": { "type": "integer", "minimum": 0 },
+    "audio_encoding": { "type": "string", "const": "PCM_24KHZ" },
+    "mode": { "type": "string", "const": "ENDPOINTING" },
+    "partial_mode": { "type": "string", "const": "DELTA" }
+  },
+  "additionalProperties": false
+}

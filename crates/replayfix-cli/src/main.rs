@@ -54,6 +54,7 @@ pub mod exit_codes {
     pub const INVALID_ISSUE_URL: i32 = 23;
     pub const ISSUE_FETCH_FAILED: i32 = 24;
     pub const REPAIR_REJECTED: i32 = 30;
+    pub const ERR_GATEWAY_AUTH_MISSING: i32 = 30;
     pub const REGRESSION_DETECTED: i32 = 31;
     pub const QUARANTINE_INVERTED_BASELINE: i32 = 32;
     pub const RECEIPT_VERIFICATION_FAILED: i32 = 40;
@@ -528,6 +529,26 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         );
     }
 
+    if parsed_mode == Some(ExecutionMode::LiveAi) {
+        let gw = MetaGatewayClient::default();
+        if let Err(e) = gw.require_live_auth() {
+            eprintln!();
+            eprintln!(
+                "  {} [GATEWAY AUTH ERROR] {}",
+                theme.error(Symbols::CROSS),
+                e
+            );
+            eprintln!(
+                "  Please set META_API_KEY (or REPLAYFIX_AI_KEY) in your environment to run in live-ai mode:"
+            );
+            eprintln!("    $env:META_API_KEY = \"your-api-key\"");
+            eprintln!(
+                "  Or run in offline calibrated fixture mode with: --mode deterministic-fixture\n"
+            );
+            exit(exit_codes::ERR_GATEWAY_AUTH_MISSING);
+        }
+    }
+
     let extras = ReproExtras {
         trace,
         mock_heal,
@@ -739,6 +760,8 @@ fn resolve_repair_mode(extras: &ReproExtras) -> Option<RepairClientMode> {
         Some(RepairClientMode::OfflineSyntaxRetryThenSuccess)
     } else if extras.mock_pkg_test_mutation {
         Some(RepairClientMode::OfflineAttemptPackageJsonTestScriptMutation)
+    } else if extras.execution_mode == Some(ExecutionMode::LiveAi) {
+        Some(RepairClientMode::LiveEndpoint)
     } else if extras.model.is_some() {
         Some(RepairClientMode::OfflineSuccessFirstAttempt)
     } else {
@@ -821,6 +844,11 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 },
             ]
         });
+        let gateway_client = if extras.execution_mode == Some(ExecutionMode::LiveAi) {
+            Some(MetaGatewayClient::default())
+        } else {
+            None
+        };
         let opts = LiveBrowserOptions {
             headed: m.headed,
             candidate_override,
@@ -831,6 +859,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             clean_ref: m.clean_ref.clone(),
             verify_matrix: extras.verify_matrix,
             mock_regression: extras.mock_regression,
+            execution_mode: extras.execution_mode,
+            gateway_client,
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -929,19 +959,36 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                         )),
                     );
                 }
+                let latency_str = vtel
+                    .sam_latency_ms
+                    .map(|l| format!(" (latency: {l}ms)"))
+                    .unwrap_or_default();
                 print_step(
                     theme,
                     "SAM 3.1 Snap",
                     StepStatus::Done,
                     "Snapped hotspot to contour centroid",
                     Some(&format!(
-                        "{} {} -> CSS ({}, {})",
+                        "{} {} -> CSS ({}, {}){}",
                         vtel.sam_snap.model,
                         vtel.sam_snap.wire_token,
                         vtel.sam_snap.calibrated_x_css,
-                        vtel.sam_snap.calibrated_y_css
+                        vtel.sam_snap.calibrated_y_css,
+                        latency_str
                     )),
                 );
+                if let Some(ref traj) = vtel.action_trajectory {
+                    print_step(
+                        theme,
+                        "Trajectory",
+                        StepStatus::Done,
+                        "Aggregated multi-step interaction trajectory",
+                        Some(&format!(
+                            "{} action(s) sequenced across video timeline",
+                            traj.actions.len()
+                        )),
+                    );
+                }
             }
             if let Some(tel) = &receipt.grounding_telemetry {
                 print_step(

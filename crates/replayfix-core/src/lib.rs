@@ -85,8 +85,8 @@ pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use merkle::{EvidenceLeaf, MerkleInclusionProof, MerkleReceipt, MerkleTree};
 pub use patch::{PatchOutcome, UnifiedPatcher};
 pub use perception::{
-    AsrRequestConfig, AsrTranscriber, NarrationCue, SamContourBox, SamSegmenter, SamSnapResult,
-    VideoTelemetry, ASR_MODEL_SLUG, SAM_MODEL_SLUG,
+    ActionTrajectory, ActionType, AsrRequestConfig, AsrTranscriber, NarrationCue, SamContourBox,
+    SamSegmenter, SamSnapResult, UserAction, VideoTelemetry, ASR_MODEL_SLUG, SAM_MODEL_SLUG,
 };
 pub use platform::{EphemeralPort, OsFamily, Platform};
 pub use portal::{

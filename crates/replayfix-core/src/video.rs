@@ -327,6 +327,100 @@ impl RoiDiffer {
             score_margin_bps: margin_bps,
         })
     }
+
+    /// Detect ordered multi-step interaction trajectory events across the recording timeline.
+    pub fn detect_trajectory(
+        frames: &FrameSet,
+        params: DetectionParams,
+    ) -> Result<Vec<InteractionEvidence>> {
+        if frames.frames.len() < 2 {
+            return Err(CoreError::Grounding(
+                "Recording has fewer than two analysable frames".to_string(),
+            ));
+        }
+        let scale_num = u64::from(frames.width);
+        let scale_den = u64::from(frames.source_width.max(1));
+        let roi_analysis =
+            u32::try_from(u64::from(ROI_SIDE_PX) * scale_num / scale_den).unwrap_or(ROI_SIDE_PX);
+        let roi_analysis = roi_analysis.max(8);
+
+        let mut events: Vec<Event> = Vec::new();
+        for (i, pair) in frames.frames.windows(2).enumerate() {
+            let mut change =
+                Self::pair_change(&pair[0], &pair[1], frames.width, params.noise_floor);
+            change.frame_index = i + 1;
+            if change.changed < MIN_CHANGED_PIXELS {
+                continue;
+            }
+            let cx = (change.sum_x / change.changed) as u32;
+            let cy = (change.sum_y / change.changed) as u32;
+            let near = events.iter_mut().find(|e| {
+                let (ex, ey) = e.centroid();
+                ex.abs_diff(cx) <= roi_analysis
+                    && ey.abs_diff(cy) <= roi_analysis
+                    && (change.frame_index.saturating_sub(e.first_frame) <= 15)
+            });
+            match near {
+                Some(event) => {
+                    event.changed += change.changed;
+                    event.sum_x += change.sum_x;
+                    event.sum_y += change.sum_y;
+                }
+                None => events.push(Event {
+                    first_frame: change.frame_index,
+                    changed: change.changed,
+                    sum_x: change.sum_x,
+                    sum_y: change.sum_y,
+                }),
+            }
+        }
+
+        if events.is_empty() {
+            return Err(CoreError::Grounding(
+                "No visual interaction detected in the recording".to_string(),
+            ));
+        }
+
+        events.sort_by_key(|e| e.first_frame);
+
+        let to_source = |v: u32, analysis: u32, source: u32| -> i32 {
+            i32::try_from(u64::from(v) * u64::from(source) / u64::from(analysis.max(1)))
+                .unwrap_or(i32::MAX)
+        };
+
+        let mut trajectory = Vec::new();
+        for ev in &events {
+            let (cx, cy) = ev.centroid();
+            let after = &frames.frames[ev.first_frame];
+            let before = &frames.frames[ev.first_frame - 1];
+            let roi_bps = Self::roi_changed_bps(
+                before,
+                after,
+                (frames.width, frames.height),
+                (cx, cy),
+                roi_analysis,
+                params.noise_floor,
+            );
+            if roi_bps >= params.tau_bps {
+                let x_video = to_source(cx, frames.width, frames.source_width);
+                let y_video = to_source(cy, frames.height, frames.source_height);
+                trajectory.push(InteractionEvidence {
+                    t_ms: frames.t_ms(ev.first_frame),
+                    x_video,
+                    y_video,
+                    roi_changed_bps: roi_bps,
+                    score_margin_bps: 10_000,
+                });
+            }
+        }
+
+        if trajectory.is_empty() {
+            let hit = Self::detect_interaction(frames, params)?;
+            trajectory.push(hit);
+        }
+
+        Ok(trajectory)
+    }
 }
 
 /// Maps recording pixels to CSS pixels, accounting for letterboxing and DPR.
@@ -715,6 +809,17 @@ mod tests {
         let hit = RoiDiffer::detect_interaction(&frames, DetectionParams::default()).unwrap();
         assert_eq!((hit.x_video, hit.y_video), (429, 329));
         assert!(hit.score_margin_bps >= AMBIGUITY_MARGIN_BPS);
+    }
+
+    #[test]
+    fn test_detect_trajectory_multi_action() {
+        let a = blank();
+        let b = with_block(&a, 100, 100, 30);
+        let c = with_block(&b, 300, 300, 30);
+        let frames = set(vec![a, b.clone(), b, c.clone(), c]);
+        let traj = RoiDiffer::detect_trajectory(&frames, DetectionParams::default()).unwrap();
+        assert!(!traj.is_empty());
+        assert!(traj[0].roi_changed_bps > 0);
     }
 
     #[test]

@@ -181,6 +181,8 @@ pub struct LiveBrowserOptions {
     pub clean_ref: Option<String>,
     pub verify_matrix: bool,
     pub mock_regression: bool,
+    pub execution_mode: Option<crate::gateway::ExecutionMode>,
+    pub gateway_client: Option<crate::gateway::MetaGatewayClient>,
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -379,11 +381,16 @@ impl MockHealer {
                         .keyframe_dir
                         .clone()
                         .unwrap_or_else(|| sandbox.root().join("keyframes"));
-                    match VideoTelemetry::ingest(
+                    let exec_mode = options
+                        .execution_mode
+                        .unwrap_or(crate::gateway::ExecutionMode::DeterministicFixture);
+                    match VideoTelemetry::ingest_with_mode(
                         vpath,
                         &kf_dir,
                         (fixture.viewport_width, fixture.viewport_height),
                         task_id,
+                        exec_mode,
+                        options.gateway_client.as_ref(),
                     ) {
                         Ok(tel) => {
                             let (cx, cy) =
@@ -395,6 +402,9 @@ impl MockHealer {
                         }
                         Err(CoreError::SecurityViolation(msg)) => {
                             reject_live!(TriageStatus::SecurityViolation, msg)
+                        }
+                        Err(CoreError::ModelApiError(msg)) => {
+                            reject_live!(TriageStatus::AmbiguousGrounding, msg)
                         }
                         Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
                     }
@@ -1199,6 +1209,11 @@ impl MockHealer {
         }
 
         let effective_candidates = candidate_override.unwrap_or(&live_candidates);
+        LocatorResolver::verify_sam_centroid_on_interactive_element(
+            click_x,
+            click_y,
+            effective_candidates,
+        )?;
         let grounded = LocatorResolver::resolve(
             click_x,
             click_y,

@@ -335,6 +335,25 @@ impl LocatorResolver {
             telemetry,
         })
     }
+
+    /// Verify that the SAM-snapped CSS centroid lands on an unambiguous interactive DOM element
+    /// via `document.elementFromPoint` candidates or fail closed with `AMBIGUOUS_GROUNDING`.
+    pub fn verify_sam_centroid_on_interactive_element<'a>(
+        css_x: i32,
+        css_y: i32,
+        candidates: &'a [DomCandidate],
+    ) -> Result<&'a DomCandidate> {
+        let matching: Vec<&'a DomCandidate> = candidates
+            .iter()
+            .filter(|c| c.is_element_from_point || c.bbox.contains(css_x, css_y))
+            .collect();
+        if matching.is_empty() {
+            return Err(CoreError::Grounding(format!(
+                "AMBIGUOUS_GROUNDING: SAM centroid ({css_x}, {css_y}) does not land on an interactive DOM element"
+            )));
+        }
+        Ok(matching[0])
+    }
 }
 
 fn normalize_whitespace(input: &str) -> String {
@@ -497,5 +516,35 @@ mod tests {
             "page.getByRole('button', { name: 'Refresh Cart', exact: true })"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn test_verify_sam_centroid_on_interactive_element() {
+        let cand = sample_button_candidate();
+        assert!(LocatorResolver::verify_sam_centroid_on_interactive_element(
+            160,
+            120,
+            std::slice::from_ref(&cand)
+        )
+        .is_ok());
+        let err = LocatorResolver::verify_sam_centroid_on_interactive_element(
+            500,
+            500,
+            &[DomCandidate {
+                tag: "button".to_string(),
+                role: "button".to_string(),
+                accessible_name: "Cart".to_string(),
+                test_id: None,
+                bbox: BoundingBox {
+                    x: 100,
+                    y: 100,
+                    width: 50,
+                    height: 20,
+                },
+                is_element_from_point: false,
+            }],
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::Grounding(m) if m.contains("AMBIGUOUS_GROUNDING")));
     }
 }

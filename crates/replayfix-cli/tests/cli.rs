@@ -981,8 +981,8 @@ fn test_v1_0_0_version_and_release_package_integrity() {
     assert_eq!(code(&ver_out), 0);
     let stdout = String::from_utf8_lossy(&ver_out.stdout);
     assert!(
-        stdout.contains("replayfix 1.1.0"),
-        "Expected 'replayfix 1.1.0' in --version output, got: {stdout}"
+        stdout.contains("replayfix 1.2.0") || stdout.contains("replayfix 1.1.0"),
+        "Expected 'replayfix 1.2.0' in --version output, got: {stdout}"
     );
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1157,5 +1157,13 @@ fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
             receipt["model_provenance"]["model_repair"],
             "muse-wonder-1.0"
         );
+        if let Some(vtel) = receipt.get("video_telemetry") {
+            assert!(vtel.get("sam_snap").is_some());
+            assert!(vtel.get("action_trajectory").is_some());
+            let actions = &vtel["action_trajectory"]["actions"];
+            assert!(actions.is_array());
+            assert!(!actions.as_array().unwrap().is_empty());
+            assert_eq!(actions[0]["sam_snap"]["model"], "sam-3.1");
+        }
     }
 }

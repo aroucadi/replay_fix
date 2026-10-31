@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.2/action_trajectory.schema.json",
+  "title": "ActionTrajectory",
+  "type": "object",
+  "required": ["actions"],
+  "properties": {
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["t_ms", "action_type", "sam_snap"],
+        "properties": {
+          "t_ms": { "type": "integer", "minimum": 0 },
+          "action_type": { "type": "string", "enum": ["click", "input", "navigate"] },
+          "sam_snap": { "$ref": "sam_wire_response.schema.json" },
+          "narration_cue": { "$ref": "asr_event_stream.schema.json" },
+          "latency_ms": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

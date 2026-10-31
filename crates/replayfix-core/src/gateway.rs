@@ -864,6 +864,31 @@ impl MultimodalGateway {
     }
 }
 
+/// Wire request payload for Meta SAM 3.1 (`POST https://api.meta.ai/v1/responses`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SamWirePayload {
+    pub model: String,
+    pub prompt: String,
+    pub image_base64: String,
+    pub image_sha256: String,
+    pub candidate_x: i32,
+    pub candidate_y: i32,
+}
+
+/// Wire request payload for Meta Muse Voice 24 kHz ASR (`POST https://api.meta.ai/v1/asr/transcribe`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AsrPayload {
+    pub model: String,
+    pub audio_encoding: String,
+    pub sample_rate_hz: u32,
+    pub channels: u16,
+    pub mode: String,
+    pub partial_mode: String,
+    pub emit_audio_progress: bool,
+    pub audio_wav_base64: String,
+    pub audio_sha256: String,
+}
+
 /// Production HTTPS client (`reqwest` + `rustls-tls`) for outbound authenticated requests
 /// to Meta AI (`muse-spark-1.3`, `muse-wonder-1.0`, `sam-3.1`, `muse-voice-transcribe-1.0`)
 /// with fallback to `meta-llama/Llama-3.2-11B-Vision-Instruct` and `meta-llama/Llama-3.3-70B-Instruct`.
@@ -1163,6 +1188,109 @@ impl MetaGatewayClient {
             fallback_triggered,
             request_fingerprint_sha256: fingerprint,
         })
+    }
+
+    /// Dispatch a keyframe PNG crop around `(cand_x, cand_y)` to `POST https://api.meta.ai/v1/responses`
+    /// with model `sam-3.1` and return `(wire_tokens_output, latency_ms)`.
+    pub fn segment_keyframe_sam31(
+        &self,
+        png_bytes: &[u8],
+        cand_x: i32,
+        cand_y: i32,
+    ) -> Result<(String, u64)> {
+        if png_bytes.is_empty() {
+            return Err(CoreError::Grounding(
+                "AMBIGUOUS_GROUNDING: cannot segment empty keyframe PNG buffer".to_string(),
+            ));
+        }
+        let img_sha = sha256_hex(png_bytes);
+        let prompt = format!(
+            "Segment the interactive UI element near video coordinate ({cand_x}, {cand_y}) and emit <|box;x1=...;y1=...;x2=...;y2=...|><|mask;...|> tokens."
+        );
+        let req = GatewayRequest {
+            role: ModelRole::SpatialSegmentation,
+            requested_model: "sam-3.1".to_string(),
+            prompt,
+            reasoning_effort: None,
+            estimated_tokens: 256,
+            include_audio: false,
+            audio_wav_bytes: None,
+            image_sha256: Some(img_sha),
+        };
+        let resp = self.send_live_https_with_image(&req, Some(png_bytes), None)?;
+        Ok((resp.output_text, resp.latency_ms))
+    }
+
+    /// Resolve the dedicated ASR transcription endpoint URL (`POST /v1/asr/transcribe`).
+    #[must_use]
+    pub fn asr_endpoint_url(&self) -> String {
+        if let Some(prefix) = self.base_url.strip_suffix("/responses") {
+            format!("{prefix}/asr/transcribe")
+        } else {
+            crate::perception::ASR_TRANSCRIBE_ENDPOINT.to_string()
+        }
+    }
+
+    /// Stream 24 kHz mono 16-bit PCM WAV audio to `POST /v1/asr/transcribe` with model
+    /// `muse-voice-transcribe-1.0`, parse `audioProcessedMs`, and return a temporally aligned `NarrationCue`.
+    pub fn transcribe_audio_wav(
+        &self,
+        wav_bytes: &[u8],
+    ) -> Result<crate::perception::NarrationCue> {
+        let wav_meta = validate_wav_audio(wav_bytes)?;
+        if !wav_meta.is_24khz_mono {
+            return Err(CoreError::Verification(format!(
+                "muse-voice-transcribe-1.0 requires 24000 Hz 16-bit mono PCM WAV (got {} Hz, {} ch, {} bit)",
+                wav_meta.sample_rate_hz, wav_meta.channels, wav_meta.bits_per_sample
+            )));
+        }
+        let api_key = self.require_live_auth()?;
+        let asr_cfg = crate::perception::AsrRequestConfig::default();
+        crate::perception::AsrTranscriber::validate_config(&asr_cfg)?;
+
+        let payload = AsrPayload {
+            model: asr_cfg.model.clone(),
+            audio_encoding: asr_cfg.audio_encoding.clone(),
+            sample_rate_hz: asr_cfg.sample_rate_hz,
+            channels: u16::from(asr_cfg.channels),
+            mode: asr_cfg.mode.clone(),
+            partial_mode: asr_cfg.partial_mode.clone(),
+            emit_audio_progress: asr_cfg.emit_audio_progress,
+            audio_wav_base64: Self::encode_base64(wav_bytes),
+            audio_sha256: wav_meta.sha256,
+        };
+
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
+            .timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+            .build()
+            .map_err(|e| {
+                CoreError::ModelApiError(format!(
+                    "Failed to build rustls HTTPS client for ASR: {e}"
+                ))
+            })?;
+
+        let url = self.asr_endpoint_url();
+        let resp = http_client
+            .post(&url)
+            .bearer_auth(api_key)
+            .json(&payload)
+            .send()
+            .map_err(|e| {
+                let safe_err = self.config.redact_secrets(&e.to_string());
+                CoreError::ModelApiError(format!("Live ASR transport error from {url}: {safe_err}"))
+            })?;
+
+        let status = resp.status().as_u16();
+        let body_text = resp.text().unwrap_or_default();
+        if status != 200 {
+            let safe_body = self.config.redact_secrets(&body_text);
+            return Err(CoreError::ModelApiError(format!(
+                "GATEWAY_ASR_FAILED: HTTP {status} from {url}: {safe_body}"
+            )));
+        }
+
+        crate::perception::AsrTranscriber::parse_asr_events(&asr_cfg, &body_text)
     }
 }
 
