@@ -55,7 +55,7 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "model": { "type": "string", "const": "sam-3.1" },
+        "model": { "type": "string", "enum": ["sam-3.1", "local_diff_heuristic"] },
         "wire_token": { "type": "string", "minLength": 1 },
         "box_x1": { "type": "integer" },
         "box_y1": { "type": "integer" },
@@ -82,7 +82,7 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "model": { "type": "string", "const": "muse-voice-transcribe-1.0" },
+        "model": { "type": "string", "enum": ["muse-voice-transcribe-1.0", "simulated_fixture", "local_heuristic"] },
         "transcript": { "type": "string" },
         "audio_processed_ms": { "type": "integer", "minimum": 0 },
         "aligned_video_time_ms": { "type": "integer", "minimum": 0 },

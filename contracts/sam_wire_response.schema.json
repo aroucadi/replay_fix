@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["model", "wire_token", "box_x1", "box_y1", "box_x2", "box_y2", "centroid_x_video", "centroid_y_video", "calibrated_x_css", "calibrated_y_css"],
   "properties": {
-    "model": { "type": "string", "const": "sam-3.1" },
+    "model": { "type": "string", "enum": ["sam-3.1", "local_diff_heuristic"] },
     "wire_token": { "type": "string", "pattern": "^<\\|box;x1=[0-9]+;y1=[0-9]+;x2=[0-9]+;y2=[0-9]+\\|>" },
     "box_x1": { "type": "integer", "minimum": 0 },
     "box_y1": { "type": "integer", "minimum": 0 },

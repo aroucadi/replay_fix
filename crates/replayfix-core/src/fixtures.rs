@@ -184,17 +184,14 @@ const RF01_INDEX_HTML: &str = r#"<!DOCTYPE html>
   <main>
     <h1>Shopping Cart</h1>
     <button id="refresh-cart-btn" data-testid="cart-refresh-btn" style="position:fixed;left:100px;top:100px;width:120px;height:40px;">Refresh Cart</button>
-    <button id="btn-publish-quote" data-testid="btn-publish-quote" style="position:fixed;left:470px;top:350px;width:130px;height:45px;">Publish Quote</button>
     <div id="cart-summary-output" data-testid="cart-summary-output">Pending</div>
   </main>
   <script type="module">
     import { cartItemCount } from './src/cart-summary.js';
-    const trigger = () => {
+    document.getElementById('refresh-cart-btn').addEventListener('click', () => {
       const count = cartItemCount({});
       document.getElementById('cart-summary-output').textContent = 'Items: ' + count;
-    };
-    document.getElementById('refresh-cart-btn')?.addEventListener('click', trigger);
-    document.getElementById('btn-publish-quote')?.addEventListener('click', trigger);
+    });
   </script>
 </body>
 </html>
@@ -331,6 +328,37 @@ impl Fixture {
             "RF-04" => Some(Self::rf04()),
             "RF-05" => Some(Self::rf05()),
             _ => None,
+        }
+    }
+
+    /// Resolve fixture for a task id, detecting if `repo_path` is an authentic MetaPulse checkout.
+    pub fn for_task_in_repo(task_id: &str, repo_path: &Path) -> Option<Fixture> {
+        if repo_path.join("public/app.js").exists() && task_id == "RF-01" {
+            return Some(Self::metapulse_rf01());
+        }
+        Self::for_task(task_id)
+    }
+
+    fn metapulse_rf01() -> Fixture {
+        Fixture {
+            task_id: "RF-01",
+            target_path: "public/app.js",
+            buggy_source: "async function handlePublishQuote() {\n  let session;\n  console.log(session.currentUser.profileId);\n}\n",
+            builtin_diff: "--- a/public/app.js\n+++ b/public/app.js\n@@ -226,3 +226,3 @@\n   const comment = elements.quoteCommentInput.value;\n-  let session;\n+  let session = { currentUser: { profileId: 'default' } };\n   console.log(\"Processing quote repost with profile:\", session.currentUser.profileId);\n",
+            index_html: "<!DOCTYPE html><html><body><button id=\"btn-publish-quote\">Publish Quote</button></body></html>",
+            click_x: 532,
+            click_y: 374,
+            viewport_width: 1280,
+            viewport_height: 720,
+            expected_output_text: "Quote Published",
+            contract: BehavioralContract {
+                contract_id: "RF-01-quote-repost".to_string(),
+                task_id: "RF-01".to_string(),
+                setup: "open the quote repost modal".to_string(),
+                target: "handlePublishQuote".to_string(),
+                action: "click publish quote button".to_string(),
+                postcondition_id: "publishes-quote-without-throwing".to_string(),
+            },
         }
     }
 

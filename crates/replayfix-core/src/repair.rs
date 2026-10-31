@@ -1354,12 +1354,22 @@ impl RepairClientMode {
 #[derive(Debug, Clone)]
 pub struct BoundedRepairClient {
     pub mode: RepairClientMode,
+    pub gateway: Option<crate::gateway::MetaGatewayClient>,
 }
 
 impl BoundedRepairClient {
     #[must_use]
     pub const fn new(mode: RepairClientMode) -> Self {
-        Self { mode }
+        Self {
+            mode,
+            gateway: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_gateway(mut self, gateway: crate::gateway::MetaGatewayClient) -> Self {
+        self.gateway = Some(gateway);
+        self
     }
 
     /// Generate a candidate repair response for `request`.
@@ -1379,8 +1389,12 @@ impl BoundedRepairClient {
         }
 
         if self.mode == RepairClientMode::LiveEndpoint {
-            let gateway_cfg = crate::gateway::GatewayConfig::default();
-            let gateway_client = crate::gateway::MetaGatewayClient::new(gateway_cfg);
+            let gateway_client = match &self.gateway {
+                Some(gw) => gw.clone(),
+                None => {
+                    crate::gateway::MetaGatewayClient::new(crate::gateway::GatewayConfig::default())
+                }
+            };
             gateway_client.require_live_auth()?;
 
             let prompt = format!(
@@ -1668,7 +1682,13 @@ impl ModelPool {
                         }
                         let task_start = std::time::Instant::now();
                         let mut config = MuseModelConfig::new(model_slug.as_str(), None).ok()?;
-                        let client = BoundedRepairClient::new(client_mode);
+                        let mut client = BoundedRepairClient::new(client_mode);
+                        if client_mode == RepairClientMode::LiveEndpoint {
+                            let gw = crate::gateway::MetaGatewayClient::new(
+                                crate::gateway::GatewayConfig::default(),
+                            );
+                            client = client.with_gateway(gw);
+                        }
                         let user_prompt = PromptBuilder::build_user_prompt(
                             task_id,
                             target_path,

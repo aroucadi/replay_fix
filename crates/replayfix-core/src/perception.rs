@@ -367,12 +367,14 @@ impl SamSegmenter {
             mask_rle: Some(format!("rle:{active_pixels}:{}x{}", x2 - x1, y2 - y1)),
         };
 
-        Self::snap_to_centroid(
+        let mut snap = Self::snap_to_centroid(
             candidate_video.0,
             candidate_video.1,
             &[contour],
             calibration,
-        )
+        )?;
+        snap.model = "local_diff_heuristic".to_string();
+        Ok(snap)
     }
 
     /// Segment keyframe PNG crop using live Meta SAM 3.1 HTTPS API (`POST https://api.meta.ai/v1/responses`).
@@ -457,9 +459,12 @@ impl AsrTranscriber {
                 "Audio routing to '{model_slug}' is strictly prohibited (documented muse-spark-1.3 audio degradation flaw); use '{ASR_MODEL_SLUG}'"
             )));
         }
-        if normalized != ASR_MODEL_SLUG {
+        if normalized != ASR_MODEL_SLUG
+            && normalized != "simulated_fixture"
+            && normalized != "local_heuristic"
+        {
             return Err(CoreError::Manifest(format!(
-                "Unsupported ASR model '{model_slug}': expected '{ASR_MODEL_SLUG}'"
+                "Unsupported ASR model '{model_slug}': expected '{ASR_MODEL_SLUG}', 'simulated_fixture', or 'local_heuristic'"
             )));
         }
         Ok(())
@@ -596,7 +601,10 @@ impl AsrTranscriber {
         let Some(wav) = wav_bytes else {
             return Ok(None);
         };
-        let config = AsrRequestConfig::default();
+        let config = AsrRequestConfig {
+            model: "simulated_fixture".to_string(),
+            ..Default::default()
+        };
         Self::validate_config(&config)?;
 
         if wav.len() < 44 || &wav[..4] != b"RIFF" {
@@ -917,7 +925,7 @@ data: [DONE]\n";
         VideoPreprocessor::synthesize_demo_video(&mp4_path).unwrap();
         let telemetry = VideoTelemetry::ingest(&mp4_path, &kf_dir, (1280, 720), "RF-01").unwrap();
 
-        assert_eq!(telemetry.sam_snap.model, "sam-3.1");
+        assert_eq!(telemetry.sam_snap.model, "local_diff_heuristic");
         assert_eq!(
             (
                 telemetry.sam_snap.calibrated_x_css,
@@ -927,7 +935,7 @@ data: [DONE]\n";
         );
         assert_eq!(telemetry.keyframe_paths.len(), 1);
         let cue = telemetry.narration.expect("narration aligned");
-        assert_eq!(cue.model, "muse-voice-transcribe-1.0");
+        assert_eq!(cue.model, "simulated_fixture");
         assert_eq!(cue.audio_processed_ms, telemetry.interaction.t_ms);
         assert_eq!(cue.transcript, "I clicked Refresh Cart on RF-01 here");
         assert!(telemetry.action_trajectory.is_some());

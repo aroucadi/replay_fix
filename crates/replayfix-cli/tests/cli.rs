@@ -383,7 +383,10 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     assert_eq!(receipt["schema_version"], "0.9");
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert_eq!(receipt["substrate"], "playwright-cdp");
-    assert_eq!(receipt["video_telemetry"]["sam_snap"]["model"], "sam-3.1");
+    assert_eq!(
+        receipt["video_telemetry"]["sam_snap"]["model"],
+        "local_diff_heuristic"
+    );
     assert_eq!(
         receipt["video_telemetry"]["sam_snap"]["calibrated_x_css"],
         160
@@ -394,7 +397,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     );
     assert_eq!(
         receipt["video_telemetry"]["narration"]["model"],
-        "muse-voice-transcribe-1.0"
+        "simulated_fixture"
     );
     let keyframes = receipt["video_telemetry"]["keyframe_paths"]
         .as_array()
@@ -1146,25 +1149,14 @@ fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
         let receipt = json(&dir.join(&out_sub).join("audit_receipt.json"));
         assert_eq!(receipt["task_id"], bug_id);
         assert_eq!(receipt["provenance"], "deterministic-fixture");
-        assert_eq!(
-            receipt["model_provenance"]["execution_mode"],
-            "deterministic-fixture"
-        );
-        assert_eq!(
-            receipt["model_provenance"]["model_intent"],
-            "muse-spark-1.3"
-        );
-        assert_eq!(
-            receipt["model_provenance"]["model_repair"],
-            "muse-wonder-1.0"
-        );
+        assert!(receipt.get("model_provenance").is_none() || receipt["model_provenance"].is_null());
         if let Some(vtel) = receipt.get("video_telemetry") {
             assert!(vtel.get("sam_snap").is_some());
             assert!(vtel.get("action_trajectory").is_some());
             let actions = &vtel["action_trajectory"]["actions"];
             assert!(actions.is_array());
             assert!(!actions.as_array().unwrap().is_empty());
-            assert_eq!(actions[0]["sam_snap"]["model"], "sam-3.1");
+            assert_eq!(actions[0]["sam_snap"]["model"], "local_diff_heuristic");
         }
     }
 }

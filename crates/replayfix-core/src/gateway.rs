@@ -146,6 +146,31 @@ pub struct GatewayConfig {
     pub circuit_cooldown_ms: u64,
 }
 
+fn parse_dotenv_var(path: &std::path::Path, var_name: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").map_or(line, str::trim);
+        if let Some((k, v)) = line.split_once('=') {
+            if k.trim().eq_ignore_ascii_case(var_name) {
+                let mut val = v.trim();
+                if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
+                    || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
+                {
+                    val = &val[1..val.len() - 1];
+                }
+                if !val.trim().is_empty() {
+                    return Some(val.trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn resolve_env_key(var_name: &str) -> Option<String> {
     if std::env::var("REPLAYFIX_TEST_NO_REG").is_ok() {
         return std::env::var(var_name)
@@ -157,20 +182,39 @@ pub fn resolve_env_key(var_name: &str) -> Option<String> {
             return Some(val);
         }
     }
+    // Check .env in current working directory and up to 3 parent directories
+    if let Ok(mut dir) = std::env::current_dir() {
+        for _ in 0..4 {
+            let env_path = dir.join(".env");
+            if env_path.is_file() {
+                if let Some(val) = parse_dotenv_var(&env_path, var_name) {
+                    return Some(val);
+                }
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
     #[cfg(windows)]
     {
-        if let Ok(output) = std::process::Command::new("reg")
-            .args(["query", "HKCU\\Environment", "/v", var_name])
-            .output()
-        {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 3 && parts[0].eq_ignore_ascii_case(var_name) {
-                        let key_val = parts[2..].join(" ");
-                        if !key_val.trim().is_empty() {
-                            return Some(key_val.trim().to_string());
+        for hive in [
+            "HKCU\\Environment",
+            "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+        ] {
+            if let Ok(output) = std::process::Command::new("reg")
+                .args(["query", hive, "/v", var_name])
+                .output()
+            {
+                if output.status.success() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 3 && parts[0].eq_ignore_ascii_case(var_name) {
+                            let key_val = parts[2..].join(" ");
+                            if !key_val.trim().is_empty() {
+                                return Some(key_val.trim().to_string());
+                            }
                         }
                     }
                 }
@@ -1232,8 +1276,14 @@ impl MetaGatewayClient {
             .get("usage")
             .and_then(|u| {
                 u.get("cached_tokens")
-                    .or_else(|| u.get("input_tokens_details").and_then(|d| d.get("cached_tokens")))
-                    .or_else(|| u.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")))
+                    .or_else(|| {
+                        u.get("input_tokens_details")
+                            .and_then(|d| d.get("cached_tokens"))
+                    })
+                    .or_else(|| {
+                        u.get("prompt_tokens_details")
+                            .and_then(|d| d.get("cached_tokens"))
+                    })
             })
             .and_then(|v| v.as_u64())
             .unwrap_or(0);

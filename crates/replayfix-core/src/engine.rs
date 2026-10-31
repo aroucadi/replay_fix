@@ -832,7 +832,12 @@ impl MockHealer {
     where
         F: FnMut(&ScratchSandbox) -> Result<(bool, Vec<OracleEvent>)>,
     {
-        let client = BoundedRepairClient::new(client_mode);
+        let mut client = BoundedRepairClient::new(client_mode);
+        if client_mode == RepairClientMode::LiveEndpoint {
+            let gw =
+                crate::gateway::MetaGatewayClient::new(crate::gateway::GatewayConfig::default());
+            client = client.with_gateway(gw);
+        }
         let loop_started = Instant::now();
         let mut previous_response_id: Option<String> = None;
         let mut encrypted_content: Option<String> = None;

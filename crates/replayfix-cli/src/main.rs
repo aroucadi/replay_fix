@@ -789,7 +789,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     } else {
         "--mock-heal"
     };
-    let fixture = Fixture::for_task(&m.task_id).unwrap_or_else(|| {
+    let fixture = Fixture::for_task_in_repo(&m.task_id, &repo_dir).unwrap_or_else(|| {
         usage_error(
             &format!(
                 "{mode_flag} has no built-in fixture for task '{}'. Supported tasks: {}",
@@ -925,22 +925,21 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 });
 
                 if mode_str == "deterministic-fixture" {
-                    if receipt.disclaimer.contains("no model was involved") {
-                        receipt.disclaimer = format!(
-                            "Deterministic fixture replay: offline gates verified against calibrated fixture. Zero live external AI tokens billed (offline simulated profiles: intent={intent}, repair={repair})."
-                        );
-                    }
+                    receipt.provenance = Some("deterministic-fixture".to_string());
+                    receipt.model_provenance = None;
+                    receipt.disclaimer =
+                        "Deterministic fixture replay: offline gates verified against calibrated fixture. Zero live external AI tokens billed.".to_string();
                 } else if mode_str == "live-ai" {
+                    receipt.provenance = Some("live-ai".to_string());
                     receipt.disclaimer = format!(
                         "Live AI verification: gates verified with authenticated Meta AI models (intent={intent}, repair={repair})."
                     );
+                    receipt.model_provenance = Some(ModelProvenanceRecord {
+                        execution_mode: mode_str,
+                        model_intent: intent,
+                        model_repair: repair,
+                    });
                 }
-
-                receipt.model_provenance = Some(ModelProvenanceRecord {
-                    execution_mode: mode_str,
-                    model_intent: intent,
-                    model_repair: repair,
-                });
             }
             write_artifact(&out_dir, |dir| {
                 receipt.write_disaggregated_artifacts(dir, Some(&diff), None)
