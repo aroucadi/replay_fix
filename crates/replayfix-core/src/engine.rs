@@ -767,6 +767,8 @@ impl MockHealer {
             task_id: task_id.to_string(),
             substrate: SUBSTRATE_LIVE_BROWSER.to_string(),
             disclaimer: DISCLAIMER_LIVE_BROWSER.to_string(),
+            provenance: None,
+            model_provenance: None,
             contract_id: fixture.contract.contract_id.clone(),
             contract_sha256: contract_sha256.clone(),
             gate1: GateRecord {
@@ -1533,6 +1535,8 @@ impl MockHealer {
             task_id: task_id.to_string(),
             substrate: SUBSTRATE.to_string(),
             disclaimer: DISCLAIMER.to_string(),
+            provenance: None,
+            model_provenance: None,
             contract_id: fixture.contract.contract_id.clone(),
             contract_sha256: contract_sha256.clone(),
             gate1: GateRecord {

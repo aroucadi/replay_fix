@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.1/gateway_response.json",
+  "title": "MetaGatewayResponse",
+  "type": "object",
+  "required": ["provider", "provenance", "requested_model", "serving_model", "output_text", "input_tokens", "output_tokens", "latency_ms"],
+  "properties": {
+    "provider": { "type": "string" },
+    "provenance": { "type": "string", "enum": ["live-ai", "deterministic-fixture"] },
+    "requested_model": { "type": "string" },
+    "serving_model": { "type": "string" },
+    "output_text": { "type": "string" },
+    "input_tokens": { "type": "integer", "minimum": 0 },
+    "output_tokens": { "type": "integer", "minimum": 0 },
+    "cached_tokens": { "type": "integer", "minimum": 0 },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "fallback_triggered": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

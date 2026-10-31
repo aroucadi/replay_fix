@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.1/gateway_request.json",
+  "title": "MetaGatewayRequest",
+  "type": "object",
+  "required": ["model", "role", "system_prompt", "untrusted_dom_context", "max_tokens"],
+  "properties": {
+    "model": { "type": "string" },
+    "fallback_model": { "type": ["string", "null"] },
+    "role": { "type": "string", "enum": ["deep_reasoning", "fast_synthesis", "spatial_segmentation", "speech_transcription"] },
+    "system_prompt": { "type": "string" },
+    "untrusted_dom_context": { "type": "string", "description": "XML-escaped untrusted DOM/console context wrapped in <UNTRUSTED_DOM_CONTEXT> tags" },
+    "max_tokens": { "type": "integer", "minimum": 1 },
+    "temperature": { "type": "number", "minimum": 0 },
+    "include_audio": { "type": "boolean", "const": false }
+  },
+  "additionalProperties": false
+}

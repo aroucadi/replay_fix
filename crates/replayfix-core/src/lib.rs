@@ -57,18 +57,22 @@ pub use engine::{
     OracleEventKind,
 };
 pub use error::{CoreError, Result};
-pub use fixtures::Fixture;
+pub use fixtures::{
+    Fixture, MetaPulseCaseRecord, MetaPulseManifest, MetaPulseRepoRunner, METAPULSE_REPO_URL,
+};
 pub use fsm::{
     CausalConfidence, DifferentialDiagnosisReport, DifferentialMatrix, DifferentialState, Phase,
     PhaseMachine, ReproExecutionResult,
 };
 pub use gateway::{
-    align_transcript_with_keyframes, validate_wav_audio, CircuitBreaker, CircuitState,
-    GatewayConfig, GatewayProvenance, GatewayProvider, GatewayRequest, GatewayResponse,
-    KeyframeAlignment, ModelRole, MultimodalGateway, RatePool, TranscriptSegment, TransportOutcome,
-    WavAudioMetadata, BASETEN_FALLBACK_ENDPOINT, BASETEN_MUSE_SPARK_OPEN_SLUG,
-    DEFAULT_ALIGNMENT_TOLERANCE_MS, DEFAULT_CIRCUIT_COOLDOWN_MS, DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
-    DEFAULT_GATEWAY_TIMEOUT_MS, DEFAULT_MAX_RETRIES, MAX_AUDIO_DURATION_MS,
+    align_transcript_with_keyframes, escape_untrusted_dom_context, validate_wav_audio,
+    CircuitBreaker, CircuitState, ExecutionMode, GatewayConfig, GatewayProvenance, GatewayProvider,
+    GatewayRequest, GatewayResponse, KeyframeAlignment, MetaGatewayClient, ModelRole,
+    MultimodalGateway, RatePool, TranscriptSegment, TransportOutcome, WavAudioMetadata,
+    BASETEN_FALLBACK_ENDPOINT, BASETEN_MUSE_SPARK_OPEN_SLUG, DEFAULT_ALIGNMENT_TOLERANCE_MS,
+    DEFAULT_CIRCUIT_COOLDOWN_MS, DEFAULT_CIRCUIT_FAILURE_THRESHOLD, DEFAULT_GATEWAY_TIMEOUT_MS,
+    DEFAULT_MAX_RETRIES, LLAMA_32_11B_VISION_FALLBACK_SLUG, LLAMA_33_70B_FALLBACK_SLUG,
+    MAX_AUDIO_DURATION_MS, META_CONNECT_TIMEOUT_SECS, META_READ_TIMEOUT_SECS,
     META_RESPONSES_ENDPOINT,
 };
 pub use ingestion::{
@@ -92,7 +96,8 @@ pub use portal::{
     MAX_PORTAL_RECEIPT_BYTES,
 };
 pub use receipt::{
-    AuditReceipt, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE, TRIAGE_REPORT_FILE,
+    AuditReceipt, ModelProvenanceRecord, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE,
+    TRIAGE_REPORT_FILE,
 };
 pub use regression::{RegressionEvaluator, RegressionParityReport, TestStatus, TestSuiteSnapshot};
 pub use repair::{

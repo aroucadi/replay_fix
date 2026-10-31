@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-10-30
+
+**Spec 110 — Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI HTTPS Gateway & Dual Execution Modes**: Migrated all 20 real MetaPulse `.mp4` cursor recordings (`RF-01` through `RF-20`) with immutable `benchmarks/metapulse/MANIFEST.json`, added `MetaGatewayClient` (`reqwest` + `rustls-tls`, 30s connect / 90s read timeouts, `<UNTRUSTED_DOM_CONTEXT>` escaping, Llama-3.2/3.3 fallbacks), exposed `--mode <live-ai | deterministic-fixture>`, `--model-intent`, and `--model-repair` CLI flags, and generated the Option B real MetaPulse demonstration video in `release/v1.1.0/`. Full notes: [docs/release-notes/v1.1.0.md](docs/release-notes/v1.1.0.md).
+
+### Added
+- **20-Bug MetaPulse Benchmark Suite (`benchmarks/metapulse/`, `replayfix-core::fixtures`)**:
+  - 20 real `.mp4` cursor defect recordings (`RF-01`..`RF-20`), `BENCHMARK_METADATA.md`, `MANIFEST.json` with SHA-256 verification (`MetaPulseManifest::verify_all_videos`), and `MetaPulseRepoRunner` (`https://github.com/aroucadi/MetaPulse.git`).
+- **Production HTTPS `MetaGatewayClient` (`replayfix-core::gateway`)**:
+  - Pure-Rust TLS (`reqwest` + `rustls-tls`) client with 30s connect / 90s read timeouts, `META_API_KEY` / `REPLAYFIX_AI_KEY` Bearer auth, HTTP 429/503 exponential backoff, `<UNTRUSTED_DOM_CONTEXT>` XML escaping, and fallback routing to `meta-llama/Llama-3.2-11B-Vision-Instruct` and `meta-llama/Llama-3.3-70B-Instruct`.
+- **Dual Execution Modes (`replayfix-cli`, `replayfix-core::receipt`)**:
+  - Added `--mode <live-ai | deterministic-fixture>`, `--model-intent`, and `--model-repair`, failing closed with Exit Code `30` (`ERR_GATEWAY_AUTH_MISSING`) when `live-ai` is invoked without credentials, and recording `provenance` and `model_provenance` in `audit_receipt.json`.
+
+---
+
 ## [1.0.0] - 2026-10-30
 
 **Grand Finale — Final Production Release & Hackathon Submission (`Spec 100`)**: Optimized LTO production Rust binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode code signing and verification, synchronized 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) with `demo-evidence-manifest.json` and WebVTT captions, updated comprehensive documentation (`README.md`), and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package. Full notes: [docs/release-notes/v1.0.0.md](docs/release-notes/v1.0.0.md).

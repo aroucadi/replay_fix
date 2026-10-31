@@ -1,0 +1,188 @@
+{
+  "schema_version": "1.1",
+  "benchmark_suite": "MetaPulse-20",
+  "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+  "total_cases": 20,
+  "cases": [
+    {
+      "bug_id": "RF-01",
+      "title": "Quote Repost fails with TypeError: quoteContext is undefined",
+      "target_branch": "bug/RF-01",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4",
+      "size_bytes": 260287,
+      "sha256": "881f71b9111e57c514e8130d166315d080a39c0c1d0f0e40badcab3a52c5a129"
+    },
+    {
+      "bug_id": "RF-02",
+      "title": "Follow button double-increments follower counter on rapid click",
+      "target_branch": "bug/RF-02",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-02_stale_follower_increment.mp4",
+      "size_bytes": 140207,
+      "sha256": "9faad5fd4173a4644c2c73ce9449822b083d93f7b31f0de81f6a38b2720f852c"
+    },
+    {
+      "bug_id": "RF-03",
+      "title": "Character counter underflows into negative numbers and allows submission",
+      "target_branch": "bug/RF-03",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-03_character_counter_underflow.mp4",
+      "size_bytes": 65320,
+      "sha256": "89c5cc516ce74061e2cd2f832054dd9b535fadd558b9a687ff3ad2ff0fcd65a9"
+    },
+    {
+      "bug_id": "RF-04",
+      "title": "Draft state lost on modal backdrop click without confirmation",
+      "target_branch": "bug/RF-04",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-04_draft_state_loss.mp4",
+      "size_bytes": 198166,
+      "sha256": "17b032dc9a7104e86748f6fdff2931fb31b2e4ef15e8662d69a26146b4688e90"
+    },
+    {
+      "bug_id": "RF-05",
+      "title": "Rapid like click causes optimistic counter race condition desync",
+      "target_branch": "bug/RF-05",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-05_like_race_condition_desync.mp4",
+      "size_bytes": 124510,
+      "sha256": "bd8295c18e16c12e87294e94351caaa6362bcbace54989a9a7ea6355e132fd25"
+    },
+    {
+      "bug_id": "RF-06",
+      "title": "Whitespace-only thread content passes validation and gets published",
+      "target_branch": "bug/RF-06",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-06_whitespace_only_thread.mp4",
+      "size_bytes": 143969,
+      "sha256": "3f4d89a180da3782a6fa32880df7d35c266bd485466ba1b9b6733de7df024d3d"
+    },
+    {
+      "bug_id": "RF-07",
+      "title": "Profile bio length validation checks raw HTML string instead of text",
+      "target_branch": "bug/RF-07",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-07_bio_length_raw_html_bypass.mp4",
+      "size_bytes": 66617,
+      "sha256": "d8b5a1da8a4b2cde70ae75d87838c03e79405e7e6955e2c5019fc12e069dc378"
+    },
+    {
+      "bug_id": "RF-08",
+      "title": "Disabled Post button remains stuck disabled after correcting input",
+      "target_branch": "bug/RF-08",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-08_disabled_post_button_stuck.mp4",
+      "size_bytes": 129553,
+      "sha256": "4507ce4f6415cf73ab8c174dc8a732fff617092a08487e2e3f8e2f1eb6ba0e39"
+    },
+    {
+      "bug_id": "RF-09",
+      "title": "Search bar crashes client filter when entering regex special characters",
+      "target_branch": "bug/RF-09",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-09_search_regex_break.mp4",
+      "size_bytes": 151994,
+      "sha256": "b827ddbb950cbd466e759fe2576c7bc02ed9a0bb3905dbd455db562dae864c53"
+    },
+    {
+      "bug_id": "RF-10",
+      "title": "Category filter dropdown resets to \"All\" upon pagination or submit error",
+      "target_branch": "bug/RF-10",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-10_category_dropdown_reset.mp4",
+      "size_bytes": 153603,
+      "sha256": "80ebd2bea04db386d9b27d344ea502bef71674749fc8d36013a7bcba4b3c0c4b"
+    },
+    {
+      "bug_id": "RF-11",
+      "title": "Stale tab switch closure leaks old tab scroll listeners",
+      "target_branch": "bug/RF-11",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-11_stale_tab_switch_closure.mp4",
+      "size_bytes": 105843,
+      "sha256": "09f8a9d5e07637ea1189592010add37199553595015d377c21e5d3d6acc72096"
+    },
+    {
+      "bug_id": "RF-12",
+      "title": "Bookmark button missing await causes UI state reversion on refresh",
+      "target_branch": "bug/RF-12",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-12_missing_await_bookmark_desync.mp4",
+      "size_bytes": 99034,
+      "sha256": "e6604643a885b9519a5611abd184e4e40d79e603b4ef1f600cf41fe6ee1e925f"
+    },
+    {
+      "bug_id": "RF-13",
+      "title": "Unhandled 500 error leaves loading skeleton spinner running indefinitely",
+      "target_branch": "bug/RF-13",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-13_unhandled_500_spinner_hang.mp4",
+      "size_bytes": 150021,
+      "sha256": "eefd523ecf7884b91a0f6d905682582f751e15ab2f1f7830c08541c1b72eb4ea"
+    },
+    {
+      "bug_id": "RF-14",
+      "title": "Typeahead search race condition: slow response overwrites newer results",
+      "target_branch": "bug/RF-14",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-14_search_race_condition.mp4",
+      "size_bytes": 138173,
+      "sha256": "70387bdd018208483e8c6304b43a2859905f64619db680165042ea0eb511f013"
+    },
+    {
+      "bug_id": "RF-15",
+      "title": "Session expiry during reply composition silently dismisses modal",
+      "target_branch": "bug/RF-15",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-15_silent_session_expiry_close.mp4",
+      "size_bytes": 190405,
+      "sha256": "decc6d5aeafc9f55fb6193cff635d376ec368df33f30063eba9666f25f4beac1"
+    },
+    {
+      "bug_id": "RF-16",
+      "title": "Modal backdrop z-index intercepts clicks intended for header actions",
+      "target_branch": "bug/RF-16",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-16_backdrop_zindex_interception.mp4",
+      "size_bytes": 84693,
+      "sha256": "c74e206071bc68e76694f09ae8e61a12f5751fa8ff26ac311a8328cd9709df5b"
+    },
+    {
+      "bug_id": "RF-17",
+      "title": "Dynamic ID selector drift prevents interaction with newly appended replies",
+      "target_branch": "bug/RF-17",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-17_dynamic_selector_drift.mp4",
+      "size_bytes": 73011,
+      "sha256": "2df7846acab5cb7ec41178b513fac0ee20bc3d7a5cb2fb2d401f2e1a8ebbcfc6"
+    },
+    {
+      "bug_id": "RF-18",
+      "title": "Thread card overflow:hidden clips action dropdown menu",
+      "target_branch": "bug/RF-18",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-18_dropdown_clipped_overflow.mp4",
+      "size_bytes": 70473,
+      "sha256": "a9133b883fb91b76b7e8def763f0ddcd5ecccdd88e7ca372c598ed98c8d3c14b"
+    },
+    {
+      "bug_id": "RF-19",
+      "title": "Accessibility focus trap escapes into background page inside composer dialog",
+      "target_branch": "bug/RF-19",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-19_focus_trap_escape.mp4",
+      "size_bytes": 113028,
+      "sha256": "4b9518fe4def57210d6395c57e255b95fc1e938346dceb9aad530c87f42e5292"
+    },
+    {
+      "bug_id": "RF-20",
+      "title": "Mobile navigation hamburger icon disappears at 768px breakpoint",
+      "target_branch": "bug/RF-20",
+      "repository_url": "https://github.com/aroucadi/MetaPulse.git",
+      "filename": "benchmarks/metapulse/videos/RF-20_mobile_hamburger_breakpoint_vanish.mp4",
+      "size_bytes": 79784,
+      "sha256": "77846989d896f559dc551aafed388b68d90f2f0781ea1b8b8a6571a5c0b26765"
+    }
+  ]
+}

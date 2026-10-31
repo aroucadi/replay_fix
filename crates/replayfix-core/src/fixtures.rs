@@ -1,6 +1,154 @@
-//! Built-in fixtures for simulated and live-browser two-gate verification.
+//! Built-in fixtures for simulated and live-browser two-gate verification,
+//! plus the 20-bug MetaPulse Benchmark Suite (`RF-01` through `RF-20`) manifest
+//! and repository branch runner.
 
+use crate::digest::sha256_hex;
 use crate::engine::BehavioralContract;
+use crate::error::{CoreError, Result};
+use crate::process::run_bounded;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+
+/// Canonical GitHub repository URL for the MetaPulse 20-bug SWE-bench application.
+pub const METAPULSE_REPO_URL: &str = "https://github.com/aroucadi/MetaPulse.git";
+
+/// Single benchmark case entry in `benchmarks/metapulse/MANIFEST.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetaPulseCaseRecord {
+    pub bug_id: String,
+    pub title: String,
+    pub target_branch: String,
+    pub repository_url: String,
+    pub filename: String,
+    pub size_bytes: usize,
+    pub sha256: String,
+}
+
+/// Immutable manifest cataloging all 20 MetaPulse benchmark recordings (`RF-01`..`RF-20`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetaPulseManifest {
+    pub schema_version: String,
+    pub benchmark_suite: String,
+    pub repository_url: String,
+    pub total_cases: usize,
+    pub cases: Vec<MetaPulseCaseRecord>,
+}
+
+impl MetaPulseManifest {
+    /// Load `benchmarks/metapulse/MANIFEST.json` relative to `repo_root`.
+    pub fn load_from_repo(repo_root: &Path) -> Result<Self> {
+        let path = repo_root.join("benchmarks/metapulse/MANIFEST.json");
+        let raw = fs::read_to_string(&path)?;
+        let manifest: Self = serde_json::from_str(&raw)?;
+        Ok(manifest)
+    }
+
+    /// Verify that all 20 benchmark `.mp4` files exist on disk, match `size_bytes`,
+    /// and hash to their recorded `sha256` digest.
+    pub fn verify_all_videos(&self, repo_root: &Path) -> Result<()> {
+        if self.total_cases != 20 || self.cases.len() != 20 {
+            return Err(CoreError::Verification(format!(
+                "Expected 20 MetaPulse benchmark cases, found {}",
+                self.cases.len()
+            )));
+        }
+        for case in &self.cases {
+            let video_path = repo_root.join(&case.filename);
+            if !video_path.exists() {
+                return Err(CoreError::Verification(format!(
+                    "Missing MetaPulse benchmark video '{}'",
+                    video_path.display()
+                )));
+            }
+            let bytes = fs::read(&video_path)?;
+            if bytes.len() != case.size_bytes {
+                return Err(CoreError::Verification(format!(
+                    "MetaPulse video '{}' size mismatch (expected {}, got {})",
+                    case.bug_id,
+                    case.size_bytes,
+                    bytes.len()
+                )));
+            }
+            let actual_sha = sha256_hex(&bytes);
+            if actual_sha != case.sha256 {
+                return Err(CoreError::Verification(format!(
+                    "MetaPulse video '{}' SHA-256 mismatch (expected {}, got {})",
+                    case.bug_id, case.sha256, actual_sha
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Look up a specific benchmark case (`RF-01`..`RF-20`).
+    #[must_use]
+    pub fn find_case(&self, bug_id: &str) -> Option<&MetaPulseCaseRecord> {
+        self.cases.iter().find(|c| c.bug_id == bug_id)
+    }
+}
+
+/// Native runner to clone or check out the real MetaPulse repository at `bug/RF-01`..`bug/RF-20`.
+#[derive(Debug, Clone)]
+pub struct MetaPulseRepoRunner {
+    pub repo_url: String,
+}
+
+impl Default for MetaPulseRepoRunner {
+    fn default() -> Self {
+        Self {
+            repo_url: METAPULSE_REPO_URL.to_string(),
+        }
+    }
+}
+
+impl MetaPulseRepoRunner {
+    /// Validate that `bug_id` is in `RF-01`..`RF-20` and return its canonical branch `bug/RF-XX`.
+    pub fn target_branch_for_bug(bug_id: &str) -> Result<String> {
+        if !Self::all_metapulse_bug_ids().contains(&bug_id) {
+            return Err(CoreError::Verification(format!(
+                "Unsupported MetaPulse bug_id '{bug_id}': expected RF-01..RF-20"
+            )));
+        }
+        Ok(format!("bug/{bug_id}"))
+    }
+
+    /// All 20 canonical MetaPulse bug IDs (`RF-01` through `RF-20`).
+    #[must_use]
+    pub const fn all_metapulse_bug_ids() -> &'static [&'static str] {
+        &[
+            "RF-01", "RF-02", "RF-03", "RF-04", "RF-05", "RF-06", "RF-07", "RF-08", "RF-09",
+            "RF-10", "RF-11", "RF-12", "RF-13", "RF-14", "RF-15", "RF-16", "RF-17", "RF-18",
+            "RF-19", "RF-20",
+        ]
+    }
+
+    /// Clone or check out `bug/<bug_id>` into `dest_dir` with a bounded timeout.
+    pub fn checkout_defect_branch(&self, bug_id: &str, dest_dir: &Path) -> Result<String> {
+        let branch = Self::target_branch_for_bug(bug_id)?;
+        let dest_str = dest_dir.to_string_lossy().to_string();
+        let mut cmd = std::process::Command::new("git");
+        cmd.args([
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            &branch,
+            "--single-branch",
+            &self.repo_url,
+            &dest_str,
+        ]);
+        let out = run_bounded(cmd, None, Duration::from_secs(60), 64 * 1024)?;
+        if out.exit_code != Some(0) {
+            return Err(CoreError::Verification(format!(
+                "git clone of {} ({}) failed: {}",
+                self.repo_url, branch, out.stderr
+            )));
+        }
+        Ok(branch)
+    }
+}
 
 /// A self-contained defect scenario: buggy source, HTML host page, click hotspot,
 /// behavioral contract, and a known-good unified diff fix.
@@ -335,5 +483,31 @@ mod tests {
         assert_eq!(f.click_x, 160);
         assert_eq!(f.click_y, 120);
         assert!(f.index_html.contains("Refresh Cart"));
+    }
+
+    #[test]
+    fn test_metapulse_20_bug_manifest_and_video_sha256_integrity() {
+        let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let manifest = MetaPulseManifest::load_from_repo(&repo_root).unwrap();
+        assert_eq!(manifest.total_cases, 20);
+        assert_eq!(manifest.cases.len(), 20);
+        manifest.verify_all_videos(&repo_root).unwrap();
+
+        let rf01 = manifest.find_case("RF-01").unwrap();
+        assert_eq!(rf01.target_branch, "bug/RF-01");
+        assert!(rf01.title.contains("Quote Repost"));
+
+        let rf20 = manifest.find_case("RF-20").unwrap();
+        assert_eq!(rf20.target_branch, "bug/RF-20");
+        assert_eq!(
+            MetaPulseRepoRunner::target_branch_for_bug("RF-15").unwrap(),
+            "bug/RF-15"
+        );
+        assert!(MetaPulseRepoRunner::target_branch_for_bug("RF-99").is_err());
     }
 }

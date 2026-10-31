@@ -48,12 +48,23 @@ pub struct PatchRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelProvenanceRecord {
+    pub execution_mode: String,
+    pub model_intent: String,
+    pub model_repair: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditReceipt {
     pub schema_version: String,
     pub status: String,
     pub task_id: String,
     pub substrate: String,
     pub disclaimer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provenance: Option<ModelProvenanceRecord>,
     pub contract_id: String,
     pub contract_sha256: String,
     pub gate1: GateRecord,
@@ -877,6 +888,8 @@ mod tests {
             task_id: "RF-01".to_string(),
             substrate: SUBSTRATE.to_string(),
             disclaimer: DISCLAIMER.to_string(),
+            provenance: None,
+            model_provenance: None,
             contract_id: "contract_rf01".to_string(),
             contract_sha256: "abcdef".to_string(),
             gate1: GateRecord {

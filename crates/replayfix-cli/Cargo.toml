@@ -1,6 +1,6 @@
 [package]
 name = "replayfix-cli"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 authors = ["ReplayFix Contributors"]
 description = "ReplayFix CLI — Deterministic verification and repair harness"
@@ -12,7 +12,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-replayfix-core = { path = "../replayfix-core", version = "1.0.0" }
+replayfix-core = { path = "../replayfix-core", version = "1.1.0" }
 tokio = { version = "1.43", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

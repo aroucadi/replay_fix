@@ -17,6 +17,59 @@ pub const BASETEN_FALLBACK_ENDPOINT: &str = "https://inference.baseten.co/v1";
 /// Canonical model slug for Baseten Muse Spark Open fallback.
 pub const BASETEN_MUSE_SPARK_OPEN_SLUG: &str = "meta-models/muse-spark-open";
 
+/// Fallback vision model slug for `muse-spark-1.3` intent perception.
+pub const LLAMA_32_11B_VISION_FALLBACK_SLUG: &str = "meta-llama/Llama-3.2-11B-Vision-Instruct";
+
+/// Fallback code repair model slug for `muse-wonder-1.0` surgical patch synthesis.
+pub const LLAMA_33_70B_FALLBACK_SLUG: &str = "meta-llama/Llama-3.3-70B-Instruct";
+
+/// Production HTTPS connect timeout in seconds (30s).
+pub const META_CONNECT_TIMEOUT_SECS: u64 = 30;
+
+/// Production HTTPS read/response timeout in seconds (90s).
+pub const META_READ_TIMEOUT_SECS: u64 = 90;
+
+/// Honest execution mode selected via `--mode <live-ai | deterministic-fixture>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExecutionMode {
+    LiveAi,
+    DeterministicFixture,
+}
+
+impl ExecutionMode {
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw.trim() {
+            "live-ai" => Ok(Self::LiveAi),
+            "deterministic-fixture" => Ok(Self::DeterministicFixture),
+            other => Err(CoreError::Verification(format!(
+                "Invalid --mode '{other}': expected 'live-ai' or 'deterministic-fixture'"
+            ))),
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LiveAi => "live-ai",
+            Self::DeterministicFixture => "deterministic-fixture",
+        }
+    }
+}
+
+/// Escape untrusted DOM/application strings and wrap them in `<UNTRUSTED_DOM_CONTEXT>` tags
+/// so adversarial page content cannot break out of XML prompt fences.
+#[must_use]
+pub fn escape_untrusted_dom_context(raw_dom: &str) -> String {
+    let escaped = raw_dom
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;");
+    format!("<UNTRUSTED_DOM_CONTEXT>\n{escaped}\n</UNTRUSTED_DOM_CONTEXT>")
+}
+
 /// Default per-request timeout in milliseconds (15 seconds).
 pub const DEFAULT_GATEWAY_TIMEOUT_MS: u64 = 15_000;
 
@@ -95,12 +148,18 @@ pub struct GatewayConfig {
 
 impl Default for GatewayConfig {
     fn default() -> Self {
+        let resolved_meta_key = std::env::var("META_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                std::env::var("REPLAYFIX_AI_KEY")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+            });
         Self {
             meta_endpoint_url: META_RESPONSES_ENDPOINT.to_string(),
             baseten_fallback_url: BASETEN_FALLBACK_ENDPOINT.to_string(),
-            meta_api_key: std::env::var("META_API_KEY")
-                .ok()
-                .filter(|s| !s.trim().is_empty()),
+            meta_api_key: resolved_meta_key,
             baseten_api_key: std::env::var("BASETEN_API_KEY")
                 .ok()
                 .filter(|s| !s.trim().is_empty()),
@@ -503,6 +562,8 @@ impl GatewayRequest {
                 | "muse-spark-1.3-contributor"
                 | BASETEN_MUSE_SPARK_OPEN_SLUG
                 | "meta-models/muse-spark-open-1026"
+                | LLAMA_32_11B_VISION_FALLBACK_SLUG
+                | LLAMA_33_70B_FALLBACK_SLUG
         );
         let is_sam_model = matches!(self.requested_model.as_str(), "sam-3-1" | "sam-3.1");
         let is_asr_model = self.requested_model == "muse-voice-transcribe-1.0";
@@ -803,6 +864,190 @@ impl MultimodalGateway {
     }
 }
 
+/// Production HTTPS client (`reqwest` + `rustls-tls`) for outbound authenticated requests
+/// to Meta AI (`muse-spark-1.3`, `muse-wonder-1.0`, `sam-3.1`, `muse-voice-transcribe-1.0`)
+/// with fallback to `meta-llama/Llama-3.2-11B-Vision-Instruct` and `meta-llama/Llama-3.3-70B-Instruct`.
+#[derive(Debug, Clone)]
+pub struct MetaGatewayClient {
+    pub base_url: String,
+    pub config: GatewayConfig,
+    pub connect_timeout_secs: u64,
+    pub read_timeout_secs: u64,
+}
+
+impl Default for MetaGatewayClient {
+    fn default() -> Self {
+        Self::new(GatewayConfig::default())
+    }
+}
+
+impl MetaGatewayClient {
+    #[must_use]
+    pub fn new(config: GatewayConfig) -> Self {
+        Self {
+            base_url: config.meta_endpoint_url.clone(),
+            config,
+            connect_timeout_secs: META_CONNECT_TIMEOUT_SECS,
+            read_timeout_secs: META_READ_TIMEOUT_SECS,
+        }
+    }
+
+    /// Verify that `META_API_KEY` or `REPLAYFIX_AI_KEY` is configured before running `--mode live-ai`.
+    pub fn require_live_auth(&self) -> Result<&str> {
+        self.config.meta_api_key.as_deref().ok_or_else(|| {
+            CoreError::ModelApiError(
+                "ERR_GATEWAY_AUTH_MISSING: --mode live-ai requires META_API_KEY (or REPLAYFIX_AI_KEY) to be set in the environment."
+                    .to_string(),
+            )
+        })
+    }
+
+    /// Resolve the fallback model slug for a given primary Meta model.
+    #[must_use]
+    pub fn fallback_model_for(model_slug: &str) -> Option<&'static str> {
+        match model_slug {
+            "muse-spark-1.3" | "muse-spark-1.3-contributor" => {
+                Some(LLAMA_32_11B_VISION_FALLBACK_SLUG)
+            }
+            "muse-wonder-1.0" => Some(LLAMA_33_70B_FALLBACK_SLUG),
+            _ => None,
+        }
+    }
+
+    /// Dispatch a live authenticated HTTPS POST request to the configured Meta AI endpoint
+    /// with 30s connect timeout, 90s read timeout, `<UNTRUSTED_DOM_CONTEXT>` escaping,
+    /// and exponential backoff on HTTP 429/503.
+    pub fn send_live_https(
+        &self,
+        request: &GatewayRequest,
+        untrusted_dom_context: Option<&str>,
+    ) -> Result<GatewayResponse> {
+        request.validate()?;
+        let api_key = self.require_live_auth()?;
+        let fingerprint = request.fingerprint_sha256()?;
+
+        let fenced_prompt = match untrusted_dom_context {
+            Some(dom) => format!("{}\n{}", request.prompt, escape_untrusted_dom_context(dom)),
+            None => request.prompt.clone(),
+        };
+
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
+            .timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+            .build()
+            .map_err(|e| {
+                CoreError::ModelApiError(format!("Failed to build rustls HTTPS client: {e}"))
+            })?;
+
+        let payload = serde_json::json!({
+            "model": request.requested_model,
+            "input": fenced_prompt,
+            "reasoning": request.reasoning_effort.as_ref().map(|eff| serde_json::json!({ "effort": eff })),
+        });
+
+        let max_attempts = self.config.max_retries.saturating_add(1);
+        let mut last_err = String::new();
+
+        for attempt in 0..max_attempts {
+            let start = std::time::Instant::now();
+            let resp_res = http_client
+                .post(&self.base_url)
+                .bearer_auth(api_key)
+                .json(&payload)
+                .send();
+
+            match resp_res {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    if status == 200 {
+                        let body_val: serde_json::Value = resp.json().map_err(|e| {
+                            CoreError::ModelApiError(format!(
+                                "Malformed JSON from Meta AI gateway: {e}"
+                            ))
+                        })?;
+                        let output_text = body_val
+                            .get("output_text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let serving_model = body_val
+                            .get("model")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&request.requested_model)
+                            .to_string();
+                        let input_tokens = body_val
+                            .get("usage")
+                            .and_then(|u| u.get("input_tokens"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(request.estimated_tokens);
+                        let output_tokens = body_val
+                            .get("usage")
+                            .and_then(|u| u.get("output_tokens"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let cached_tokens = body_val
+                            .get("usage")
+                            .and_then(|u| u.get("cached_tokens"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let slug = MuseModelSlug::parse(&serving_model)
+                            .unwrap_or(MuseModelSlug::MuseSpark13);
+                        let cost_nanos = TokenAccounting::usage_nanos(
+                            slug,
+                            input_tokens,
+                            cached_tokens,
+                            output_tokens,
+                            0,
+                        );
+                        return Ok(GatewayResponse {
+                            provider: GatewayProvider::MetaAi,
+                            provenance: GatewayProvenance::LiveProvider,
+                            requested_model: request.requested_model.clone(),
+                            serving_model,
+                            output_text,
+                            input_tokens,
+                            output_tokens,
+                            cached_tokens,
+                            cost_nanos,
+                            latency_ms: start.elapsed().as_millis() as u64,
+                            retries_attempted: attempt,
+                            fallback_triggered: false,
+                            request_fingerprint_sha256: fingerprint,
+                        });
+                    } else if status == 401 || status == 403 {
+                        return Err(CoreError::ModelApiError(format!(
+                            "GATEWAY_AUTH_FAILED: HTTP {status} from {}",
+                            self.base_url
+                        )));
+                    } else if status == 429 || status == 503 || status >= 500 {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|h| h.to_str().ok())
+                            .map(ToString::to_string);
+                        let delay_ms =
+                            RatePool::compute_retry_delay_ms(attempt, retry_after.as_deref());
+                        last_err = format!("HTTP {status} (backoff {delay_ms}ms)");
+                        continue;
+                    } else {
+                        return Err(CoreError::ModelApiError(format!(
+                            "GATEWAY_HTTP_ERROR: HTTP {status} from {}",
+                            self.base_url
+                        )));
+                    }
+                }
+                Err(e) => {
+                    last_err = self.config.redact_secrets(&e.to_string());
+                }
+            }
+        }
+
+        Err(CoreError::ModelApiError(format!(
+            "GATEWAY_LIVE_REQUEST_FAILED after {max_attempts} attempts: {last_err}"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1063,5 +1308,41 @@ mod tests {
         assert!(aligned[0].within_tolerance);
         assert_eq!(aligned[0].delta_ms, Some(150));
         assert!(!aligned[1].within_tolerance);
+    }
+
+    #[test]
+    fn test_meta_gateway_client_auth_guard_xml_escaping_and_fallbacks() {
+        let cfg = GatewayConfig {
+            meta_api_key: None,
+            ..Default::default()
+        };
+        let client = MetaGatewayClient::new(cfg);
+        assert_eq!(client.connect_timeout_secs, 30);
+        assert_eq!(client.read_timeout_secs, 90);
+        let err = client.require_live_auth().unwrap_err();
+        assert!(err.to_string().contains("ERR_GATEWAY_AUTH_MISSING"));
+
+        assert_eq!(
+            MetaGatewayClient::fallback_model_for("muse-spark-1.3"),
+            Some(LLAMA_32_11B_VISION_FALLBACK_SLUG)
+        );
+        assert_eq!(
+            MetaGatewayClient::fallback_model_for("muse-wonder-1.0"),
+            Some(LLAMA_33_70B_FALLBACK_SLUG)
+        );
+
+        let escaped = escape_untrusted_dom_context("<script>alert(\"xss\")</script>");
+        assert!(escaped.starts_with("<UNTRUSTED_DOM_CONTEXT>\n"));
+        assert!(escaped.contains("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"));
+
+        assert_eq!(
+            ExecutionMode::parse("live-ai").unwrap(),
+            ExecutionMode::LiveAi
+        );
+        assert_eq!(
+            ExecutionMode::parse("deterministic-fixture").unwrap(),
+            ExecutionMode::DeterministicFixture
+        );
+        assert!(ExecutionMode::parse("unknown").is_err());
     }
 }

@@ -27,9 +27,10 @@ use std::io::IsTerminal;
 
 use clap::{Args, Parser, Subcommand};
 use replayfix_core::{
-    BoundingBox, CoreError, DependencyStatus, Doctor, DomCandidate, EnvironmentAdapter, Fixture,
-    HealOutcome, LiveBrowserOptions, MockHealer, MuseModelConfig, Platform, RepairClientMode,
-    TaskManifest, MUSE_SPARK_13_SLUG,
+    BoundingBox, CoreError, DependencyStatus, Doctor, DomCandidate, EnvironmentAdapter,
+    ExecutionMode, Fixture, HealOutcome, LiveBrowserOptions, MetaGatewayClient, MockHealer,
+    ModelProvenanceRecord, MuseModelConfig, Platform, RepairClientMode, TaskManifest,
+    MUSE_SPARK_13_SLUG,
 };
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -158,6 +159,18 @@ pub struct ReproArgs {
     /// Meta Muse model slug for bounded autonomous repair (muse-spark-1.3, muse-wonder-1.0, muse-spark-1.3-contributor)
     #[arg(long)]
     pub model: Option<String>,
+
+    /// Honest execution mode: 'live-ai' (outbound HTTPS via META_API_KEY) or 'deterministic-fixture' (offline calibrated fixtures)
+    #[arg(long)]
+    pub mode: Option<String>,
+
+    /// Intent perception model identifier (e.g. muse-spark-1.3 or meta-llama/Llama-3.2-11B-Vision-Instruct)
+    #[arg(long)]
+    pub model_intent: Option<String>,
+
+    /// Code repair model identifier (e.g. muse-wonder-1.0 or meta-llama/Llama-3.3-70B-Instruct)
+    #[arg(long)]
+    pub model_repair: Option<String>,
 
     /// Optional reasoning effort override ('high' or 'xhigh'). 'max' is strictly prohibited.
     #[arg(long)]
@@ -384,6 +397,9 @@ struct ReproExtras {
     live_browser: bool,
     mock_ambiguous: bool,
     model: Option<String>,
+    execution_mode: Option<ExecutionMode>,
+    model_intent: Option<String>,
+    model_repair: Option<String>,
     mock_failing_repair: bool,
     mock_syntax_retry: bool,
     mock_pkg_test_mutation: bool,
@@ -418,6 +434,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         live_browser,
         mock_ambiguous,
         model,
+        mode,
+        model_intent,
+        model_repair,
         reasoning_effort,
         mock_failing_repair,
         mock_syntax_retry,
@@ -431,6 +450,27 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         yes,
         issue,
     } = args;
+
+    let parsed_mode = if let Some(ref raw_mode) = mode {
+        match ExecutionMode::parse(raw_mode) {
+            Ok(m) => Some(m),
+            Err(e) => usage_error(&e.to_string(), theme),
+        }
+    } else {
+        None
+    };
+
+    if parsed_mode == Some(ExecutionMode::LiveAi) {
+        let gw_client = MetaGatewayClient::default();
+        if let Err(e) = gw_client.require_live_auth() {
+            eprintln!("  {} {e}", theme.error(Symbols::CROSS));
+            eprintln!(
+                "  {} Set META_API_KEY=<token> (or REPLAYFIX_AI_KEY=<token>) for live-ai, or use --mode deterministic-fixture.",
+                theme.muted("→")
+            );
+            exit(exit_codes::REPAIR_REJECTED);
+        }
+    }
 
     if let Some(ref slug) = model {
         if let Err(e) = MuseModelConfig::new(slug, reasoning_effort.as_deref()) {
@@ -451,6 +491,14 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
                 .to_ascii_lowercase();
             if lower.starts_with("rf01") || lower.starts_with("rf-01") {
                 Some("RF-01")
+            } else if lower.starts_with("rf02") || lower.starts_with("rf-02") {
+                Some("RF-02")
+            } else if lower.starts_with("rf03") || lower.starts_with("rf-03") {
+                Some("RF-03")
+            } else if lower.starts_with("rf04") || lower.starts_with("rf-04") {
+                Some("RF-04")
+            } else if lower.starts_with("rf05") || lower.starts_with("rf-05") {
+                Some("RF-05")
             } else {
                 None
             }
@@ -459,17 +507,23 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
-    let autonomous_requested =
-        model.is_some() || mock_failing_repair || mock_syntax_retry || mock_pkg_test_mutation;
+    let autonomous_requested = model.is_some()
+        || parsed_mode.is_some()
+        || mock_failing_repair
+        || mock_syntax_retry
+        || mock_pkg_test_mutation;
     let auto_live_from_video = inferred_from_video.is_some()
         && !mock_heal
+        && parsed_mode != Some(ExecutionMode::DeterministicFixture)
         && video.as_deref().is_some_and(|v| Path::new(v).exists());
     let live_browser = live_browser || auto_live_from_video;
-    let mock_heal = mock_heal || (autonomous_requested && !live_browser);
+    let mock_heal = mock_heal
+        || (autonomous_requested && !live_browser)
+        || (parsed_mode == Some(ExecutionMode::DeterministicFixture) && !live_browser);
 
     if !mock_heal && !live_browser && (mock_patch != "builtin" || output_dir != ".replayfix") {
         usage_error(
-            "'--mock-patch' and '--output-dir' require '--mock-heal', '--live-browser', or '--model'",
+            "'--mock-patch' and '--output-dir' require '--mock-heal', '--live-browser', '--mode', or '--model'",
             theme,
         );
     }
@@ -480,6 +534,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         live_browser,
         mock_ambiguous,
         model,
+        execution_mode: parsed_mode,
+        model_intent,
+        model_repair,
         mock_failing_repair,
         mock_syntax_retry,
         mock_pkg_test_mutation,
@@ -807,6 +864,29 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
 
     match outcome {
         HealOutcome::Verified(mut receipt) => {
+            if extras.execution_mode.is_some()
+                || extras.model_intent.is_some()
+                || extras.model_repair.is_some()
+            {
+                let mode_str = extras
+                    .execution_mode
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_else(|| "deterministic-fixture".to_string());
+                receipt.provenance = Some(mode_str.clone());
+                receipt.model_provenance = Some(ModelProvenanceRecord {
+                    execution_mode: mode_str,
+                    model_intent: extras
+                        .model_intent
+                        .clone()
+                        .unwrap_or_else(|| "muse-spark-1.3".to_string()),
+                    model_repair: extras.model_repair.clone().unwrap_or_else(|| {
+                        extras
+                            .model
+                            .clone()
+                            .unwrap_or_else(|| "muse-wonder-1.0".to_string())
+                    }),
+                });
+            }
             write_artifact(&out_dir, |dir| {
                 receipt.write_disaggregated_artifacts(dir, Some(&diff), None)
             });

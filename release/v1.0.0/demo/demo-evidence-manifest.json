@@ -11,9 +11,9 @@
   },
   "video": {
     "file": "release/v1.0.0/demo/replayfix-v1.0.0-demo.mp4",
-    "sha256": "d8ac6265498ce9f51c8ecf2d5984e107f6a95d04937436d372cd63372c96948a",
-    "size_bytes": 1124665,
-    "duration_seconds": 180.0,
+    "sha256": "143f643b20b2ed556fde2b49a5e739bb31b1cf71d410f4f81a67701b8cb11191",
+    "size_bytes": 10157250,
+    "duration_seconds": 180,
     "resolution": "1920x1080",
     "fps": 30,
     "video_codec": "h264",
@@ -32,7 +32,10 @@
         "release/v1.0.0/binaries/windows-x64/replayfix.exe doctor --json",
         "release/v1.0.0/binaries/windows-x64/replayfix.exe run --bug RF-01 --mock-heal --output-dir release/v1.0.0/examples/sanitized-receipts/act3_verified"
       ],
-      "observed_exit_codes": [0, 0],
+      "observed_exit_codes": [
+        0,
+        0
+      ],
       "contract_sha256": "400bc991f224",
       "evidence_artifacts": {
         "release/v1.0.0/examples/sanitized-receipts/act3_verified/audit_receipt.json": "3324a8e77c890d3b36e19a99ed1ee0e8a178c1315f3cb8ebbdc6041df02c4d1b"
@@ -48,7 +51,10 @@
         "release/v1.0.0/binaries/windows-x64/replayfix.exe run --bug RF-01 --mock-heal --mock-patch noop --output-dir release/v1.0.0/examples/sanitized-receipts/act2_noop",
         "release/v1.0.0/binaries/windows-x64/replayfix.exe run --bug RF-01 --mock-heal --mock-patch cheat_patch.diff --output-dir release/v1.0.0/examples/sanitized-receipts/act2_cheat"
       ],
-      "observed_exit_codes": [30, 11],
+      "observed_exit_codes": [
+        30,
+        11
+      ],
       "rejection_statuses": [
         "REPAIR_NOOP_REJECTED",
         "TEST_MUTATION_PROHIBITED"
@@ -68,7 +74,10 @@
         "release/v1.0.0/binaries/windows-x64/replayfix.exe verify-receipt release/v1.0.0/examples/sanitized-receipts/act3_verified/audit_receipt.json --json",
         "release/v1.0.0/binaries/windows-x64/replayfix.exe sweep --mock-heal --output release/v1.0.0/examples/sanitized-receipts/act3_sweep --json"
       ],
-      "observed_exit_codes": [0, 0],
+      "observed_exit_codes": [
+        0,
+        0
+      ],
       "merkle_root_rf01": "24a236abd932058cae838a920123a68d8726b87bd9ed76386d24cf9b56b13683",
       "merkle_root_sweep": "75dc9d2b7d5beead9042765ce85fd65acb1b031a2ccc352d189acc851066ab00",
       "sweep_elapsed_ms": 6867,

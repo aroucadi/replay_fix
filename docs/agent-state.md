@@ -1,11 +1,16 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.0.0` (`100-v1.0.0-final-production-release` — Final Production Release & Hackathon Submission)
-- **Status**: Production Release Qualification Complete; 224/224 Tests Passing, Zero Panics, 0 Clippy Warnings. Optimized LTO release binary (`replayfix.exe` v1.0.0), Windows 11 Authenticode signature verification, 180-second Three-Act demonstration video (`replayfix-v1.0.0-demo.mp4`) + `demo-evidence-manifest.json` + WebVTT captions, offline `proof_viewer.html`, and complete `release/v1.0.0/` GitHub & Meta Hackathon submission package verified.
+- **Active Milestone**: `v1.1.0` (`110-v1.1.0-real-metapulse-muse-integration` — Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI HTTPS Gateway & Dual Execution Modes)
+- **Status**: Production Release Qualification Complete; 226/226 Tests Passing, Zero Panics, 0 Clippy Warnings. 20 real MetaPulse `.mp4` videos (`RF-01`..`RF-20`) + `MANIFEST.json`, `MetaGatewayClient` (`reqwest` + `rustls-tls`), `--mode <live-ai | deterministic-fixture>`, Option B real MetaPulse demo video, and `release/v1.1.0/` package verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.1.0 Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI Gateway & Dual Execution Modes (Spec 110)**:
+  - Migrated all 20 real MetaPulse `.mp4` defect recordings (`RF-01`..`RF-20`) into `benchmarks/metapulse/videos/` with cryptographic `MANIFEST.json` verification (`MetaPulseManifest`) and `MetaPulseRepoRunner`.
+  - Implemented `MetaGatewayClient` (`reqwest` + `rustls-tls`, 30s connect / 90s read timeouts, `META_API_KEY` / `REPLAYFIX_AI_KEY` Bearer auth, `<UNTRUSTED_DOM_CONTEXT>` XML escaping, and Llama-3.2/3.3 fallback slugs).
+  - Wired `--mode <live-ai | deterministic-fixture>`, `--model-intent`, and `--model-repair` with Exit Code `30` (`ERR_GATEWAY_AUTH_MISSING`) on missing live credentials and `provenance` / `model_provenance` in `audit_receipt.json`.
+  - Packaged `release/v1.1.0/` with signed `replayfix.exe` (`v1.1.0`), `proof_viewer.html`, Option B real MetaPulse demonstration video, and `SHA256SUMS.txt`.
 - [x] **v1.0.0 Final Production Release, Authenticode Signing & Three-Act Demonstration (Spec 100)**:
   - Production `replayfix.exe` (`v1.0.0`) compiled with `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`, Authenticode-signed (`Status: Valid`), and packaged in `release/v1.0.0/binaries/windows-x64/`.
   - Real Three-Act execution and 180.0s `1920x1080` 30fps H.264/AAC demonstration video (`release/v1.0.0/demo/replayfix-v1.0.0-demo.mp4`) with `demo-evidence-manifest.json` and WebVTT captions.

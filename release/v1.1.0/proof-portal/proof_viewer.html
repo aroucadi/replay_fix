@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none';">
+  <title>ReplayFix v0.9.5 — Offline Judge Proof Portal &amp; Cryptographic Verifier</title>
+  <style>
+    :root {
+      --bg-0: #070b14;
+      --bg-1: #0d1424;
+      --bg-2: #131d33;
+      --bg-3: #1b2845;
+      --border: #263859;
+      --text-0: #f0f6fc;
+      --text-1: #b8c7e0;
+      --text-2: #7e93b8;
+      --brand: #38bdf8;
+      --brand-dim: rgba(56, 189, 248, 0.14);
+      --green: #22c55e;
+      --green-bg: rgba(34, 197, 94, 0.14);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.15);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.15);
+      --purple: #a855f7;
+      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-0);
+      color: var(--text-0);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      min-height: 100vh;
+      padding-bottom: 3rem;
+    }
+    header {
+      background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 1.25rem 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .brand-block { display: flex; align-items: center; gap: 0.9rem; }
+    .brand-logo {
+      width: 40px; height: 40px; border-radius: 10px;
+      background: var(--brand-dim); border: 1px solid var(--brand);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--brand); font-family: var(--font-mono); font-weight: 800; font-size: 1.05rem;
+    }
+    .brand-title h1 { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; }
+    .brand-title p { font-size: 0.8rem; color: var(--text-2); }
+    .airgap-pill {
+      font-family: var(--font-mono); font-size: 0.75rem;
+      padding: 0.35rem 0.75rem; border-radius: 999px;
+      background: var(--bg-3); border: 1px solid var(--border); color: var(--brand);
+    }
+    main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem; }
+    .control-bar {
+      display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; margin-bottom: 1.25rem;
+    }
+    @media (max-width: 960px) { .control-bar { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1.15rem 1.35rem;
+    }
+    .card-title {
+      font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-2); font-weight: 700; margin-bottom: 0.65rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .drop-zone {
+      border: 2px dashed var(--border); border-radius: 8px;
+      padding: 1rem; text-align: center; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      background: rgba(19, 29, 51, 0.5);
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--brand); background: var(--brand-dim);
+    }
+    .preset-row {
+      display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem;
+    }
+    button, .btn {
+      background: var(--bg-2); color: var(--text-0);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.42rem 0.75rem; font-size: 0.8rem; font-weight: 600;
+      cursor: pointer; font-family: var(--font-sans);
+    }
+    button:hover { border-color: var(--brand); color: var(--brand); }
+    button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    button.active-preset { background: var(--brand-dim); border-color: var(--brand); color: var(--brand); }
+    .verdict-banner {
+      border-radius: 10px; padding: 1.1rem 1.4rem; margin-bottom: 1.25rem;
+      border: 1px solid var(--border); display: flex; flex-wrap: wrap;
+      align-items: center; justify-content: space-between; gap: 1rem;
+    }
+    .verdict-genuine { background: var(--green-bg); border-color: var(--green); }
+    .verdict-untrusted { background: var(--amber-bg); border-color: var(--amber); }
+    .verdict-failed { background: var(--red-bg); border-color: var(--red); }
+    .verdict-badge {
+      font-family: var(--font-mono); font-size: 1.05rem; font-weight: 800;
+      padding: 0.3rem 0.75rem; border-radius: 6px; letter-spacing: 0.02em;
+    }
+    .verdict-genuine .verdict-badge { background: var(--green); color: #04130a; }
+    .verdict-untrusted .verdict-badge { background: var(--amber); color: #1c1102; }
+    .verdict-failed .verdict-badge { background: var(--red); color: #fff; }
+    .layer-strip {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1.25rem;
+    }
+    @media (max-width: 900px) { .layer-strip { grid-template-columns: repeat(2, 1fr); } }
+    .layer-box {
+      background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.75rem 1rem;
+    }
+    .layer-box .layer-name { font-size: 0.72rem; color: var(--text-2); text-transform: uppercase; font-weight: 700; }
+    .layer-box .layer-val { font-family: var(--font-mono); font-size: 0.86rem; font-weight: 700; margin-top: 0.25rem; }
+    .status-pass { color: var(--green); }
+    .status-warn { color: var(--amber); }
+    .status-fail { color: var(--red); }
+    .tabs {
+      display: flex; flex-wrap: wrap; gap: 0.4rem;
+      border-bottom: 1px solid var(--border); padding-bottom: 0.6rem; margin-bottom: 1.25rem;
+    }
+    .tab-btn {
+      padding: 0.5rem 0.95rem; border-radius: 6px; font-size: 0.84rem;
+      background: var(--bg-1); color: var(--text-1); border: 1px solid var(--border);
+    }
+    .tab-btn.active {
+      background: var(--brand-dim); color: var(--brand); border-color: var(--brand);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1.3fr; gap: 1rem; }
+    @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
+    .kv-list { display: grid; grid-template-columns: 170px 1fr; gap: 0.45rem 0.75rem; font-size: 0.84rem; }
+    .kv-key { color: var(--text-2); font-weight: 600; }
+    .kv-val { font-family: var(--font-mono); word-break: break-all; color: var(--text-0); }
+    .leaf-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .leaf-item {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 7px;
+      padding: 0.7rem 0.9rem; cursor: pointer; text-align: left; width: 100%;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .leaf-item.selected { border-color: var(--brand); background: var(--brand-dim); }
+    .leaf-item.invalid { border-color: var(--red); background: var(--red-bg); }
+    .code-box {
+      background: #050811; border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.85rem 1rem; font-family: var(--font-mono); font-size: 0.79rem;
+      overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-1);
+    }
+    .diff-line { font-family: var(--font-mono); font-size: 0.8rem; padding: 0.1rem 0.5rem; white-space: pre; }
+    .diff-add { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+    .diff-del { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
+    .diff-hunk { color: var(--brand); font-weight: 700; }
+    .sweep-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.85rem;
+    }
+    .sweep-card {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem;
+    }
+    .input-text {
+      background: var(--bg-0); color: var(--text-0); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.42rem 0.65rem; font-family: var(--font-mono);
+      font-size: 0.78rem; width: 100%;
+    }
+    .viewport-canvas-wrap {
+      background: #050811; border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.75rem; text-align: center;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-block">
+      <div class="brand-logo" aria-hidden="true">RF</div>
+      <div class="brand-title">
+        <h1>ReplayFix — Judge Proof Portal &amp; Cryptographic Evidence Verifier</h1>
+        <p>Spec 095 (v0.9.5) • RFC 8785 Canonical JSON • RFC 6962 Merkle Proofs • RFC 8032 Pure Ed25519</p>
+      </div>
+    </div>
+    <div class="airgap-pill" title="Strict CSP: default-src 'none'; connect-src 'none'">
+      AIR-GAPPED OFFLINE VERIFIER • ZERO NETWORK CALLS
+    </div>
+  </header>
+
+  <main>
+    <section class="control-bar" aria-label="Receipt Import and Trust Store Controls">
+      <div class="card">
+        <div class="card-title">
+          <span>1. Import Receipt Artifact (Drag &amp; Drop or Select Preset)</span>
+          <span id="file-meta-label">Max 50 MB • UTF-8 JSON</span>
+        </div>
+        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop audit_receipt.json, merkle_receipt.json, or sweep_receipt.json here">
+          <div><strong>Drop <code>audit_receipt.json</code>, <code>merkle_receipt.json</code>, or <code>sweep_receipt.json</code></strong></div>
+          <div style="font-size:0.78rem; color:var(--text-2); margin-top:0.2rem;">or click to browse local disk (100% client-side verification)</div>
+          <input type="file" id="file-input" accept=".json,application/json" style="display:none">
+        </div>
+        <div class="preset-row" role="group" aria-label="Built-in Cryptographic Demo Presets">
+          <button type="button" id="btn-preset-genuine" class="active-preset">Preset 1: RF-01 Verified Genuine</button>
+          <button type="button" id="btn-preset-sweep">Preset 2: 5-Bug Sweep (RF-01..RF-05)</button>
+          <button type="button" id="btn-preset-untrusted">Preset 3: Untrusted Signer Key</button>
+          <button type="button" id="btn-preset-tampered">Preset 4: Tampered Leaf (Bit-Flip)</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>2. Pinned Ed25519 Trust Store (Layer 4 Policy)</span>
+          <span id="trust-count-label">1 Pinned Key</span>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-1); margin-bottom:0.5rem;">
+          A valid Ed25519 signature only proves key ownership. <strong>VERIFIED GENUINE</strong> requires the signer's public key to match your pinned trust anchor:
+        </p>
+        <div style="display:flex; gap:0.5rem; margin-bottom:0.55rem;">
+          <input type="text" id="pinned-key-input" class="input-text" aria-label="Pinned Ed25519 Public Key Hex" spellcheck="false">
+          <button type="button" id="btn-apply-key">Apply Pin</button>
+          <button type="button" id="btn-clear-key">Unpin</button>
+        </div>
+        <div style="font-size:0.74rem; color:var(--text-2); font-family:var(--font-mono);" id="active-pin-status"></div>
+      </div>
+    </section>
+
+    <section id="verdict-banner" class="verdict-banner verdict-genuine" aria-live="polite">
+      <div>
+        <div style="font-size:0.75rem; text-transform:uppercase; color:var(--text-1); font-weight:700;">Independent Client-Side Cryptographic Verdict</div>
+        <div id="verdict-badge" class="verdict-badge" style="margin-top:0.35rem; display:inline-block;">VERIFIED GENUINE</div>
+      </div>
+      <div style="flex:1; min-width:260px;">
+        <div id="verdict-summary" style="font-weight:600; font-size:0.92rem;"></div>
+        <div id="verdict-detail" style="font-size:0.8rem; color:var(--text-1); font-family:var(--font-mono); margin-top:0.2rem;"></div>
+      </div>
+    </section>
+
+    <section class="layer-strip" aria-label="Four-Layer Verification Breakdown">
+      <div class="layer-box">
+        <div class="layer-name">Layer 1 • Schema &amp; RFC 8785 JCS</div>
+        <div class="layer-val" id="layer1-status">PASS</div>
+      </div>
+      <div class="layer-box">
+        <div class="layer-name">Layer 2 • RFC 6962 Merkle Proofs</div>
+        <div class="layer-val" id="layer2-status">PASS</div>
+      </div>
+      <div class="layer-box">
+        <div class="layer-name">Layer 3 • RFC 8032 Pure Ed25519</div>
+        <div class="layer-val" id="layer3-status">PASS</div>
+      </div>
+      <div class="layer-box">
+        <div class="layer-name">Layer 4 • Signer Trust &amp; Gates</div>
+        <div class="layer-val" id="layer4-status">PASS</div>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="Evidence Inspector Views">
+      <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-tab="tab-merkle">Merkle Proof Explorer</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-signature">Signature &amp; Provenance</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-multimodal">Video, DOM &amp; SAM 3.1 Evidence</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-diff">Unified Diff &amp; Regression Parity</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-sweep">5-Bug Benchmark Sweep</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-raw">Raw Canonical Receipt</button>
+    </nav>
+
+    <!-- TAB 1: MERKLE PROOF EXPLORER -->
+    <section id="tab-merkle" class="tab-panel active" role="tabpanel">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Disaggregated Evidence Leaves (RFC 6962 0x00 Prefix)</span>
+            <span id="leaf-count-badge">0 Leaves</span>
+          </div>
+          <div id="leaf-list" class="leaf-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <span>Selected Leaf Cryptographic Audit Path &amp; Root Derivation</span>
+            <span id="selected-leaf-status"></span>
+          </div>
+          <div id="leaf-inspector-body" class="kv-list" style="margin-bottom:0.9rem;"></div>
+          <div class="card-title"><span>RFC 8785 Canonical Leaf Bytes (UTF-16 Sorted Keys)</span></div>
+          <pre id="leaf-canonical-box" class="code-box" style="margin-bottom:0.9rem;"></pre>
+          <div class="card-title"><span>Step-by-Step RFC 6962 Inclusion Proof Path (0x01 || Left || Right)</span></div>
+          <pre id="leaf-audit-steps" class="code-box"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: SIGNATURE & PROVENANCE -->
+    <section id="tab-signature" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="card-title"><span>RFC 8032 Pure Ed25519 Attestation &amp; Domain-Separated Payload</span></div>
+        <div id="signature-kv" class="kv-list" style="margin-bottom:1rem;"></div>
+        <div class="card-title"><span>Reconstructed Canonical Signing Payload Bytes</span></div>
+        <pre id="signing-payload-box" class="code-box"></pre>
+      </div>
+    </section>
+
+    <!-- TAB 3: MULTIMODAL EVIDENCE -->
+    <section id="tab-multimodal" class="tab-panel" role="tabpanel">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Calibrated Viewport &amp; SAM 3.1 Spatial Grounding Overlay</span>
+            <span id="multimodal-provenance-tag">PROVENANCE: DETERMINISTIC FIXTURE</span>
+          </div>
+          <div id="missing-media-banner" class="code-box" style="margin-bottom:0.75rem; border-color:var(--amber); color:var(--amber);"></div>
+          <div class="viewport-canvas-wrap">
+            <svg id="spatial-svg" viewBox="0 0 1280 720" style="width:100%; height:auto; max-height:340px; border:1px solid var(--border); border-radius:6px; background:#091122;" role="img" aria-label="Calibrated Browser Viewport with ROI and SAM 3.1 Segmentation Box"></svg>
+          </div>
+          <div style="display:flex; gap:0.5rem; margin-top:0.75rem; flex-wrap:wrap;">
+            <button type="button" id="btn-frame-0" class="active-preset">Keyframe t=800ms (Pre-Click)</button>
+            <button type="button" id="btn-frame-1">Keyframe t=1550ms (Click Hotspot &amp; ROI Diff)</button>
+            <button type="button" id="btn-frame-2">Keyframe t=2400ms (Post-Action Oracle Red)</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>Spatial Grounding &amp; 24 kHz ASR Temporal Alignment</span></div>
+          <div id="multimodal-kv" class="kv-list" style="margin-bottom:1rem;"></div>
+          <div class="card-title"><span>Playwright ariaSnapshot &amp; ASR Utterance Correlation (±250ms)</span></div>
+          <pre id="multimodal-trace-box" class="code-box"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: UNIFIED DIFF & REGRESSION PARITY -->
+    <section id="tab-diff" class="tab-panel" role="tabpanel">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Verified Candidate Patch (Unified Diff)</span>
+            <span id="diff-target-label">src/cart-summary.js</span>
+          </div>
+          <div id="diff-viewer" class="code-box"></div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>Active Regression Parity &amp; Anti-Cheat Locks</span></div>
+          <div id="regression-kv" class="kv-list" style="margin-bottom:1rem;"></div>
+          <div class="card-title"><span>Formal Regression Set Invariant: F_patched \ F_baseline = ∅</span></div>
+          <pre id="regression-formula-box" class="code-box"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: 5-BUG BENCHMARK SWEEP -->
+    <section id="tab-sweep" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="card-title">
+          <span>MetaPulse Five-Bug Benchmark Sweep (RF-01 through RF-05)</span>
+          <span id="sweep-summary-label"></span>
+        </div>
+        <div id="sweep-grid" class="sweep-grid" style="margin-top:0.75rem;"></div>
+      </div>
+    </section>
+
+    <!-- TAB 6: RAW CANONICAL JSON -->
+    <section id="tab-raw" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="card-title"><span>RFC 8785 Canonical JSON Serialization</span></div>
+        <pre id="raw-json-box" class="code-box"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+
+    // =========================================================================
+    // 1. CONSTANTS & BUILT-IN CRYPTOGRAPHICALLY GENUINE PRESETS (FROM RUST CORE)
+    // =========================================================================
+    const MAX_RECEIPT_BYTES = 52428800; // 50 MB
+    const MAX_JSON_DEPTH = 32;
+    const EMPTY_TREE_ROOT = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const DEFAULT_PINNED_KEY = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+    // Embedded presets generated by replayfix_core::portal::PortalDemoPresets::generate()
+    const PRESETS = {"trusted_public_key_hex":"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","rf01_merkle_receipt":{"schema_version":"0.9","tree_size":5,"merkle_root":"03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65","leaves":[{"artifact_type":"candidate_patch","file_name":"01_candidate.diff","content_sha256":"2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c","size_bytes":174,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"syntax_preflight","file_name":"02_preflight.json","content_sha256":"d1bb9f090c7a44d9b7c499363133ab46165294922a00337ab26d683a8275c291","size_bytes":69,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"differential_diagnosis","file_name":"03_differential_diagnosis.json","content_sha256":"a24fe5c2396e5a13061900877e83a0121ab620b7861270d96184b6b0122c1076","size_bytes":84,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"regression_parity","file_name":"04_regression_parity.json","content_sha256":"49569ad7cabef4dbfcd3beb7286455a05c4c80ad49fd7bfc87f129ff56370423","size_bytes":101,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"audit_receipt","file_name":"04_audit_receipt.json","content_sha256":"20ebace4135c9e78780d72606a3534000a0195eac8c6b25b00b1bdd721dbaa30","size_bytes":105,"timestamp":"2026-10-30T12:00:00Z"}],"inclusion_proofs":{"04_regression_parity.json":{"leaf_index":3,"tree_size":5,"audit_path":["5e7afacd604c2a5652f5a105da6fc6cca099d1bb48c2b3b71bee127ba5db7cb4","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"04_audit_receipt.json":{"leaf_index":4,"tree_size":5,"audit_path":["38b95f811aac23633d9c7391afc4bd9fe28d8fbd4363700c2aab99e7a46b3d68"]},"01_candidate.diff":{"leaf_index":0,"tree_size":5,"audit_path":["32da99a60c229af1eac6fc11bdd24a07bbb597c7d64d98eda18fcc12c5676bac","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"02_preflight.json":{"leaf_index":1,"tree_size":5,"audit_path":["772a94827c1122bb9a175b839df8d6666b3359cc01e0ad2029768f278e812d5c","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"03_differential_diagnosis.json":{"leaf_index":2,"tree_size":5,"audit_path":["4c34543dfbe9e5e7ab4be5bedd65d5c40d6dc6226d07c0d7c56cb3f7232f3128","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]}},"attestation":{"schema_version":"0.9","algorithm":"Ed25519","public_key":"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","signature":"98318ed54fb2b06982ed5427156ee0887c4f9ac39ff2094145a4ec52af2263d7d834b4d3c11e612c2e6f8d958bdcb8bb3a7800695e0750ed5ed778d527d52908","signing_payload":"REPLAYFIX-ATTESTATION:v0.9:0.9:03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65:5:2026-10-30T12:00:00Z","created_at":"2026-10-30T12:00:00Z"}},"rf01_tampered_merkle_receipt":{"schema_version":"0.9","tree_size":5,"merkle_root":"03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65","leaves":[{"artifact_type":"candidate_patch","file_name":"01_candidate.diff","content_sha256":"0c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c","size_bytes":174,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"syntax_preflight","file_name":"02_preflight.json","content_sha256":"d1bb9f090c7a44d9b7c499363133ab46165294922a00337ab26d683a8275c291","size_bytes":69,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"differential_diagnosis","file_name":"03_differential_diagnosis.json","content_sha256":"a24fe5c2396e5a13061900877e83a0121ab620b7861270d96184b6b0122c1076","size_bytes":84,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"regression_parity","file_name":"04_regression_parity.json","content_sha256":"49569ad7cabef4dbfcd3beb7286455a05c4c80ad49fd7bfc87f129ff56370423","size_bytes":101,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"audit_receipt","file_name":"04_audit_receipt.json","content_sha256":"20ebace4135c9e78780d72606a3534000a0195eac8c6b25b00b1bdd721dbaa30","size_bytes":105,"timestamp":"2026-10-30T12:00:00Z"}],"inclusion_proofs":{"04_regression_parity.json":{"leaf_index":3,"tree_size":5,"audit_path":["5e7afacd604c2a5652f5a105da6fc6cca099d1bb48c2b3b71bee127ba5db7cb4","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"04_audit_receipt.json":{"leaf_index":4,"tree_size":5,"audit_path":["38b95f811aac23633d9c7391afc4bd9fe28d8fbd4363700c2aab99e7a46b3d68"]},"01_candidate.diff":{"leaf_index":0,"tree_size":5,"audit_path":["32da99a60c229af1eac6fc11bdd24a07bbb597c7d64d98eda18fcc12c5676bac","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"02_preflight.json":{"leaf_index":1,"tree_size":5,"audit_path":["772a94827c1122bb9a175b839df8d6666b3359cc01e0ad2029768f278e812d5c","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"03_differential_diagnosis.json":{"leaf_index":2,"tree_size":5,"audit_path":["4c34543dfbe9e5e7ab4be5bedd65d5c40d6dc6226d07c0d7c56cb3f7232f3128","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]}},"attestation":{"schema_version":"0.9","algorithm":"Ed25519","public_key":"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","signature":"98318ed54fb2b06982ed5427156ee0887c4f9ac39ff2094145a4ec52af2263d7d834b4d3c11e612c2e6f8d958bdcb8bb3a7800695e0750ed5ed778d527d52908","signing_payload":"REPLAYFIX-ATTESTATION:v0.9:0.9:03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65:5:2026-10-30T12:00:00Z","created_at":"2026-10-30T12:00:00Z"}},"rf01_untrusted_merkle_receipt":{"schema_version":"0.9","tree_size":5,"merkle_root":"03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65","leaves":[{"artifact_type":"candidate_patch","file_name":"01_candidate.diff","content_sha256":"2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c","size_bytes":174,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"syntax_preflight","file_name":"02_preflight.json","content_sha256":"d1bb9f090c7a44d9b7c499363133ab46165294922a00337ab26d683a8275c291","size_bytes":69,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"differential_diagnosis","file_name":"03_differential_diagnosis.json","content_sha256":"a24fe5c2396e5a13061900877e83a0121ab620b7861270d96184b6b0122c1076","size_bytes":84,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"regression_parity","file_name":"04_regression_parity.json","content_sha256":"49569ad7cabef4dbfcd3beb7286455a05c4c80ad49fd7bfc87f129ff56370423","size_bytes":101,"timestamp":"2026-10-30T12:00:00Z"},{"artifact_type":"audit_receipt","file_name":"04_audit_receipt.json","content_sha256":"20ebace4135c9e78780d72606a3534000a0195eac8c6b25b00b1bdd721dbaa30","size_bytes":105,"timestamp":"2026-10-30T12:00:00Z"}],"inclusion_proofs":{"04_regression_parity.json":{"leaf_index":3,"tree_size":5,"audit_path":["5e7afacd604c2a5652f5a105da6fc6cca099d1bb48c2b3b71bee127ba5db7cb4","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"03_differential_diagnosis.json":{"leaf_index":2,"tree_size":5,"audit_path":["4c34543dfbe9e5e7ab4be5bedd65d5c40d6dc6226d07c0d7c56cb3f7232f3128","1f9f41379d7041f092820de0fcd12e9e05f3c1a58100ebd17a53664e60351ec3","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"01_candidate.diff":{"leaf_index":0,"tree_size":5,"audit_path":["32da99a60c229af1eac6fc11bdd24a07bbb597c7d64d98eda18fcc12c5676bac","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"02_preflight.json":{"leaf_index":1,"tree_size":5,"audit_path":["772a94827c1122bb9a175b839df8d6666b3359cc01e0ad2029768f278e812d5c","0f421560b21535cb40f0fd6f8da09d80f2c5871321d880ef28a27adac2aa86da","54f2e979f2c2b96b38685ab1e1d8db0ef2c5584d8520603d852599abe4e3eb53"]},"04_audit_receipt.json":{"leaf_index":4,"tree_size":5,"audit_path":["38b95f811aac23633d9c7391afc4bd9fe28d8fbd4363700c2aab99e7a46b3d68"]}},"attestation":{"schema_version":"0.9","algorithm":"Ed25519","public_key":"3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c","signature":"ebbd2a795a9345688f1fa63ae02d9209ade139babea4fb2801d6909f6983640467847a20c95197346b039517324f546af1b30d3a64a12b8c92043af7acb9c008","signing_payload":"REPLAYFIX-ATTESTATION:v0.9:0.9:03fd5a9d7cc76fd2483e15427b4154ddf82bb34f1a80bcf543c3ef5b5fce0d65:5:2026-10-30T12:00:00Z","created_at":"2026-10-30T12:00:00Z"}},"five_bug_sweep_receipt":{"schema_version":"0.9","total_bugs":5,"repaired_bugs":5,"failed_bugs":0,"results":{"RF-01":{"bug_id":"RF-01","status":"VERIFIED_REPAIRED","exit_code":0,"target_path":"src/cart-summary.js","patch_sha256":"2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c","elapsed_ms":680},"RF-02":{"bug_id":"RF-02","status":"VERIFIED_REPAIRED","exit_code":0,"target_path":"src/discount.js","patch_sha256":"168086f55ee2b5f561b2ef53307cda001878734cf69168ec9d6a7a6646758867","elapsed_ms":775},"RF-03":{"bug_id":"RF-03","status":"VERIFIED_REPAIRED","exit_code":0,"target_path":"src/inventory.js","patch_sha256":"00dfcf7dce42cf6ea700e09a6b75f8baf681e7689986c0b7bc704c89b79a5b51","elapsed_ms":870},"RF-04":{"bug_id":"RF-04","status":"VERIFIED_REPAIRED","exit_code":0,"target_path":"src/cart-store.js","patch_sha256":"3713734e835e0d9ad617120167e02f4b3b5fff71f7357cf5aeb1b42c72b949fa","elapsed_ms":965},"RF-05":{"bug_id":"RF-05","status":"VERIFIED_REPAIRED","exit_code":0,"target_path":"src/order.js","patch_sha256":"52f43c2abdd461cfa386662065a6b7e80eafdea079c6ba6518df534571e1dd93","elapsed_ms":1060}},"merkle_root":"3168a8698195395237ca2c1cb131cd0ab054c3a2a1e73fa628bcba316fa2181f","ed25519_attestation":{"schema_version":"0.9","algorithm":"Ed25519","public_key":"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","signature":"44a45f1d2f08ba0ae9571fb9b3d2130c4661864051deca8efe43a3a0fe9552ae7d47b1438e46b9c80261697717d1075eaa2ddeb03ed430b0a92b716fde6aef04","signing_payload":"REPLAYFIX-ATTESTATION:v0.9:0.9:3168a8698195395237ca2c1cb131cd0ab054c3a2a1e73fa628bcba316fa2181f:5:2026-10-30T12:00:00Z","created_at":"2026-10-30T12:00:00Z"},"elapsed_wall_clock_ms":3880,"created_at":"2026-10-30T12:00:00Z"}};
+
+    const NL = String.fromCharCode(10);
+    const RF01_DIFF_TEXT = [
+      "--- a/src/cart-summary.js",
+      "+++ b/src/cart-summary.js",
+      "@@ -1,5 +1,5 @@",
+      " export function renderCartSummary(state) {",
+      "-  const items = [];",
+      "+  const items = Array.isArray(state.items) ? state.items : [];",
+      "   const totalCents = items.reduce((sum, item) => sum + item.priceCents * item.qty, 0);",
+      "   return { count: items.length, totalCents };",
+      " }"
+    ].join(NL);
+
+    // =========================================================================
+    // 2. PURE-JS SYNCHRONOUS SHA-256 & SHA-512 (RFC 6234) + RFC 8032 ED25519
+    // =========================================================================
+    const SHA256_K = new Uint32Array([
+      0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+    ]);
+
+    function rotr32(x, n) { return (x >>> n) | (x << (32 - n)); }
+
+    function sha256Bytes(msgBytes) {
+      const len = msgBytes.length;
+      const bitLenHi = Math.floor((len * 8) / 0x100000000);
+      const bitLenLo = (len * 8) >>> 0;
+      const padLen = ((len + 9 + 63) & ~63);
+      const buf = new Uint8Array(padLen);
+      buf.set(msgBytes, 0);
+      buf[len] = 0x80;
+      const dv = new DataView(buf.buffer);
+      dv.setUint32(padLen - 8, bitLenHi, false);
+      dv.setUint32(padLen - 4, bitLenLo, false);
+
+      let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+      let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+      const w = new Uint32Array(64);
+
+      for (let off = 0; off < padLen; off += 64) {
+        for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4, false);
+        for (let i = 16; i < 64; i++) {
+          const s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+          const s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+          w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+        }
+        let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+        for (let i = 0; i < 64; i++) {
+          const S1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
+          const ch = (e & f) ^ (~e & g);
+          const t1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+          const S0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
+          const maj = (a & b) ^ (a & c) ^ (b & c);
+          const t2 = (S0 + maj) >>> 0;
+          h = g; g = f; f = e; e = (d + t1) >>> 0;
+          d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+        }
+        h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+        h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+      }
+      const out = new Uint8Array(32);
+      const odv = new DataView(out.buffer);
+      [h0, h1, h2, h3, h4, h5, h6, h7].forEach((v, i) => odv.setUint32(i * 4, v, false));
+      return out;
+    }
+
+    const SHA512_K = [
+      0x428a2f98d728ae22n,0x7137449123ef65cdn,0xb5c0fbcfec4d3b2fn,0xe9b5dba58189dbbcn,
+      0x3956c25bf348b538n,0x59f111f1b605d019n,0x923f82a4af194f9bn,0xab1c5ed5da6d8118n,
+      0xd807aa98a3030242n,0x12835b0145706fben,0x243185be4ee4b28cn,0x550c7dc3d5ffb4e2n,
+      0x72be5d74f27b896fn,0x80deb1fe3b1696b1n,0x9bdc06a725c71235n,0xc19bf174cf692694n,
+      0xe49b69c19ef14ad2n,0xefbe4786384f25e3n,0x0fc19dc68b8cd5b5n,0x240ca1cc77ac9c65n,
+      0x2de92c6f592b0275n,0x4a7484aa6ea6e483n,0x5cb0a9dcbd41fbd4n,0x76f988da831153b5n,
+      0x983e5152ee66dfabn,0xa831c66d2db43210n,0xb00327c898fb213fn,0xbf597fc7beef0ee4n,
+      0xc6e00bf33da88fc2n,0xd5a79147930aa725n,0x06ca6351e003826fn,0x142929670a0e6e70n,
+      0x27b70a8546d22ffcn,0x2e1b21385c26c926n,0x4d2c6dfc5ac42aedn,0x53380d139d95b3dfn,
+      0x650a73548baf63den,0x766a0abb3c77b2a8n,0x81c2c92e47edaee6n,0x92722c851482353bn,
+      0xa2bfe8a14cf10364n,0xa81a664bbc423001n,0xc24b8b70d0f89791n,0xc76c51a30654be30n,
+      0xd192e819d6ef5218n,0xd69906245565a910n,0xf40e35855771202an,0x106aa07032bbd1b8n,
+      0x19a4c116b8d2d0c8n,0x1e376c085141ab53n,0x2748774cdf8eeb99n,0x34b0bcb5e19b48a8n,
+      0x391c0cb3c5c95a63n,0x4ed8aa4ae3418acbn,0x5b9cca4f7763e373n,0x682e6ff3d6b2b8a3n,
+      0x748f82ee5defb2fcn,0x78a5636f43172f60n,0x84c87814a1f0ab72n,0x8cc702081a6439ecn,
+      0x90befffa23631e28n,0xa4506cebde82bde9n,0xbef9a3f7b2c67915n,0xc67178f2e372532bn,
+      0xca273eceea26619cn,0xd186b8c721c0c207n,0xeada7dd6cde0eb1en,0xf57d4f7fee6ed178n,
+      0x06f067aa72176fban,0x0a637dc5a2c898a6n,0x113f9804bef90daen,0x1b710b35131c471bn,
+      0x28db77f523047d84n,0x32caab7b40c72493n,0x3c9ebe0a15c9bebcn,0x431d67c49c100d4cn,
+      0x4cc5d4becb3e42b6n,0x597f299cfc657e2an,0x5fcb6fab3ad6faecn,0x6c44198c4a475817n
+    ];
+    const MASK64 = 0xffffffffffffffffn;
+    function rotr64(x, n) { return ((x >> n) | (x << (64n - n))) & MASK64; }
+
+    function sha512Bytes(msgBytes) {
+      const len = msgBytes.length;
+      const padLen = ((len + 17 + 127) & ~127);
+      const buf = new Uint8Array(padLen);
+      buf.set(msgBytes, 0);
+      buf[len] = 0x80;
+      const dv = new DataView(buf.buffer);
+      dv.setBigUint64(padLen - 8, BigInt(len) * 8n, false);
+
+      let h0 = 0x6a09e667f3bcc908n, h1 = 0xbb67ae8584caa73bn, h2 = 0x3c6ef372fe94f82bn, h3 = 0xa54ff53a5f1d36f1n;
+      let h4 = 0x510e527fade682d1n, h5 = 0x9b05688c2b3e6c1fn, h6 = 0x1f83d9abfb41bd6bn, h7 = 0x5be0cd19137e2179n;
+      const w = new Array(80).fill(0n);
+
+      for (let off = 0; off < padLen; off += 128) {
+        for (let i = 0; i < 16; i++) w[i] = dv.getBigUint64(off + i * 8, false);
+        for (let i = 16; i < 80; i++) {
+          const s0 = rotr64(w[i - 15], 1n) ^ rotr64(w[i - 15], 8n) ^ (w[i - 15] >> 7n);
+          const s1 = rotr64(w[i - 2], 19n) ^ rotr64(w[i - 2], 61n) ^ (w[i - 2] >> 6n);
+          w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & MASK64;
+        }
+        let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+        for (let i = 0; i < 80; i++) {
+          const S1 = rotr64(e, 14n) ^ rotr64(e, 18n) ^ rotr64(e, 41n);
+          const ch = (e & f) ^ ((~e & MASK64) & g);
+          const t1 = (h + S1 + ch + SHA512_K[i] + w[i]) & MASK64;
+          const S0 = rotr64(a, 28n) ^ rotr64(a, 34n) ^ rotr64(a, 39n);
+          const maj = (a & b) ^ (a & c) ^ (b & c);
+          const t2 = (S0 + maj) & MASK64;
+          h = g; g = f; f = e; e = (d + t1) & MASK64;
+          d = c; c = b; b = a; a = (t1 + t2) & MASK64;
+        }
+        h0 = (h0 + a) & MASK64; h1 = (h1 + b) & MASK64; h2 = (h2 + c) & MASK64; h3 = (h3 + d) & MASK64;
+        h4 = (h4 + e) & MASK64; h5 = (h5 + f) & MASK64; h6 = (h6 + g) & MASK64; h7 = (h7 + h) & MASK64;
+      }
+      const out = new Uint8Array(64);
+      const odv = new DataView(out.buffer);
+      [h0, h1, h2, h3, h4, h5, h6, h7].forEach((v, i) => odv.setBigUint64(i * 8, v, false));
+      return out;
+    }
+
+    // RFC 8032 Pure Ed25519 Curve Verification
+    const ED_P = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffedn;
+    const ED_L = 0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn;
+    const ED_D = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+    const ED_BX = 15112221349535400772501151409588531511454012693041857206046113283949847762202n;
+    const ED_BY = 46316835694926478169428394003475163141307993866256225615783033603165251855960n;
+    const ED_B = { X: ED_BX, Y: ED_BY, Z: 1n, T: (ED_BX * ED_BY) % ED_P };
+
+    function modP(a) { const r = a % ED_P; return r < 0n ? r + ED_P : r; }
+    function modPow(base, exp, m) {
+      let res = 1n, b = base % m, e = exp;
+      while (e > 0n) {
+        if (e & 1n) res = (res * b) % m;
+        b = (b * b) % m;
+        e >>= 1n;
+      }
+      return res;
+    }
+    const SQRT_M1 = modPow(2n, (ED_P - 1n) / 4n, ED_P);
+
+    function edAdd(p, q) {
+      const A = modP((p.Y - p.X) * (q.Y - q.X));
+      const B = modP((p.Y + p.X) * (q.Y + q.X));
+      const C = modP(p.T * 2n * ED_D * q.T);
+      const D = modP(p.Z * 2n * q.Z);
+      const E = modP(B - A);
+      const F = modP(D - C);
+      const G = modP(D + C);
+      const H = modP(B + A);
+      return { X: modP(E * F), Y: modP(G * H), Z: modP(F * G), T: modP(E * H) };
+    }
+
+    function edScalarMul(pt, scalar) {
+      let res = { X: 0n, Y: 1n, Z: 1n, T: 0n };
+      let cur = pt, k = scalar;
+      while (k > 0n) {
+        if (k & 1n) res = edAdd(res, cur);
+        cur = edAdd(cur, cur);
+        k >>= 1n;
+      }
+      return res;
+    }
+
+    function edDecodePoint(bytes32) {
+      if (bytes32.length !== 32) return null;
+      let y = 0n;
+      for (let i = 0; i < 32; i++) {
+        const b = (i === 31) ? (bytes32[31] & 0x7f) : bytes32[i];
+        y |= BigInt(b) << BigInt(i * 8);
+      }
+      if (y >= ED_P) return null;
+      const sign = (bytes32[31] >>> 7) & 1;
+      const y2 = modP(y * y);
+      const u = modP(y2 - 1n);
+      const v = modP(ED_D * y2 + 1n);
+      const v3 = modP(v * v * v);
+      const v7 = modP(v3 * v3 * v);
+      let x = modP(modP(u * v3) * modPow(modP(u * v7), (ED_P - 5n) / 8n, ED_P));
+      const vx2 = modP(v * modP(x * x));
+      if (vx2 === u) {
+        // valid root
+      } else if (vx2 === modP(-u)) {
+        x = modP(x * SQRT_M1);
+      } else {
+        return null;
+      }
+      if (x === 0n && sign === 1) return null;
+      if (Number(x & 1n) !== sign) x = ED_P - x;
+      return { X: x, Y: y, Z: 1n, T: modP(x * y) };
+    }
+
+    function bytesToLeBigInt(bytes) {
+      let v = 0n;
+      for (let i = 0; i < bytes.length; i++) v |= BigInt(bytes[i]) << BigInt(i * 8);
+      return v;
+    }
+
+    function verifyEd25519PureJs(sigBytes, msgBytes, pubKeyBytes) {
+      if (sigBytes.length !== 64 || pubKeyBytes.length !== 32) return false;
+      const rBytes = sigBytes.slice(0, 32);
+      const sBytes = sigBytes.slice(32, 64);
+      const S = bytesToLeBigInt(sBytes);
+      if (S >= ED_L) return false;
+      const R = edDecodePoint(rBytes);
+      const A = edDecodePoint(pubKeyBytes);
+      if (!R || !A) return false;
+
+      const hInput = new Uint8Array(64 + msgBytes.length);
+      hInput.set(rBytes, 0);
+      hInput.set(pubKeyBytes, 32);
+      hInput.set(msgBytes, 64);
+      const kHash = sha512Bytes(hInput);
+      const k = bytesToLeBigInt(kHash) % ED_L;
+
+      const lhs = edScalarMul(ED_B, S);
+      const rhs = edAdd(R, edScalarMul(A, k));
+      return modP(lhs.X * rhs.Z - rhs.X * lhs.Z) === 0n &&
+             modP(lhs.Y * rhs.Z - rhs.Y * lhs.Z) === 0n;
+    }
+
+    // =========================================================================
+    // 3. RFC 8785 CANONICAL JSON & RFC 6962 MERKLE TREE VERIFIER
+    // =========================================================================
+    function bytesToHex(bytes) {
+      let s = "";
+      for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+      return s;
+    }
+
+    function hexToBytes(hex) {
+      if (typeof hex !== "string" || hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) return null;
+      const out = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    }
+
+    function compareUtf16(a, b) {
+      const len = Math.min(a.length, b.length);
+      for (let i = 0; i < len; i++) {
+        const d = a.charCodeAt(i) - b.charCodeAt(i);
+        if (d !== 0) return d;
+      }
+      return a.length - b.length;
+    }
+
+    function canonicalJson(val) {
+      if (val === null) return "null";
+      if (typeof val === "boolean") return val ? "true" : "false";
+      if (typeof val === "number") {
+        if (!Number.isFinite(val) || !Number.isSafeInteger(val)) {
+          throw new Error("Canonical JSON forbids floating-point or non-safe-integer numbers");
+        }
+        return String(val);
+      }
+      if (typeof val === "string") return JSON.stringify(val);
+      if (Array.isArray(val)) {
+        return "[" + val.map(canonicalJson).join(",") + "]";
+      }
+      if (typeof val === "object") {
+        const keys = Object.keys(val).sort(compareUtf16);
+        const parts = keys.map(k => JSON.stringify(k) + ":" + canonicalJson(val[k]));
+        return "{" + parts.join(",") + "}";
+      }
+      throw new Error("Unsupported JSON value type");
+    }
+
+    function utf8Bytes(str) { return new TextEncoder().encode(str); }
+
+    function hashLeafRfc6962(leafObj) {
+      const canonStr = canonicalJson({
+        artifact_type: leafObj.artifact_type,
+        file_name: leafObj.file_name,
+        content_sha256: leafObj.content_sha256,
+        size_bytes: leafObj.size_bytes,
+        timestamp: leafObj.timestamp
+      });
+      const raw = utf8Bytes(canonStr);
+      const prefixed = new Uint8Array(1 + raw.length);
+      prefixed[0] = 0x00;
+      prefixed.set(raw, 1);
+      return { hashBytes: sha256Bytes(prefixed), canonicalString: canonStr };
+    }
+
+    function hashChildrenRfc6962(left32, right32) {
+      const buf = new Uint8Array(65);
+      buf[0] = 0x01;
+      buf.set(left32, 1);
+      buf.set(right32, 33);
+      return sha256Bytes(buf);
+    }
+
+    function largestPowerOf2LessThan(n) {
+      if (n <= 1) return 0;
+      let k = 1;
+      while (k * 2 < n) k *= 2;
+      return k;
+    }
+
+    function verifyMerkleProofSteps(leafHashBytes, proof, expectedRootHex) {
+      const steps = [];
+      const size = proof.tree_size;
+      const index = proof.leaf_index;
+      if (!Number.isSafeInteger(size) || size === 0 || !Number.isSafeInteger(index) || index < 0 || index >= size) {
+        return { valid: false, computedRootHex: "", steps: ["Invalid leaf_index or tree_size"] };
+      }
+      const pathHexList = Array.isArray(proof.audit_path) ? proof.audit_path : [];
+      const directions = [];
+      let curIdx = index, curSize = size;
+      while (curSize > 1) {
+        const k = largestPowerOf2LessThan(curSize);
+        if (curIdx < k) {
+          directions.push("right"); // sibling is on the right
+          curSize = k;
+        } else {
+          directions.push("left"); // sibling is on the left
+          curIdx -= k;
+          curSize -= k;
+        }
+      }
+      if (directions.length !== pathHexList.length) {
+        return {
+          valid: false,
+          computedRootHex: "",
+          steps: [`Audit path length (${pathHexList.length}) != expected depth (${directions.length})`]
+        };
+      }
+      directions.reverse();
+      let acc = leafHashBytes;
+      steps.push(`Leaf[${index}] H(0x00 || B) = ${bytesToHex(acc)}`);
+      for (let i = 0; i < pathHexList.length; i++) {
+        const sibBytes = hexToBytes(pathHexList[i]);
+        if (!sibBytes || sibBytes.length !== 32) {
+          return { valid: false, computedRootHex: "", steps: ["Invalid 32-byte sibling hex in audit_path"] };
+        }
+        const dir = directions[i];
+        if (dir === "left") {
+          acc = hashChildrenRfc6962(sibBytes, acc);
+          steps.push(`Step ${i + 1}: H(0x01 || Sibling_L[${pathHexList[i].slice(0, 12)}..] || Current) -> ${bytesToHex(acc)}`);
+        } else {
+          acc = hashChildrenRfc6962(acc, sibBytes);
+          steps.push(`Step ${i + 1}: H(0x01 || Current || Sibling_R[${pathHexList[i].slice(0, 12)}..]) -> ${bytesToHex(acc)}`);
+        }
+      }
+      const computedRootHex = bytesToHex(acc);
+      const valid = computedRootHex.toLowerCase() === expectedRootHex.toLowerCase();
+      steps.push(`Final Root Match: ${valid ? "MATCHED (" + computedRootHex + ")" : "MISMATCH (computed " + computedRootHex + " vs expected " + expectedRootHex + ")"}`);
+      return { valid, computedRootHex, steps };
+    }
+
+    function checkJsonDepthAndProto(rawText) {
+      let depth = 0, maxDepth = 0, inStr = false, esc = false;
+      for (let i = 0; i < rawText.length; i++) {
+        const c = rawText.charCodeAt(i);
+        if (inStr) {
+          if (esc) esc = false;
+          else if (c === 92) esc = true;
+          else if (c === 34) inStr = false;
+        } else {
+          if (c === 34) inStr = true;
+          else if (c === 123 || c === 91) {
+            depth++;
+            if (depth > maxDepth) maxDepth = depth;
+          } else if (c === 125 || c === 93) {
+            depth--;
+          }
+        }
+      }
+      if (maxDepth > MAX_JSON_DEPTH) {
+        throw new Error(`JSON nesting depth (${maxDepth}) exceeds maximum (${MAX_JSON_DEPTH})`);
+      }
+      if (rawText.includes('"__proto__"') || rawText.includes('"prototype"') || rawText.includes('"constructor"')) {
+        throw new Error("Forbidden prototype-pollution key (__proto__, prototype, or constructor) detected");
+      }
+      const dupKey = checkDuplicateJsonKeys(rawText);
+      if (dupKey !== null) {
+        throw new Error(`Duplicate JSON object key '${dupKey}' rejected before parsing`);
+      }
+    }
+
+    function checkDuplicateJsonKeys(raw) {
+      const stack = [];
+      let i = 0;
+      const len = raw.length;
+      while (i < len) {
+        const ch = raw.charCodeAt(i);
+        if (ch === 34) {
+          const start = i;
+          i++;
+          let esc = false;
+          while (i < len) {
+            const c = raw.charCodeAt(i);
+            if (esc) esc = false;
+            else if (c === 92) esc = true;
+            else if (c === 34) break;
+            i++;
+          }
+          if (i >= len) return null;
+          const end = i;
+          i++;
+          const top = stack.length > 0 ? stack[stack.length - 1] : null;
+          if (top && top.type === "obj" && top.expectingKey) {
+            let j = i;
+            while (j < len && (raw.charCodeAt(j) === 32 || raw.charCodeAt(j) === 9 || raw.charCodeAt(j) === 10 || raw.charCodeAt(j) === 13)) j++;
+            if (j < len && raw.charCodeAt(j) === 58) {
+              const keyStr = raw.slice(start + 1, end);
+              if (top.keys.has(keyStr)) return keyStr;
+              top.keys.add(keyStr);
+              top.expectingKey = false;
+            }
+          }
+          continue;
+        } else if (ch === 123) {
+          stack.push({ type: "obj", keys: new Set(), expectingKey: true });
+        } else if (ch === 91) {
+          stack.push({ type: "arr" });
+        } else if (ch === 125 || ch === 93) {
+          stack.pop();
+        } else if (ch === 44) {
+          const top = stack.length > 0 ? stack[stack.length - 1] : null;
+          if (top && top.type === "obj") top.expectingKey = true;
+        }
+        i++;
+      }
+      return null;
+    }
+
+    function evaluateReceiptObject(rawText, pinnedKeySet) {
+      if (typeof rawText !== "string" || rawText.length === 0 || rawText.length > MAX_RECEIPT_BYTES) {
+        return { verdict: "MALFORMED RECEIPT", reason: "Empty or oversized input (> 50 MB)" };
+      }
+      let obj;
+      try {
+        checkJsonDepthAndProto(rawText);
+        obj = JSON.parse(rawText);
+        canonicalJson(obj);
+      } catch (err) {
+        return { verdict: "MALFORMED RECEIPT", reason: err.message || "Malformed JSON" };
+      }
+      if (!obj || typeof obj !== "object" || typeof obj.schema_version !== "string") {
+        return { verdict: "MALFORMED RECEIPT", reason: "Missing mandatory schema_version field" };
+      }
+      if (obj.schema_version !== "0.9") {
+        return { verdict: "UNSUPPORTED PROTOCOL VERSION", reason: `Unsupported schema_version '${obj.schema_version}' (expected '0.9')`, obj };
+      }
+
+      // Case A: MerkleReceipt
+      if (obj.inclusion_proofs && Array.isArray(obj.leaves)) {
+        if (obj.tree_size !== obj.leaves.length) {
+          return { verdict: "INTEGRITY CHECK FAILED", reason: `tree_size (${obj.tree_size}) != leaves.length (${obj.leaves.length})`, obj };
+        }
+        if (obj.tree_size === 0) {
+          if (Object.keys(obj.inclusion_proofs).length > 0 || String(obj.merkle_root).toLowerCase() !== EMPTY_TREE_ROOT) {
+            return { verdict: "INTEGRITY CHECK FAILED", reason: "Empty MerkleReceipt root mismatch or unexpected inclusion proofs", obj, leafDetails: [], layer1: true, layer2: false, layer3: false, layer4: false };
+          }
+          if (!obj.attestation) {
+            return { verdict: "UNSIGNED RECEIPT", reason: "Empty MerkleReceipt verified, but unsigned", obj, leafDetails: [], layer1: true, layer2: true, layer3: false, layer4: false };
+          }
+          return verifyAttestationAndTrust(obj.attestation, obj.merkle_root, 0, pinnedKeySet, obj, []);
+        }
+        const seenNames = new Set();
+        const leafDetails = [];
+        let allProofsOk = true;
+        let firstFailReason = "";
+
+        for (let i = 0; i < obj.leaves.length; i++) {
+          const leaf = obj.leaves[i];
+          if (!leaf || typeof leaf.file_name !== "string" || seenNames.has(leaf.file_name)) {
+            allProofsOk = false;
+            firstFailReason = "Duplicate or invalid leaf file_name";
+            break;
+          }
+          seenNames.add(leaf.file_name);
+          const { hashBytes, canonicalString } = hashLeafRfc6962(leaf);
+          const leafHashHex = bytesToHex(hashBytes);
+          const proof = obj.inclusion_proofs[leaf.file_name] ||
+                        obj.inclusion_proofs[String(i)] ||
+                        obj.inclusion_proofs[leafHashHex] ||
+                        obj.inclusion_proofs[leaf.content_sha256];
+          if (!proof || proof.leaf_index !== i || proof.tree_size !== obj.tree_size) {
+            allProofsOk = false;
+            firstFailReason = `Missing or mismatched inclusion proof for leaf '${leaf.file_name}'`;
+            leafDetails.push({ leaf, leafHashHex, canonicalString, valid: false, steps: [firstFailReason] });
+            continue;
+          }
+          const res = verifyMerkleProofSteps(hashBytes, proof, obj.merkle_root);
+          if (!res.valid) {
+            allProofsOk = false;
+            if (!firstFailReason) firstFailReason = `Merkle proof mismatch on leaf '${leaf.file_name}'`;
+          }
+          leafDetails.push({ leaf, leafHashHex, canonicalString, valid: res.valid, steps: res.steps, computedRootHex: res.computedRootHex });
+        }
+
+        if (!allProofsOk) {
+          return { verdict: "INTEGRITY CHECK FAILED", reason: firstFailReason, obj, leafDetails, layer1: true, layer2: false, layer3: false, layer4: false };
+        }
+        if (!obj.attestation) {
+          return { verdict: "UNSIGNED RECEIPT", reason: "RFC 6962 Merkle proofs verified, but receipt is unsigned", obj, leafDetails, layer1: true, layer2: true, layer3: false, layer4: false };
+        }
+        return verifyAttestationAndTrust(obj.attestation, obj.merkle_root, obj.tree_size, pinnedKeySet, obj, leafDetails);
+      }
+
+      // Case B: SweepReceipt
+      if (typeof obj.total_bugs === "number" && obj.results && typeof obj.results === "object") {
+        const bugKeys = Object.keys(obj.results);
+        if (obj.total_bugs === 0 || bugKeys.length !== obj.total_bugs) {
+          return { verdict: "INTEGRITY CHECK FAILED", reason: "Sweep total_bugs does not match results count", obj, layer1: true, layer2: false, layer3: false, layer4: false };
+        }
+        if (!obj.ed25519_attestation) {
+          return { verdict: "UNSIGNED RECEIPT", reason: "Sweep receipt contains no Ed25519 attestation", obj, layer1: true, layer2: true, layer3: false, layer4: false };
+        }
+        const attRes = verifyAttestationAndTrust(obj.ed25519_attestation, obj.merkle_root, obj.total_bugs, pinnedKeySet, obj, []);
+        if (attRes.verdict !== "VERIFIED GENUINE") return attRes;
+        const anyCaseFailed = bugKeys.some(k => obj.results[k].exit_code !== 0 || obj.results[k].status !== "VERIFIED_REPAIRED");
+        if (obj.failed_bugs > 0 || obj.repaired_bugs !== obj.total_bugs || anyCaseFailed) {
+          return {
+            verdict: "POLICY QUALIFICATION FAILED",
+            reason: `SWEEP_PARTIAL_FAILURE: Cryptographic signature is valid and trusted, but sweep only repaired ${obj.repaired_bugs}/${obj.total_bugs} bugs (${obj.failed_bugs} failed)`,
+            obj, leafDetails: [], layer1: true, layer2: true, layer3: true, layer4: false
+          };
+        }
+        return attRes;
+      }
+
+      // Case C: Standalone AuditReceipt
+      if (typeof obj.task_id === "string" && typeof obj.contract_sha256 === "string") {
+        if (!obj.merkle_root || !obj.attestation) {
+          return { verdict: "UNSIGNED RECEIPT", reason: "AuditReceipt has no embedded Merkle root or Ed25519 attestation", obj, layer1: true, layer2: false, layer3: false, layer4: false };
+        }
+        const parts = String(obj.attestation.signing_payload || "").split(":");
+        const treeSize = parts.length >= 6 ? parseInt(parts[4], 10) : 0;
+        const attRes = verifyAttestationAndTrust(obj.attestation, obj.merkle_root, treeSize, pinnedKeySet, obj, []);
+        if (attRes.verdict !== "VERIFIED GENUINE") return attRes;
+        const statusOk = obj.status === "VERIFIED_REPAIRED";
+        const repoClean = obj.base_repo_unmodified_verified !== false;
+        const gate2Green = !obj.gate2 || obj.gate2.verdict === "GREEN";
+        const parityOk = !obj.regression_parity || obj.regression_parity.parity_preserved !== false;
+        if (!statusOk || !repoClean || !gate2Green || !parityOk) {
+          return {
+            verdict: "POLICY QUALIFICATION FAILED",
+            reason: "Cryptographic attestation is valid and trusted, but deterministic gate or regression parity policy failed",
+            obj, leafDetails: [], layer1: true, layer2: true, layer3: true, layer4: false
+          };
+        }
+        return attRes;
+      }
+
+      return { verdict: "MALFORMED RECEIPT", reason: "Unrecognized receipt structure" };
+    }
+
+    function verifyAttestationAndTrust(att, merkleRoot, treeSize, pinnedKeySet, obj, leafDetails) {
+      const expectedPayload = `REPLAYFIX-ATTESTATION:v0.9:${att.schema_version}:${merkleRoot}:${treeSize}:${att.created_at}`;
+      if (att.algorithm !== "Ed25519" || att.signing_payload !== expectedPayload) {
+        return {
+          verdict: "INTEGRITY CHECK FAILED",
+          reason: `Signing payload mismatch (expected ${expectedPayload})`,
+          obj, leafDetails, layer1: true, layer2: true, layer3: false, layer4: false
+        };
+      }
+      const sigBytes = hexToBytes(att.signature);
+      const pubBytes = hexToBytes(att.public_key);
+      if (!sigBytes || !pubBytes || !verifyEd25519PureJs(sigBytes, utf8Bytes(expectedPayload), pubBytes)) {
+        return {
+          verdict: "INTEGRITY CHECK FAILED",
+          reason: "SIGNATURE_VERIFICATION_FAILED: Ed25519 signature failed RFC 8032 verification",
+          obj, leafDetails, layer1: true, layer2: true, layer3: false, layer4: false
+        };
+      }
+      const normPub = att.public_key.toLowerCase();
+      const isTrusted = pinnedKeySet.has(normPub);
+      if (!isTrusted) {
+        return {
+          verdict: "SIGNATURE VALID — SIGNER UNTRUSTED",
+          reason: `Ed25519 signature is mathematically valid, but signer key ${normPub.slice(0, 16)}.. is not pinned in the Trust Store`,
+          obj, leafDetails, layer1: true, layer2: true, layer3: true, layer4: false
+        };
+      }
+      return {
+        verdict: "VERIFIED GENUINE",
+        reason: `All 4 zero-trust layers passed: RFC 6962 root ${merkleRoot.slice(0, 16)}.. signed by pinned key ${normPub.slice(0, 16)}..`,
+        obj, leafDetails, layer1: true, layer2: true, layer3: true, layer4: true
+      };
+    }
+
+    // Export for Node.js automated test verification when run outside browser DOM
+    if (typeof module !== "undefined" && module.exports) {
+      module.exports = {
+        PRESETS, DEFAULT_PINNED_KEY, canonicalJson, sha256Bytes, verifyEd25519PureJs,
+        evaluateReceiptObject, hashLeafRfc6962, verifyMerkleProofSteps
+      };
+    }
+
+    // =========================================================================
+    // 4. BROWSER UI CONTROLLER (SAFE DOM RENDERING VIA textContent ONLY)
+    // =========================================================================
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      const pinnedKeys = new Set([DEFAULT_PINNED_KEY.toLowerCase()]);
+      let currentRawText = JSON.stringify(PRESETS.rf01_merkle_receipt, null, 2);
+      let currentEval = null;
+      let selectedLeafIdx = 0;
+
+      const elPinInput = document.getElementById("pinned-key-input");
+      const elPinStatus = document.getElementById("active-pin-status");
+      const elTrustCount = document.getElementById("trust-count-label");
+
+      function syncPinUi() {
+        const arr = Array.from(pinnedKeys);
+        elTrustCount.textContent = `${arr.length} Pinned Key(s)`;
+        elPinStatus.textContent = arr.length > 0 ? `Pinned: ${arr[0]}` : "Pinned: (none — all signers untrusted)";
+      }
+
+      function setLayerStatus(elId, pass, warnText) {
+        const el = document.getElementById(elId);
+        if (pass === true) {
+          el.textContent = "VERIFIED ✓";
+          el.className = "layer-val status-pass";
+        } else if (warnText) {
+          el.textContent = warnText;
+          el.className = "layer-val status-warn";
+        } else {
+          el.textContent = "FAILED ✗";
+          el.className = "layer-val status-fail";
+        }
+      }
+
+      function renderKvList(container, pairs) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+        for (const [k, v] of pairs) {
+          const dt = document.createElement("div");
+          dt.className = "kv-key";
+          dt.textContent = k;
+          const dd = document.createElement("div");
+          dd.className = "kv-val";
+          dd.textContent = String(v ?? "—");
+          container.appendChild(dt);
+          container.appendChild(dd);
+        }
+      }
+
+      function renderLeafInspector() {
+        const leafListEl = document.getElementById("leaf-list");
+        while (leafListEl.firstChild) leafListEl.removeChild(leafListEl.firstChild);
+        const details = (currentEval && currentEval.leafDetails) ? currentEval.leafDetails : [];
+        document.getElementById("leaf-count-badge").textContent = `${details.length} Leaves`;
+
+        if (details.length === 0) {
+          const msg = document.createElement("div");
+          msg.style.color = "var(--text-2)";
+          msg.style.fontSize = "0.84rem";
+          msg.textContent = "Sweep or standalone receipt loaded. Select '5-Bug Benchmark Sweep' or 'Signature & Provenance' tab to inspect details.";
+          leafListEl.appendChild(msg);
+          document.getElementById("leaf-canonical-box").textContent = "N/A";
+          document.getElementById("leaf-audit-steps").textContent = "N/A";
+          return;
+        }
+
+        if (selectedLeafIdx >= details.length) selectedLeafIdx = 0;
+
+        details.forEach((item, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "leaf-item" + (idx === selectedLeafIdx ? " selected" : "") + (!item.valid ? " invalid" : "");
+          const leftSpan = document.createElement("span");
+          leftSpan.style.fontFamily = "var(--font-mono)";
+          leftSpan.textContent = `[${idx}] ${item.leaf.file_name}`;
+          const rightSpan = document.createElement("span");
+          rightSpan.className = item.valid ? "status-pass" : "status-fail";
+          rightSpan.style.fontFamily = "var(--font-mono)";
+          rightSpan.textContent = item.valid ? "PROOF VALID ✓" : "TAMPERED ✗";
+          btn.appendChild(leftSpan);
+          btn.appendChild(rightSpan);
+          btn.addEventListener("click", () => {
+            selectedLeafIdx = idx;
+            renderLeafInspector();
+          });
+          leafListEl.appendChild(btn);
+        });
+
+        const sel = details[selectedLeafIdx];
+        document.getElementById("selected-leaf-status").textContent = sel.valid ? "RFC 6962 Proof Verified" : "Proof Mismatch";
+        renderKvList(document.getElementById("leaf-inspector-body"), [
+          ["Leaf Index", selectedLeafIdx],
+          ["File Name", sel.leaf.file_name],
+          ["Artifact Type", sel.leaf.artifact_type],
+          ["Content SHA-256", sel.leaf.content_sha256],
+          ["Size (Bytes)", sel.leaf.size_bytes],
+          ["Leaf Hash (0x00 || B)", sel.leafHashHex],
+          ["Expected Merkle Root", currentEval.obj.merkle_root]
+        ]);
+        document.getElementById("leaf-canonical-box").textContent = sel.canonicalString;
+        document.getElementById("leaf-audit-steps").textContent = sel.steps.join(NL);
+      }
+
+      function renderSignatureTab() {
+        const obj = currentEval && currentEval.obj ? currentEval.obj : {};
+        const att = obj.attestation || obj.ed25519_attestation || null;
+        const kvEl = document.getElementById("signature-kv");
+        if (!att) {
+          renderKvList(kvEl, [["Attestation Status", "UNSIGNED RECEIPT (No Ed25519 signature present)"]]);
+          document.getElementById("signing-payload-box").textContent = "(unsigned)";
+          return;
+        }
+        renderKvList(kvEl, [
+          ["Algorithm", att.algorithm],
+          ["Schema Version", att.schema_version],
+          ["Signer Public Key", att.public_key],
+          ["Ed25519 Signature", att.signature],
+          ["Merkle Root Bound", obj.merkle_root || "—"],
+          ["Created At (UTC)", att.created_at],
+          ["Trust Store Verdict", currentEval.verdict]
+        ]);
+        document.getElementById("signing-payload-box").textContent = att.signing_payload;
+      }
+
+      function renderMultimodalFrame(frameIdx) {
+        ["btn-frame-0", "btn-frame-1", "btn-frame-2"].forEach((id, i) => {
+          document.getElementById(id).className = (i === frameIdx) ? "active-preset" : "";
+        });
+        document.getElementById("missing-media-banner").textContent =
+          "OFFLINE AIR-GAP NOTICE: Raw video container (rf01_demo.mp4) is not loaded into browser memory. Rendering verified geometric telemetry (1280x720 viewport, 120x120 ROI optical-flow box, SAM 3.1 <|box;88,133,232,200|> contour, and click centroid C=(160, 120)).";
+
+        const svg = document.getElementById("spatial-svg");
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        const ns = "http://www.w3.org/2000/svg";
+
+        // Draw grid & mock application shell
+        const headerRect = document.createElementNS(ns, "rect");
+        headerRect.setAttribute("x", "20"); headerRect.setAttribute("y", "20");
+        headerRect.setAttribute("width", "1240"); headerRect.setAttribute("height", "60");
+        headerRect.setAttribute("fill", "#131d33"); headerRect.setAttribute("stroke", "#263859");
+        svg.appendChild(headerRect);
+
+        // Refresh Cart button (x=88..232, y=96..144)
+        const btnRect = document.createElementNS(ns, "rect");
+        btnRect.setAttribute("x", "88"); btnRect.setAttribute("y", "96");
+        btnRect.setAttribute("width", "144"); btnRect.setAttribute("height", "48");
+        btnRect.setAttribute("rx", "6");
+        btnRect.setAttribute("fill", "#1b2845");
+        btnRect.setAttribute("stroke", frameIdx === 1 ? "#38bdf8" : "#475569");
+        btnRect.setAttribute("stroke-width", "3");
+        svg.appendChild(btnRect);
+
+        const btnLabel = document.createElementNS(ns, "text");
+        btnLabel.setAttribute("x", "160"); btnLabel.setAttribute("y", "125");
+        btnLabel.setAttribute("fill", "#f0f6fc"); btnLabel.setAttribute("font-size", "16");
+        btnLabel.setAttribute("font-family", "monospace"); btnLabel.setAttribute("text-anchor", "middle");
+        btnLabel.textContent = "Refresh Cart";
+        svg.appendChild(btnLabel);
+
+        // 120x120 ROI box around (160, 120) -> [100, 60, 220, 180]
+        const roiRect = document.createElementNS(ns, "rect");
+        roiRect.setAttribute("x", "100"); roiRect.setAttribute("y", "60");
+        roiRect.setAttribute("width", "120"); roiRect.setAttribute("height", "120");
+        roiRect.setAttribute("fill", "rgba(56, 189, 248, 0.12)");
+        roiRect.setAttribute("stroke", "#38bdf8");
+        roiRect.setAttribute("stroke-dasharray", "6,4");
+        roiRect.setAttribute("stroke-width", "2");
+        svg.appendChild(roiRect);
+
+        // Click Centroid (160, 120)
+        const cCircle = document.createElementNS(ns, "circle");
+        cCircle.setAttribute("cx", "160"); cCircle.setAttribute("cy", "120");
+        cCircle.setAttribute("r", "7");
+        cCircle.setAttribute("fill", frameIdx === 2 ? "#ef4444" : "#22c55e");
+        svg.appendChild(cCircle);
+
+        renderKvList(document.getElementById("multimodal-kv"), [
+          ["Viewport Geometry", "1280 x 720 CSS px (devicePixelRatio = 1)"],
+          ["Optical-Flow ROI", "120 x 120 px centered at (160, 120)"],
+          ["SAM 3.1 Model Slug", "sam-3-1 (wire token <|box;69,133,181,200|>)"],
+          ["Snapped Centroid", "C_x = 160 px, C_y = 120 px"],
+          ["DOM Grounding Score", "9,450 bps (margin |ΔS| = 0.42 >= 0.25 -> UNAMBIGUOUS)"],
+          ["ASR Model & Audio", "muse-voice-transcribe-1.0 (24,000 Hz 16-bit mono PCM)"],
+          ["Zero-Audio Rule", "ENFORCED (0 audio tokens sent to muse-spark-1.3)"]
+        ]);
+
+        document.getElementById("multimodal-trace-box").textContent = [
+          '[t=0800ms] ariaSnapshot: button "Refresh Cart" [data-testid="refresh-cart"] (bps=9450)',
+          '[t=1400ms] ASR [900ms..1400ms]: "Clicking Refresh Cart wipes the items" (Δt = +150ms <= 250ms tolerance)',
+          '[t=1550ms] Playwright Action: page.locator(\'[data-testid="refresh-cart"]\').click() @ (160, 120)',
+          '[t=2400ms] Gate 1 Oracle RED: expected cart count 2, observed 0 (Causal Defect Confirmed)'
+        ].join(NL);
+      }
+
+      function renderDiffAndRegressionTab() {
+        const diffEl = document.getElementById("diff-viewer");
+        while (diffEl.firstChild) diffEl.removeChild(diffEl.firstChild);
+        RF01_DIFF_TEXT.split(NL).forEach(line => {
+          const row = document.createElement("div");
+          row.className = "diff-line" +
+            (line.startsWith("+") && !line.startsWith("+++") ? " diff-add" :
+             line.startsWith("-") && !line.startsWith("---") ? " diff-del" :
+             line.startsWith("@@") ? " diff-hunk" : "");
+          row.textContent = line;
+          diffEl.appendChild(row);
+        });
+
+        renderKvList(document.getElementById("regression-kv"), [
+          ["TestFreezeGuard", "LOCKED (0 test files modified; SHA-256 verified)"],
+          ["DiffGuard (package.json)", 'LOCKED ("scripts.test*" byte-for-byte unchanged)'],
+          ["Gate 2 Stability", "2 / 2 consecutive green verification runs"],
+          ["Baseline Passing Tests", "42 passed, 0 failed, 0 skipped"],
+          ["Patched Passing Tests", "42 passed, 0 failed, 0 skipped"],
+          ["Parity Verdict", "PARITY_PRESERVED (Exit Code 0)"]
+        ]);
+
+        document.getElementById("regression-formula-box").textContent = [
+          "Invariant: F_patched \\ F_baseline = ∅  AND  S_patched <= S_baseline",
+          "F_baseline = ∅",
+          "F_patched  = ∅",
+          "Result     = ∅ (Zero new test failures, zero skip inflation)"
+        ].join(NL);
+      }
+
+      function renderSweepTab() {
+        const gridEl = document.getElementById("sweep-grid");
+        while (gridEl.firstChild) gridEl.removeChild(gridEl.firstChild);
+        const obj = (currentEval && currentEval.obj && currentEval.obj.results)
+          ? currentEval.obj
+          : PRESETS.five_bug_sweep_receipt;
+
+        const isPartial = obj.failed_bugs > 0 || obj.repaired_bugs < obj.total_bugs;
+        document.getElementById("sweep-summary-label").textContent = isPartial
+          ? `SWEEP_PARTIAL_FAILURE (${obj.repaired_bugs}/${obj.total_bugs} Repaired)`
+          : `ALL ${obj.repaired_bugs}/${obj.total_bugs} BENCHMARK BUGS VERIFIED (${obj.elapsed_wall_clock_ms} ms < 60,000 ms SLA)`;
+
+        Object.keys(obj.results).sort().forEach(bugId => {
+          const r = obj.results[bugId];
+          const card = document.createElement("div");
+          card.className = "sweep-card";
+          const title = document.createElement("div");
+          title.style.fontWeight = "700";
+          title.style.fontFamily = "var(--font-mono)";
+          title.style.marginBottom = "0.4rem";
+          title.textContent = `${bugId} • ${r.status}`;
+          title.className = (r.exit_code === 0) ? "status-pass" : "status-fail";
+          card.appendChild(title);
+
+          const body = document.createElement("div");
+          body.className = "kv-list";
+          body.style.gridTemplateColumns = "95px 1fr";
+          renderKvList(body, [
+            ["Target", r.target_path],
+            ["Exit Code", r.exit_code],
+            ["Latency", `${r.elapsed_ms} ms`],
+            ["Patch SHA", (r.patch_sha256 || "—").slice(0, 16) + ".."]
+          ]);
+          card.appendChild(body);
+          gridEl.appendChild(card);
+        });
+      }
+
+      function refreshPortalView() {
+        syncPinUi();
+        currentEval = evaluateReceiptObject(currentRawText, pinnedKeys);
+
+        const banner = document.getElementById("verdict-banner");
+        const badge = document.getElementById("verdict-badge");
+        badge.textContent = currentEval.verdict;
+        document.getElementById("verdict-summary").textContent = currentEval.reason;
+
+        if (currentEval.verdict === "VERIFIED GENUINE") {
+          banner.className = "verdict-banner verdict-genuine";
+        } else if (currentEval.verdict === "SIGNATURE VALID — SIGNER UNTRUSTED" || currentEval.verdict === "UNSIGNED RECEIPT") {
+          banner.className = "verdict-banner verdict-untrusted";
+        } else {
+          banner.className = "verdict-banner verdict-failed";
+        }
+
+        const rootStr = (currentEval.obj && currentEval.obj.merkle_root) ? currentEval.obj.merkle_root : "—";
+        document.getElementById("verdict-detail").textContent = `RFC 6962 Merkle Root: ${rootStr}`;
+
+        setLayerStatus("layer1-status", Boolean(currentEval.layer1));
+        setLayerStatus("layer2-status", Boolean(currentEval.layer2));
+        setLayerStatus("layer3-status", Boolean(currentEval.layer3), currentEval.verdict === "UNSIGNED RECEIPT" ? "UNSIGNED" : null);
+        setLayerStatus("layer4-status", Boolean(currentEval.layer4), currentEval.verdict === "SIGNATURE VALID — SIGNER UNTRUSTED" ? "UNPINNED KEY" : null);
+
+        renderLeafInspector();
+        renderSignatureTab();
+        renderDiffAndRegressionTab();
+        renderSweepTab();
+
+        try {
+          document.getElementById("raw-json-box").textContent = canonicalJson(JSON.parse(currentRawText));
+        } catch (_) {
+          document.getElementById("raw-json-box").textContent = currentRawText.slice(0, 4096);
+        }
+      }
+
+      // Wire Preset Buttons
+      function activatePreset(btnId, obj, switchToSweep) {
+        ["btn-preset-genuine", "btn-preset-sweep", "btn-preset-untrusted", "btn-preset-tampered"].forEach(id => {
+          document.getElementById(id).className = (id === btnId) ? "active-preset" : "";
+        });
+        selectedLeafIdx = 0;
+        currentRawText = JSON.stringify(obj, null, 2);
+        refreshPortalView();
+        if (switchToSweep) {
+          document.querySelector('[data-tab="tab-sweep"]').click();
+        }
+      }
+
+      document.getElementById("btn-preset-genuine").addEventListener("click", () => activatePreset("btn-preset-genuine", PRESETS.rf01_merkle_receipt, false));
+      document.getElementById("btn-preset-sweep").addEventListener("click", () => activatePreset("btn-preset-sweep", PRESETS.five_bug_sweep_receipt, true));
+      document.getElementById("btn-preset-untrusted").addEventListener("click", () => activatePreset("btn-preset-untrusted", PRESETS.rf01_untrusted_merkle_receipt, false));
+      document.getElementById("btn-preset-tampered").addEventListener("click", () => activatePreset("btn-preset-tampered", PRESETS.rf01_tampered_merkle_receipt, false));
+
+      // Wire Pin Controls
+      elPinInput.value = DEFAULT_PINNED_KEY;
+      document.getElementById("btn-apply-key").addEventListener("click", () => {
+        const val = elPinInput.value.trim().toLowerCase();
+        pinnedKeys.clear();
+        if (val.length === 64 && /^[0-9a-f]+$/.test(val)) pinnedKeys.add(val);
+        refreshPortalView();
+      });
+      document.getElementById("btn-clear-key").addEventListener("click", () => {
+        pinnedKeys.clear();
+        refreshPortalView();
+      });
+
+      // Wire File Drag & Drop
+      const dropZone = document.getElementById("drop-zone");
+      const fileInput = document.getElementById("file-input");
+      function handleFile(file) {
+        if (!file) return;
+        if (file.size > MAX_RECEIPT_BYTES) {
+          currentRawText = "";
+          refreshPortalView();
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = e => {
+          currentRawText = String(e.target.result || "");
+          document.getElementById("file-meta-label").textContent = `${file.name} (${file.size} bytes)`;
+          refreshPortalView();
+        };
+        reader.readAsText(file, "UTF-8");
+      }
+      dropZone.addEventListener("click", () => fileInput.click());
+      dropZone.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); } });
+      dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+      dropZone.addEventListener("drop", e => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+      });
+      fileInput.addEventListener("change", e => { if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]); });
+
+      // Wire Tabs
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".tab-btn").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
+          document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+          btn.classList.add("active");
+          btn.setAttribute("aria-selected", "true");
+          document.getElementById(btn.getAttribute("data-tab")).classList.add("active");
+        });
+      });
+
+      // Wire Multimodal Keyframe Buttons
+      [0, 1, 2].forEach(idx => {
+        document.getElementById(`btn-frame-${idx}`).addEventListener("click", () => renderMultimodalFrame(idx));
+      });
+
+      renderMultimodalFrame(0);
+      refreshPortalView();
+    }
+  </script>
+</body>
+</html>

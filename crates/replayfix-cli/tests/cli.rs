@@ -981,8 +981,8 @@ fn test_v1_0_0_version_and_release_package_integrity() {
     assert_eq!(code(&ver_out), 0);
     let stdout = String::from_utf8_lossy(&ver_out.stdout);
     assert!(
-        stdout.contains("replayfix 1.0.0"),
-        "Expected 'replayfix 1.0.0' in --version output, got: {stdout}"
+        stdout.contains("replayfix 1.1.0"),
+        "Expected 'replayfix 1.1.0' in --version output, got: {stdout}"
     );
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1066,5 +1066,96 @@ fn test_v1_0_0_version_and_release_package_integrity() {
                 "Demo manifest artifact hash mismatch for '{art_path}'"
             );
         }
+    }
+}
+
+#[test]
+fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
+    let dir = scratch("v110-modes");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+
+    // 1. --mode live-ai without META_API_KEY / REPLAYFIX_AI_KEY must fail closed with Exit Code 30
+    let live_out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
+        .current_dir(&dir)
+        .env_remove("META_API_KEY")
+        .env_remove("REPLAYFIX_AI_KEY")
+        .args([
+            "run",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "live-ai",
+            "--model-intent",
+            "muse-spark-1.3",
+            "--model-repair",
+            "muse-wonder-1.0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(code(&live_out), 30);
+    let stderr = String::from_utf8_lossy(&live_out.stderr);
+    assert!(stderr.contains("ERR_GATEWAY_AUTH_MISSING"));
+
+    // 2. --mode deterministic-fixture across 3 real MetaPulse videos (RF-01, RF-02, RF-03)
+    for (bug_id, video_rel) in [
+        (
+            "RF-01",
+            "benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4",
+        ),
+        (
+            "RF-02",
+            "benchmarks/metapulse/videos/RF-02_stale_follower_increment.mp4",
+        ),
+        (
+            "RF-03",
+            "benchmarks/metapulse/videos/RF-03_character_counter_underflow.mp4",
+        ),
+    ] {
+        let video_abs = repo_root.join(video_rel).display().to_string();
+        let out_sub = format!(".replayfix/{bug_id}");
+        let det_out = run_cmd(
+            &dir,
+            &[
+                "run",
+                "--video",
+                &video_abs,
+                "--repo",
+                ".",
+                "--mode",
+                "deterministic-fixture",
+                "--model-intent",
+                "muse-spark-1.3",
+                "--model-repair",
+                "muse-wonder-1.0",
+                "--output-dir",
+                &out_sub,
+            ],
+        );
+        assert_eq!(
+            code(&det_out),
+            0,
+            "Failed on {bug_id}: {}",
+            String::from_utf8_lossy(&det_out.stderr)
+        );
+        let receipt = json(&dir.join(&out_sub).join("audit_receipt.json"));
+        assert_eq!(receipt["task_id"], bug_id);
+        assert_eq!(receipt["provenance"], "deterministic-fixture");
+        assert_eq!(
+            receipt["model_provenance"]["execution_mode"],
+            "deterministic-fixture"
+        );
+        assert_eq!(
+            receipt["model_provenance"]["model_intent"],
+            "muse-spark-1.3"
+        );
+        assert_eq!(
+            receipt["model_provenance"]["model_repair"],
+            "muse-wonder-1.0"
+        );
     }
 }
