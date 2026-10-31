@@ -184,14 +184,17 @@ const RF01_INDEX_HTML: &str = r#"<!DOCTYPE html>
   <main>
     <h1>Shopping Cart</h1>
     <button id="refresh-cart-btn" data-testid="cart-refresh-btn" style="position:fixed;left:100px;top:100px;width:120px;height:40px;">Refresh Cart</button>
+    <button id="btn-publish-quote" data-testid="btn-publish-quote" style="position:fixed;left:470px;top:350px;width:130px;height:45px;">Publish Quote</button>
     <div id="cart-summary-output" data-testid="cart-summary-output">Pending</div>
   </main>
   <script type="module">
     import { cartItemCount } from './src/cart-summary.js';
-    document.getElementById('refresh-cart-btn').addEventListener('click', () => {
+    const trigger = () => {
       const count = cartItemCount({});
       document.getElementById('cart-summary-output').textContent = 'Items: ' + count;
-    });
+    };
+    document.getElementById('refresh-cart-btn')?.addEventListener('click', trigger);
+    document.getElementById('btn-publish-quote')?.addEventListener('click', trigger);
   </script>
 </body>
 </html>

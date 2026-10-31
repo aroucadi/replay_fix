@@ -888,6 +888,15 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         )
     }
     .unwrap_or_else(|e| {
+        if let CoreError::ModelApiError(ref msg) = e {
+            if msg.contains("GATEWAY_AUTH") || msg.contains("ERR_GATEWAY_AUTH") {
+                eprintln!(
+                    "  {} Authentication failed: {msg}",
+                    theme.error(Symbols::CROSS)
+                );
+                exit(exit_codes::ERR_GATEWAY_AUTH_MISSING);
+            }
+        }
         eprintln!("Internal error while running the two-gate loop: {e}");
         exit(exit_codes::INTERNAL_OR_SYSTEM_ERROR);
     });
@@ -903,18 +912,34 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     .map(|m| m.as_str().to_string())
                     .unwrap_or_else(|| "deterministic-fixture".to_string());
                 receipt.provenance = Some(mode_str.clone());
+
+                let intent = extras
+                    .model_intent
+                    .clone()
+                    .unwrap_or_else(|| "muse-spark-1.3".to_string());
+                let repair = extras.model_repair.clone().unwrap_or_else(|| {
+                    extras
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "muse-wonder-1.0".to_string())
+                });
+
+                if mode_str == "deterministic-fixture" {
+                    if receipt.disclaimer.contains("no model was involved") {
+                        receipt.disclaimer = format!(
+                            "Deterministic fixture replay: offline gates verified against calibrated fixture. Zero live external AI tokens billed (offline simulated profiles: intent={intent}, repair={repair})."
+                        );
+                    }
+                } else if mode_str == "live-ai" {
+                    receipt.disclaimer = format!(
+                        "Live AI verification: gates verified with authenticated Meta AI models (intent={intent}, repair={repair})."
+                    );
+                }
+
                 receipt.model_provenance = Some(ModelProvenanceRecord {
                     execution_mode: mode_str,
-                    model_intent: extras
-                        .model_intent
-                        .clone()
-                        .unwrap_or_else(|| "muse-spark-1.3".to_string()),
-                    model_repair: extras.model_repair.clone().unwrap_or_else(|| {
-                        extras
-                            .model
-                            .clone()
-                            .unwrap_or_else(|| "muse-wonder-1.0".to_string())
-                    }),
+                    model_intent: intent,
+                    model_repair: repair,
                 });
             }
             write_artifact(&out_dir, |dir| {
@@ -1550,8 +1575,7 @@ fn handle_export_proof(output: PathBuf, json_output: bool, theme: &Theme) -> ! {
     exit(exit_codes::SUCCESS);
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();

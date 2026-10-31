@@ -146,23 +146,49 @@ pub struct GatewayConfig {
     pub circuit_cooldown_ms: u64,
 }
 
+pub fn resolve_env_key(var_name: &str) -> Option<String> {
+    if std::env::var("REPLAYFIX_TEST_NO_REG").is_ok() {
+        return std::env::var(var_name)
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+    }
+    if let Ok(val) = std::env::var(var_name) {
+        if !val.trim().is_empty() {
+            return Some(val);
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(output) = std::process::Command::new("reg")
+            .args(["query", "HKCU\\Environment", "/v", var_name])
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 3 && parts[0].eq_ignore_ascii_case(var_name) {
+                        let key_val = parts[2..].join(" ");
+                        if !key_val.trim().is_empty() {
+                            return Some(key_val.trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
-        let resolved_meta_key = std::env::var("META_API_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| {
-                std::env::var("REPLAYFIX_AI_KEY")
-                    .ok()
-                    .filter(|s| !s.trim().is_empty())
-            });
+        let resolved_meta_key =
+            resolve_env_key("META_API_KEY").or_else(|| resolve_env_key("REPLAYFIX_AI_KEY"));
         Self {
             meta_endpoint_url: META_RESPONSES_ENDPOINT.to_string(),
             baseten_fallback_url: BASETEN_FALLBACK_ENDPOINT.to_string(),
             meta_api_key: resolved_meta_key,
-            baseten_api_key: std::env::var("BASETEN_API_KEY")
-                .ok()
-                .filter(|s| !s.trim().is_empty()),
+            baseten_api_key: resolve_env_key("BASETEN_API_KEY"),
             timeout_ms: DEFAULT_GATEWAY_TIMEOUT_MS,
             max_retries: DEFAULT_MAX_RETRIES,
             rpm_limit: 9_000,
@@ -1127,8 +1153,25 @@ impl MetaGatewayClient {
         fingerprint: String,
     ) -> Result<GatewayResponse> {
         let output_text = body_val
-            .get("output_text")
-            .and_then(|v| v.as_str())
+            .get("output")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| {
+                for item in arr {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("message") {
+                        if let Some(contents) = item.get("content").and_then(|c| c.as_array()) {
+                            for c in contents {
+                                if let Some(txt) = c.get("text").and_then(|t| t.as_str()) {
+                                    if !txt.trim().is_empty() {
+                                        return Some(txt);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            })
+            .or_else(|| body_val.get("output_text").and_then(|v| v.as_str()))
             .or_else(|| {
                 body_val
                     .get("choices")
@@ -1137,13 +1180,33 @@ impl MetaGatewayClient {
                     .and_then(|m| m.get("content"))
                     .and_then(|v| v.as_str())
             })
+            .or_else(|| {
+                body_val
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|m| m.get("text"))
+                    .and_then(|v| v.as_str())
+            })
             .or_else(|| body_val.get("text").and_then(|v| v.as_str()))
+            .or_else(|| body_val.get("content").and_then(|v| v.as_str()))
+            .or_else(|| body_val.get("response").and_then(|v| v.as_str()))
+            .or_else(|| body_val.get("output").and_then(|v| v.as_str()))
+            .or_else(|| body_val.get("result").and_then(|v| v.as_str()))
             .or_else(|| body_val.get("transcript").and_then(|v| v.as_str()))
+            .or_else(|| {
+                body_val
+                    .get("candidates")
+                    .and_then(|c| c.get(0))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|m| m.get("parts"))
+                    .and_then(|p| p.get(0))
+                    .and_then(|t| t.get("text"))
+                    .and_then(|v| v.as_str())
+            })
             .ok_or_else(|| {
-                CoreError::ModelApiError(
-                    "Live gateway JSON response missing 'output_text', 'choices[0].message.content', or 'transcript'"
-                        .to_string(),
-                )
+                CoreError::ModelApiError(format!(
+                    "Live gateway JSON response missing expected text field; got: {body_val}"
+                ))
             })?
             .to_string();
 
@@ -1167,7 +1230,11 @@ impl MetaGatewayClient {
             .unwrap_or(0);
         let cached_tokens = body_val
             .get("usage")
-            .and_then(|u| u.get("cached_tokens"))
+            .and_then(|u| {
+                u.get("cached_tokens")
+                    .or_else(|| u.get("input_tokens_details").and_then(|d| d.get("cached_tokens")))
+                    .or_else(|| u.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")))
+            })
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         let slug = MuseModelSlug::parse(&serving_model).unwrap_or(MuseModelSlug::MuseSpark13);

@@ -1084,6 +1084,7 @@ fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
         .current_dir(&dir)
         .env_remove("META_API_KEY")
         .env_remove("REPLAYFIX_AI_KEY")
+        .env("REPLAYFIX_TEST_NO_REG", "1")
         .args([
             "run",
             "--bug",
