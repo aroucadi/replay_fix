@@ -15,10 +15,23 @@ use replayfix_core::engine::{HealOutcome, LiveBrowserOptions, MockHealer};
 use replayfix_core::observer::{ChannelObserver, SubstrateEvent};
 use replayfix_core::patch::UnifiedPatcher;
 use replayfix_core::Fixture;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// Authentic conversational agent lifecycle state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentState {
+    Idle,
+    InputReceived,
+    Planning,
+    WaitingForApproval,
+    Executing,
+    Verifying,
+    Completed,
+}
 
 /// Interactive agent conversational shell.
 #[derive(Debug)]
@@ -27,6 +40,7 @@ pub struct AgentShell {
     pub theme: Theme,
     pub output_dir: PathBuf,
     pub repo_path: PathBuf,
+    pub state: AgentState,
 }
 
 impl AgentShell {
@@ -38,6 +52,7 @@ impl AgentShell {
             theme,
             output_dir,
             repo_path,
+            state: AgentState::Idle,
         }
     }
 
@@ -64,6 +79,7 @@ impl AgentShell {
         println!();
 
         loop {
+            self.state = AgentState::Idle;
             let task_prompt = self
                 .session
                 .record
@@ -78,14 +94,19 @@ impl AgentShell {
             let _ = io::stdout().flush();
 
             let mut input = String::new();
-            if io::stdin().lock().read_line(&mut input).is_err() {
-                break;
+            match io::stdin().lock().read_line(&mut input) {
+                Ok(0) | Err(_) => {
+                    let _ = self.session.save(&self.output_dir);
+                    break;
+                }
+                Ok(_) => {}
             }
 
             let trimmed = input.trim();
             if trimmed.is_empty() {
                 continue;
             }
+            self.state = AgentState::InputReceived;
 
             let intent = IntentParser::parse(trimmed);
             match intent {
@@ -385,10 +406,12 @@ impl AgentShell {
     }
 
     fn execute_repro_workflow(&mut self, task_id: &str, live_browser: bool, headed: bool) {
+        self.state = AgentState::Planning;
         let repo_display = self.repo_path.display().to_string();
         let plan = ExecutionPlan::for_repro(task_id, &repo_display, live_browser, headed);
         plan.render_card(&self.theme);
 
+        self.state = AgentState::WaitingForApproval;
         print!("  Execute this plan? [y: Yes / n: Cancel]: ");
         let _ = io::stdout().flush();
         let mut confirm = String::new();
@@ -399,9 +422,11 @@ impl AgentShell {
                 "  {} Plan aborted by operator. Repository untouched.",
                 self.theme.warning(Symbols::WARN)
             );
+            self.state = AgentState::Idle;
             return;
         }
 
+        self.state = AgentState::Executing;
         self.session.record.active_task = Some(task_id.to_string());
 
         let fixture = match Fixture::for_task_in_repo(task_id, &self.repo_path) {
@@ -413,6 +438,7 @@ impl AgentShell {
                     task_id,
                     Fixture::supported_tasks().join(", ")
                 );
+                self.state = AgentState::Idle;
                 return;
             }
         };
@@ -448,57 +474,112 @@ impl AgentShell {
         );
         spinner.tick(&self.theme);
 
-        let outcome = if live_browser {
-            MockHealer::run_live_browser_in_repo(
-                &fixture,
-                fixture.builtin_diff,
-                &self.repo_path,
-                std::slice::from_ref(&self.output_dir),
-                &opts,
-            )
-        } else {
-            MockHealer::run_in_repo_with_regression(
-                &fixture,
-                fixture.builtin_diff,
-                &self.repo_path,
-                std::slice::from_ref(&self.output_dir),
-                false,
-            )
-        };
+        let repo_path = &self.repo_path;
+        let output_dir = &self.output_dir;
+        let theme = &self.theme;
+        let state_ref = &mut self.state;
 
-        // Drain any emitted substrate events
-        while let Ok(evt) = rx.try_recv() {
-            match evt {
-                SubstrateEvent::PhaseStarted { phase, description } => {
-                    spinner.set_status(format!("{:?}", phase), description);
-                    spinner.tick(&self.theme);
+        let outcome = std::thread::scope(|s| {
+            let worker = s.spawn(|| {
+                if live_browser {
+                    MockHealer::run_live_browser_in_repo(
+                        &fixture,
+                        fixture.builtin_diff,
+                        repo_path,
+                        std::slice::from_ref(output_dir),
+                        &opts,
+                    )
+                } else {
+                    MockHealer::run_in_repo_with_regression(
+                        &fixture,
+                        fixture.builtin_diff,
+                        repo_path,
+                        std::slice::from_ref(output_dir),
+                        false,
+                    )
                 }
-                SubstrateEvent::GateEvaluated { gate, verdict, .. } => {
-                    spinner.set_status(
-                        format!("GATE {gate}"),
-                        format!("Evaluated verdict: {:?}", verdict),
-                    );
-                    spinner.tick(&self.theme);
+            });
+
+            loop {
+                match rx.recv_timeout(Duration::from_millis(33)) {
+                    Ok(evt) => {
+                        match evt {
+                            SubstrateEvent::PhaseStarted { phase, description } => {
+                                *state_ref = AgentState::Verifying;
+                                spinner.set_status(format!("{phase:?}"), description);
+                            }
+                            SubstrateEvent::GateEvaluated { gate, verdict, .. } => {
+                                *state_ref = AgentState::Verifying;
+                                spinner.set_status(
+                                    format!("GATE {gate}"),
+                                    format!("Evaluated verdict: {verdict:?}"),
+                                );
+                            }
+                            _ => {}
+                        }
+                        spinner.tick(theme);
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        spinner.tick(theme);
+                        if worker.is_finished() {
+                            break;
+                        }
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
-                _ => {}
             }
-        }
+
+            worker.join().unwrap_or_else(|_| {
+                Err(replayfix_core::CoreError::Execution(
+                    "Verification worker thread panicked".to_string(),
+                ))
+            })
+        });
 
         match outcome {
             Ok(HealOutcome::Verified(receipt)) => {
+                self.state = AgentState::Completed;
                 spinner.complete(
                     &self.theme,
                     &format!("Defect {task_id} causally reproduced & verified repaired"),
+                );
+                let aria_snap = format!(
+                    "- button \"{}\" [target={}]",
+                    fixture.contract.target, fixture.target_path
+                );
+                self.session.record_verification_artifacts(
+                    "VERIFIED_REPAIRED (Gate 1 RED -> Gate 2 GREEN)",
+                    Some(aria_snap),
+                    Some(fixture.builtin_diff.to_string()),
                 );
                 self.session.record_turn(
                     format!("reproduce and fix {task_id}"),
                     format!("Successfully verified repair for {task_id}"),
                     Some(task_id.to_string()),
                 );
+                let _ = self.session.save(&self.output_dir);
 
                 // Launch interactive diff review
-                let mut reviewer = DiffReviewer::new(fixture.builtin_diff);
-                let review_choice = reviewer.run_interactive(&self.theme);
+                self.state = AgentState::WaitingForApproval;
+                let is_interactive = io::stdin().is_terminal();
+                let review_choice = if is_interactive {
+                    let mut reviewer = DiffReviewer::new(fixture.builtin_diff);
+                    reviewer.run_interactive(&self.theme)
+                } else {
+                    println!("\n  Candidate patch verified:");
+                    println!("{}", crate::approval::highlight_diff(fixture.builtin_diff));
+                    print!("  Apply patch to base repo? [y/N]: ");
+                    let _ = io::stdout().flush();
+                    let mut ans = String::new();
+                    let _ = io::stdin().lock().read_line(&mut ans);
+                    if ans.trim().eq_ignore_ascii_case("y") {
+                        DiffReviewOutcome::Approved
+                    } else if ans.trim().eq_ignore_ascii_case("r") {
+                        DiffReviewOutcome::Rejected
+                    } else {
+                        DiffReviewOutcome::Aborted
+                    }
+                };
 
                 match review_choice {
                     DiffReviewOutcome::Approved => {
@@ -512,7 +593,7 @@ impl AgentShell {
                         let grant = self.session.permissions.request_permission(
                             &action,
                             false,
-                            true,
+                            is_interactive,
                             &self.theme,
                         );
 

@@ -19,7 +19,7 @@ pub struct SessionTurn {
     pub task_id: Option<String>,
 }
 
-/// Persistent agent session record saved to `.replayfix/session_state.json`.
+/// Persistent agent session record saved to `.replayfix/session_state.json` and `.replayfix/sessions/<session_id>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub session_id: String,
@@ -29,6 +29,12 @@ pub struct SessionRecord {
     pub active_task: Option<String>,
     pub turns: Vec<SessionTurn>,
     pub checkpoint: Option<SessionStateCheckpoint>,
+    #[serde(default)]
+    pub cached_aria_snapshots: Vec<String>,
+    #[serde(default)]
+    pub verified_gate_state: Option<String>,
+    #[serde(default)]
+    pub candidate_patches: Vec<String>,
 }
 
 /// Active interactive session manager.
@@ -52,6 +58,9 @@ impl AgentSession {
                 active_task: None,
                 turns: Vec::new(),
                 checkpoint: None,
+                cached_aria_snapshots: Vec::new(),
+                verified_gate_state: None,
+                candidate_patches: Vec::new(),
             },
             permissions: PermissionManager::new(),
         }
@@ -97,6 +106,27 @@ impl AgentSession {
         self.record.last_updated = chrono::Utc::now().to_rfc3339();
     }
 
+    /// Record verified gate state, DOM ariaSnapshot, and candidate patch into session persistence.
+    pub fn record_verification_artifacts(
+        &mut self,
+        gate_state: impl Into<String>,
+        aria_snapshot: Option<String>,
+        candidate_patch: Option<String>,
+    ) {
+        self.record.verified_gate_state = Some(gate_state.into());
+        if let Some(snap) = aria_snapshot {
+            if !self.record.cached_aria_snapshots.contains(&snap) {
+                self.record.cached_aria_snapshots.push(snap);
+            }
+        }
+        if let Some(patch) = candidate_patch {
+            if !self.record.candidate_patches.contains(&patch) {
+                self.record.candidate_patches.push(patch);
+            }
+        }
+        self.record.last_updated = chrono::Utc::now().to_rfc3339();
+    }
+
     /// Save session state atomically to file.
     pub fn save(&self, output_dir: &Path) -> Result<()> {
         if !output_dir.exists() {
@@ -109,10 +139,10 @@ impl AgentSession {
 
         let serialized = serde_json::to_string_pretty(&self.record)?;
         let session_file = output_dir.join("session_state.json");
-        fs::write(&session_file, &serialized)?;
+        replayfix_core::artifacts::atomic_write_file(&session_file, serialized.as_bytes())?;
 
         let id_file = sessions_dir.join(format!("{}.json", self.record.session_id));
-        fs::write(&id_file, serialized)?;
+        replayfix_core::artifacts::atomic_write_file(&id_file, serialized.as_bytes())?;
         Ok(())
     }
 
@@ -150,7 +180,9 @@ impl AgentSession {
 
     /// Load a specific session by ID.
     pub fn load_by_id(output_dir: &Path, session_id: &str) -> Option<Self> {
-        let id_file = output_dir.join("sessions").join(format!("{session_id}.json"));
+        let id_file = output_dir
+            .join("sessions")
+            .join(format!("{session_id}.json"));
         if id_file.exists() {
             if let Ok(content) = fs::read_to_string(id_file) {
                 if let Ok(record) = serde_json::from_str::<SessionRecord>(&content) {

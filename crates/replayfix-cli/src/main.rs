@@ -1758,9 +1758,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     session::AgentSession::load_by_id(&output, id)
                 } else {
                     let list = session::AgentSession::list_sessions(&output);
-                    list.first().and_then(|rec| {
-                        session::AgentSession::load_by_id(&output, &rec.session_id)
-                    })
+                    list.first()
+                        .and_then(|rec| session::AgentSession::load_by_id(&output, &rec.session_id))
                 };
                 let session = session_opt.unwrap_or_else(|| {
                     usage_error(
@@ -1773,6 +1772,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     theme: stdout_theme,
                     output_dir: output,
                     repo_path: PathBuf::from(repo),
+                    state: shell::AgentState::Idle,
                 };
                 shell.run()?;
             }

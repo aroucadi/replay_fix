@@ -10,7 +10,26 @@ use crossterm::terminal::{
 };
 use crossterm::QueueableCommand;
 use std::io::{self, stdout, Write};
+use std::sync::Once;
 use std::time::Duration;
+
+static PANIC_HOOK_INIT: Once = Once::new();
+
+/// Install a global panic hook that restores terminal raw mode, cursor visibility,
+/// and exits the alternate screen buffer before unwinding.
+pub fn install_terminal_panic_hook() {
+    PANIC_HOOK_INIT.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let mut out = stdout();
+            let _ = out.queue(Show);
+            let _ = out.queue(LeaveAlternateScreen);
+            let _ = out.flush();
+            let _ = disable_raw_mode();
+            default_hook(info);
+        }));
+    });
+}
 
 /// Safe RAII guard for raw terminal execution.
 #[derive(Debug)]
@@ -22,6 +41,7 @@ pub struct ScreenGuard {
 impl ScreenGuard {
     /// Initialize raw mode without switching to alternate screen (in-place interactive mode).
     pub fn enter_raw() -> io::Result<Self> {
+        install_terminal_panic_hook();
         enable_raw_mode()?;
         let mut out = stdout();
         out.queue(Hide)?;
@@ -34,6 +54,7 @@ impl ScreenGuard {
 
     /// Initialize full alternate screen with raw mode (for full-screen interactive views like diff review).
     pub fn enter_alternate() -> io::Result<Self> {
+        install_terminal_panic_hook();
         enable_raw_mode()?;
         let mut out = stdout();
         out.queue(EnterAlternateScreen)?.queue(Hide)?;
@@ -58,6 +79,17 @@ impl ScreenGuard {
             }
         }
         Ok(None)
+    }
+
+    /// Read next key or resize event, returning `Ok(None)` on resize so callers can re-render immediately.
+    pub fn read_key_or_resize() -> io::Result<Option<KeyEvent>> {
+        loop {
+            match event::read()? {
+                Event::Key(key) => return Ok(Some(key)),
+                Event::Resize(_, _) => return Ok(None),
+                _ => {}
+            }
+        }
     }
 
     /// Read next key event, blocking until input is available.

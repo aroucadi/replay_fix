@@ -146,12 +146,13 @@ impl<'a> DiffReviewer<'a> {
             let (cols, rows) = ScreenGuard::get_size();
             self.render_frame(cols, rows, theme);
 
-            match ScreenGuard::read_key() {
-                Ok(KeyEvent { code, .. }) => {
+            match ScreenGuard::read_key_or_resize() {
+                Ok(Some(KeyEvent { code, .. })) => {
                     if let Some(outcome) = self.handle_key(code, rows) {
                         return outcome;
                     }
                 }
+                Ok(None) => {}
                 Err(_) => return DiffReviewOutcome::Aborted,
             }
         }
@@ -283,7 +284,8 @@ mod tests {
 
     #[test]
     fn test_diff_reviewer_neutralizes_ansi_escape_injection() {
-        let malicious = "--- a/app.js\n+++ b/app.js\n@@ -1,1 +1,1 @@\n+\x1b[2J\x1b]50;pwned\x07const x = 1;\n";
+        let malicious =
+            "--- a/app.js\n+++ b/app.js\n@@ -1,1 +1,1 @@\n+\x1b[2J\x1b]50;pwned\x07const x = 1;\n";
         let reviewer = DiffReviewer::new(malicious);
         let theme = Theme::for_stdout(ColorOption::Never, OutputMode::Human);
         let frame = reviewer.format_frame(80, 24, &theme);
