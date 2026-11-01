@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AttachedSpaEndpoint",
+  "description": "Validation and metadata schema for Attached SPA dev server endpoints in ReplayFix v1.3.0",
+  "type": "object",
+  "required": [
+    "endpoint_url",
+    "host",
+    "port",
+    "scheme",
+    "reachable",
+    "substrate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "endpoint_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "User-supplied target endpoint URL"
+    },
+    "host": {
+      "type": "string",
+      "description": "Resolved hostname or IP address of the dev server"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "TCP port number where the dev server is listening"
+    },
+    "scheme": {
+      "type": "string",
+      "enum": ["http", "https"],
+      "description": "URL protocol scheme"
+    },
+    "reachable": {
+      "type": "boolean",
+      "description": "Whether TCP socket connectivity and HTTP probe passed"
+    },
+    "substrate": {
+      "type": "string",
+      "const": "attached-spa-remote",
+      "description": "Honest substrate attribution recorded in audit receipt"
+    },
+    "initial_status_code": {
+      "type": "integer",
+      "description": "HTTP status code returned during initial preflight probe"
+    }
+  }
+}

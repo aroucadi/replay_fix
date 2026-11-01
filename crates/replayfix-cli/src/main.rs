@@ -125,6 +125,10 @@ pub struct ReproArgs {
     #[arg(long)]
     pub server_cmd: Option<String>,
 
+    /// Attach Playwright CDP directly to an externally running application server URL (e.g. http://localhost:3000)
+    #[arg(long)]
+    pub url: Option<String>,
+
     /// Environment variable used by application for port (default: PORT)
     #[arg(long, default_value = "PORT")]
     pub port_env_var: String,
@@ -412,6 +416,7 @@ struct ReproExtras {
     apply: bool,
     yes: bool,
     issue: Option<String>,
+    url: Option<String>,
 }
 
 fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras) {
@@ -426,6 +431,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         video,
         audio,
         server_cmd,
+        url,
         port_env_var,
         healthcheck_path,
         startup_timeout_ms,
@@ -451,6 +457,12 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         yes,
         issue,
     } = args;
+
+    if let Some(ref raw_url) = url {
+        if let Err(e) = replayfix_core::AttachedSpaEndpoint::parse(raw_url) {
+            usage_error(&e.to_string(), theme);
+        }
+    }
 
     let parsed_mode = if let Some(ref raw_mode) = mode {
         match ExecutionMode::parse(raw_mode) {
@@ -501,6 +513,10 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         }
     }
 
+    let is_spa_workspace = url.is_some()
+        || replayfix_core::ManagedSpaServer::is_managed_spa(Path::new(&repo))
+        || Path::new(&repo).join("public/app.js").exists();
+
     let inferred_from_video = if task_id.is_none() && bug.is_none() {
         video.as_deref().and_then(|v| {
             let lower = Path::new(v)
@@ -518,6 +534,8 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
                 Some("RF-04")
             } else if lower.starts_with("rf05") || lower.starts_with("rf-05") {
                 Some("RF-05")
+            } else if is_spa_workspace {
+                Some("RF-01")
             } else {
                 None
             }
@@ -534,9 +552,10 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
     let auto_live_from_video = inferred_from_video.is_some()
         && !mock_heal
         && parsed_mode != Some(ExecutionMode::DeterministicFixture)
-        && video.as_deref().is_some_and(|v| Path::new(v).exists());
-    let live_browser = live_browser || auto_live_from_video;
+        && (video.as_deref().is_some_and(|v| Path::new(v).exists()) || is_spa_workspace);
+    let live_browser = live_browser || auto_live_from_video || url.is_some();
     let mock_heal = mock_heal
+        || (bug.is_some() && !live_browser)
         || (autonomous_requested && !live_browser)
         || (parsed_mode == Some(ExecutionMode::DeterministicFixture) && !live_browser);
 
@@ -567,6 +586,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         apply,
         yes,
         issue: issue.clone(),
+        url,
     };
 
     if let Some(manifest_path) = manifest {
@@ -770,7 +790,7 @@ fn resolve_repair_mode(extras: &ReproExtras) -> Option<RepairClientMode> {
 fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> ! {
     let out_dir = TaskManifest::assert_safe_path(&extras.output_dir, "output-dir")
         .unwrap_or_else(|e| fail(e, "Invalid --output-dir", theme));
-    let repo_dir = TaskManifest::assert_safe_path(&m.repo_path, "repo_path")
+    let mut repo_dir = TaskManifest::assert_safe_path(&m.repo_path, "repo_path")
         .unwrap_or_else(|e| fail(e, "Invalid --repo path", theme));
     if !repo_dir.exists() || !repo_dir.is_dir() {
         usage_error(
@@ -780,6 +800,17 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             ),
             theme,
         );
+    }
+    if m.repo_path == "."
+        && !repo_dir.join("public/app.js").exists()
+        && !repo_dir.join("src/cart-summary.js").exists()
+    {
+        if let Some(video_grandparent) = Path::new(&m.video_path).parent().and_then(|p| p.parent())
+        {
+            if video_grandparent.join("public/app.js").exists() {
+                repo_dir = video_grandparent.to_path_buf();
+            }
+        }
     }
 
     let mode_flag = if extras.live_browser {
@@ -859,6 +890,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             mock_regression: extras.mock_regression,
             execution_mode: extras.execution_mode,
             gateway_client,
+            attached_url: extras.url.clone(),
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,

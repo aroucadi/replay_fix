@@ -1,0 +1,2 @@
+9f47a1b31f10987f155d403fd9c80da2952e87a592931aa7ce76372b21acab2f  binaries/windows-x64/replayfix.exe
+9affc351b9b2581493d52ebafb4fbfe26a53f3f63e26cf48e6f1064399cd29e5  proof-portal/proof_viewer.html

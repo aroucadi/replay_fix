@@ -18,6 +18,7 @@ pub mod diffguard;
 pub mod digest;
 pub mod doctor;
 pub mod engine;
+pub mod environment;
 pub mod error;
 pub mod fixtures;
 pub mod fsm;
@@ -55,6 +56,10 @@ pub use doctor::{DependencyCheck, DependencyStatus, Doctor, DoctorReport};
 pub use engine::{
     BehavioralContract, GateVerdict, HealOutcome, LiveBrowserOptions, MockHealer, OracleEvent,
     OracleEventKind,
+};
+pub use environment::{
+    probe_http_ready, AttachedSpaEndpoint, ManagedSpaServer, SpaToolchain,
+    DEFAULT_SPA_STARTUP_TIMEOUT,
 };
 pub use error::{CoreError, Result};
 pub use fixtures::{

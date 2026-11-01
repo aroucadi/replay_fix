@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ManagedSpaConfig",
+  "description": "Configuration schema for Managed Modern Web SPA development server supervision in ReplayFix v1.3.0",
+  "type": "object",
+  "required": [
+    "toolchain",
+    "working_dir",
+    "port",
+    "url",
+    "readiness_timeout_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "toolchain": {
+      "type": "string",
+      "enum": [
+        "vite",
+        "nextjs",
+        "react-scripts",
+        "node-script"
+      ],
+      "description": "Detected SPA framework or build toolchain"
+    },
+    "working_dir": {
+      "type": "string",
+      "description": "Working directory of the spawned dev server process (scratch clone)"
+    },
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Executable and arguments spawned to boot the dev server"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Dynamically assigned ephemeral TCP port bound by the OS kernel"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Full base HTTP URL where the SPA dev server is listening"
+    },
+    "readiness_path": {
+      "type": "string",
+      "default": "/",
+      "description": "HTTP path polled to confirm server compilation readiness"
+    },
+    "readiness_timeout_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 60000,
+      "default": 30000,
+      "description": "Maximum allowed milliseconds before failing closed on dev server warmup"
+    },
+    "process_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Root process identifier for child process tree supervision"
+    }
+  }
+}

@@ -1,11 +1,16 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.2.0` (`120-v1.2.0-real-perception-sam-asr` — Realtime Multimodal Perception: Live Meta SAM 3.1, Muse Voice 24kHz ASR & Multi-Action Trajectory)
-- **Status**: Production Release Qualification Complete; 235/235 Tests Passing, Zero Panics, 0 Clippy Warnings. Live SAM 3.1 wire segmentation (`SamWirePayload`, `SamSegmenter::segment_live`), Muse Voice 24kHz PCM ASR (`AsrPayload`, `AsrTranscriber::transcribe_live`), multi-step `ActionTrajectory` extraction, honest offline vs. live provenance, `.env` + Windows Registry `META_API_KEY` resolution, and `release/v1.2.0/` package verified.
+- **Active Milestone**: `v1.3.0` (`130-v1.3.0-substrate-truth-spa` — Substrate Truth & Universal SPA Grounding)
+- **Status**: Production Release Qualification Complete; 250/250 Tests Passing, Zero Panics, 0 Clippy Warnings. Enforced execution-derived provenance and billing integrity in `audit_receipt.json`, implemented Universal SPA Attached Mode (`--url <endpoint> --repo <path>`) and Managed Mode (`--repo <path>` via `ManagedSpaServer` on dynamic port `:0` with 30s health polling and RAII process-tree cleanup), and decoupled real workspaces (`benchmarks/metapulse/`) from synthetic HTML fixture fallbacks.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.3.0 Substrate Truth & Universal SPA Grounding (Spec 130)**:
+  - Implemented `crates/replayfix-core/src/environment.rs` (`SpaToolchain`, `ManagedSpaServer`, `AttachedSpaEndpoint`) supporting `vite`, `next`, `react-scripts`, and Node dev scripts on dynamic port `:0` with 30s HTTP readiness polling and RAII `Drop` process-tree teardown.
+  - Added `--url <endpoint>` CLI option for Attached SPA Mode, connecting Playwright CDP directly to external dev servers, synchronizing candidate repairs to `--repo` during Gate 2, and rolling back on failure.
+  - Enforced execution-derived `provenance`, `model_provenance`, and `token_accounting` in `audit_receipt.json`, rejecting `--mode live-ai` combined with mock flags (`Exit 2`).
+  - Added runnable MetaPulse SPA substrate (`benchmarks/metapulse/package.json`, `server.js`, `public/index.html`, `public/app.js`) and removed synthetic `#btn-publish-quote` fallback elements from `RF01_INDEX_HTML`.
 - [x] **v1.2.0 Realtime Multimodal Perception: Live Meta SAM 3.1, Muse Voice 24kHz ASR & Multi-Action Trajectory (Spec 120)**:
   - Implemented `SamWirePayload`, `MetaGatewayClient::send_sam_segmentation`, and `SamSegmenter::segment_live` (`sam-3.1`) with CDP `document.elementFromPoint` centroid verification and fail-closed `AMBIGUOUS_GROUNDING` (`Exit 22`).
   - Implemented `AsrPayload` (`PCM_24KHZ`, `ENDPOINTING`, `DELTA`), 44-byte RIFF/WAVE header verification (`24,000 Hz`, mono, 16-bit PCM), `MetaGatewayClient::send_asr_transcription`, and `AsrTranscriber::transcribe_live` / `parse_asr_events` (`muse-voice-transcribe-1.0`).
@@ -126,8 +131,8 @@
 ## 4. Deferred Items (documented, not hidden)
 - `tracing_subscriber` is initialised for structured diagnostic logging.
 
-## 5. v1.2.0 Readiness
-- **Shipping status**: Spec 000 through Spec 120 (`v1.2.0`) complete, verified, and packaged in `release/v1.2.0/`.
+## 5. v1.3.0 Readiness
+- **Shipping status**: Spec 000 through Spec 130 (`v1.3.0`) complete, verified, and packaged in `release/v1.3.0/`.
 
 ## 6. Next Immediate Task
-- Stand by for `v1.2.0` release tagging or live Meta AI execution runs.
+- Stand by for `v1.3.0` release tagging or live Meta AI execution runs.

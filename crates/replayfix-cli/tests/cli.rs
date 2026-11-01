@@ -1206,24 +1206,14 @@ fn test_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
 #[test]
 fn test_provenance_honest_on_default_run() {
     let dir = scratch("provenance-default");
-    let out = run_cmd(
-        &dir,
-        &[
-            "run",
-            "--bug",
-            "RF-01",
-            "--mock-heal",
-            "--output-dir",
-            "out-default",
-        ],
-    );
+    let out = run_cmd(&dir, &["run", "--bug", "RF-01"]);
     assert_eq!(
         code(&out),
         0,
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let receipt = json(&dir.join("out-default/audit_receipt.json"));
+    let receipt = json(&dir.join(".replayfix/audit_receipt.json"));
     assert_eq!(receipt["provenance"], "deterministic-fixture");
     assert!(receipt.get("model_provenance").is_none() || receipt["model_provenance"].is_null());
     assert!(receipt.get("token_accounting").is_none() || receipt["token_accounting"].is_null());
@@ -1286,4 +1276,159 @@ fn test_deterministic_fixture_clears_token_accounting() {
         .as_str()
         .unwrap()
         .contains("Zero live external AI tokens billed"));
+}
+
+#[test]
+fn test_managed_spa_server_boots_on_port_0_and_cleans_up() {
+    let dir = scratch("managed-spa-port-0");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let metapulse_dir = repo_root.join("benchmarks/metapulse");
+
+    let out_managed = run_cmd(
+        &dir,
+        &[
+            "repro",
+            "--video",
+            "bug.mp4",
+            "--repo",
+            &metapulse_dir.display().to_string(),
+            "--output-dir",
+            "out-managed-spa",
+        ],
+    );
+    assert_eq!(
+        code(&out_managed),
+        0,
+        "Managed SPA mode failed: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out_managed.stdout),
+        String::from_utf8_lossy(&out_managed.stderr)
+    );
+    let managed_receipt = json(&dir.join("out-managed-spa/audit_receipt.json"));
+    assert_eq!(managed_receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(managed_receipt["gate1"]["verdict"], "RED");
+    assert_eq!(managed_receipt["gate2"]["verdict"], "GREEN");
+    assert_eq!(managed_receipt["provenance"], "deterministic-fixture");
+    assert!(
+        managed_receipt.get("model_provenance").is_none()
+            || managed_receipt["model_provenance"].is_null()
+    );
+    assert!(
+        managed_receipt.get("token_accounting").is_none()
+            || managed_receipt["token_accounting"].is_null()
+    );
+    let managed_port = managed_receipt["ephemeral_port"].as_u64().unwrap() as u16;
+    assert!(managed_port > 0);
+    // Child dev server must be terminated after run completes.
+    assert!(!replayfix_core::probe_http_ready(
+        "127.0.0.1",
+        managed_port,
+        "/"
+    ));
+}
+
+#[test]
+fn test_attached_spa_mode_connects_to_external_url() {
+    let dir = scratch("attached-spa-mode");
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let metapulse_dir = repo_root.join("benchmarks/metapulse");
+
+    let target_app = dir.join("target-app");
+    fs::create_dir_all(target_app.join("public")).unwrap();
+    fs::copy(
+        metapulse_dir.join("package.json"),
+        target_app.join("package.json"),
+    )
+    .unwrap();
+    fs::copy(
+        metapulse_dir.join("server.js"),
+        target_app.join("server.js"),
+    )
+    .unwrap();
+    fs::copy(
+        metapulse_dir.join("public/index.html"),
+        target_app.join("public/index.html"),
+    )
+    .unwrap();
+    fs::copy(
+        metapulse_dir.join("public/app.js"),
+        target_app.join("public/app.js"),
+    )
+    .unwrap();
+    let initial_app_js = fs::read_to_string(target_app.join("public/app.js")).unwrap();
+
+    let external_server = replayfix_core::ManagedSpaServer::spawn(&target_app, None).unwrap();
+    let attached_url = external_server.base_url();
+    let attached_port = external_server.port();
+
+    // 1. Attached Mode without --apply preserves \Delta repo = 0 (Shadow Scratch First)
+    let out_attached = run_cmd(
+        &dir,
+        &[
+            "repro",
+            "--video",
+            "bug.mp4",
+            "--url",
+            &attached_url,
+            "--repo",
+            "target-app",
+            "--output-dir",
+            "out-attached-spa",
+        ],
+    );
+    assert_eq!(
+        code(&out_attached),
+        0,
+        "Attached SPA mode failed: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out_attached.stdout),
+        String::from_utf8_lossy(&out_attached.stderr)
+    );
+    let attached_receipt = json(&dir.join("out-attached-spa/audit_receipt.json"));
+    assert_eq!(attached_receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(attached_receipt["substrate"], "attached-spa-remote");
+    assert_eq!(
+        attached_receipt["ephemeral_port"].as_u64().unwrap(),
+        u64::from(attached_port)
+    );
+    assert_eq!(attached_receipt["gate1"]["verdict"], "RED");
+    assert_eq!(attached_receipt["gate2"]["verdict"], "GREEN");
+    assert_eq!(attached_receipt["provenance"], "deterministic-fixture");
+    assert_eq!(
+        fs::read_to_string(target_app.join("public/app.js")).unwrap(),
+        initial_app_js,
+        "Shadow Scratch First: --repo must remain unmodified when --apply is not passed"
+    );
+
+    // 2. Attached Mode with --apply --yes applies verified patch to --repo
+    let out_apply = run_cmd(
+        &dir,
+        &[
+            "repro",
+            "--video",
+            "bug.mp4",
+            "--url",
+            &attached_url,
+            "--repo",
+            "target-app",
+            "--apply",
+            "--yes",
+            "--output-dir",
+            "out-attached-apply",
+        ],
+    );
+    assert_eq!(code(&out_apply), 0);
+    let patched_app_js = fs::read_to_string(target_app.join("public/app.js")).unwrap();
+    assert!(
+        patched_app_js.contains("let session = { currentUser: { profileId: 'default' } };"),
+        "--apply --yes must apply verified patch to --repo target-app/public/app.js"
+    );
 }

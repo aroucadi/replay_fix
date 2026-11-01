@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 pub const SCHEMA_VERSION: &str = "0.9";
 pub const SUBSTRATE: &str = "mock-static-oracle";
 pub const SUBSTRATE_LIVE_BROWSER: &str = "playwright-cdp";
+pub const SUBSTRATE_ATTACHED_SPA: &str = "attached-spa-remote";
+pub const SUBSTRATE_MANAGED_SPA: &str = "managed-spa-supervisor";
 pub const DISCLAIMER: &str = "Simulated oracle: gates inspect a built-in fixture. No browser was executed and no model was involved.";
 pub const DISCLAIMER_LIVE_BROWSER: &str = "Live Playwright CDP oracle: gates executed in Chromium against an isolated ephemeral sandbox server.";
 pub const AUDIT_RECEIPT_FILE: &str = "audit_receipt.json";
@@ -574,6 +576,7 @@ pub enum TriageStatus {
     FlakyNonDeterministic,
     InvalidTestOverfit,
     CleanPassUnreproduced,
+    EnvironmentSetupFailed,
 }
 
 impl TriageStatus {
@@ -596,6 +599,7 @@ impl TriageStatus {
             Self::FlakyNonDeterministic => "FLAKY_NON_DETERMINISTIC",
             Self::InvalidTestOverfit => "INVALID_TEST_OVERFIT",
             Self::CleanPassUnreproduced => "CLEAN_PASS_UNREPRODUCED",
+            Self::EnvironmentSetupFailed => "ENVIRONMENT_SETUP_FAILED",
         }
     }
 
@@ -611,6 +615,7 @@ impl TriageStatus {
             Self::BridgeExecutionFailed => 20,
             Self::QuarantineRepairFailed | Self::FlakyNonDeterministic => 21,
             Self::AmbiguousGrounding => 22,
+            Self::EnvironmentSetupFailed => 25,
             Self::RepairNoopRejected | Self::PatchApplyFailed | Self::Gate2NotGreen => 30,
             Self::RegressionDetected => 31,
             Self::QuarantineInvertedBaseline => 32,

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-11-01
+
+**Spec 130 — Substrate Truth & Universal SPA Grounding**: Enforced execution-derived provenance and billing integrity in `audit_receipt.json`, added Universal SPA **Attached Mode** (`--url <endpoint> --repo <path>`) and **Managed Mode** (`--repo <path>` via `ManagedSpaServer` with dynamic `:0` port capture, 30s health polling, and RAII process-tree teardown), and decoupled real workspaces (`benchmarks/metapulse/`) from synthetic HTML fixture fallbacks. Full notes: [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md).
+
+### Added
+- **Universal SPA Environment Manager (`replayfix-core::environment`, `replayfix-cli`)**:
+  - `ManagedSpaServer` and `SpaToolchain` auto-detecting `vite`, `next`, `react-scripts`, and Node dev scripts from `package.json`, spawning child dev servers on dynamic port `:0`, capturing bound ports from stdout/stderr, polling HTTP readiness with a 30s timeout, and terminating child process trees via `Drop` (`Platform::terminate_process_tree`).
+  - `AttachedSpaEndpoint` and `--url <endpoint>` CLI option connecting Playwright CDP directly to externally running application servers, synchronizing candidate patches to `--repo` during Gate 2, and rolling back on failure.
+- **Execution-Derived Provenance & Billing Integrity (`replayfix-cli`, `replayfix-core::engine`)**:
+  - Rejects any combination of `--mode live-ai` with mock flags (`--mock-syntax-retry`, `--mock-failing-repair`, `--mock-pkg-test-mutation`, or `--mock-patch != "builtin"`) with `ERR_USAGE` (Exit Code `2`).
+  - Initializes `AuditReceipt.provenance` to `Some("deterministic-fixture")` and guarantees `model_provenance: null` and `token_accounting: null` on all offline/fixture executions.
+- **Runnable MetaPulse SPA Workspace (`benchmarks/metapulse/`, `replayfix-core::fixtures`)**:
+  - Added runnable `package.json`, `server.js`, `public/index.html`, and `public/app.js` under `benchmarks/metapulse/` and removed synthetic `#btn-publish-quote` fallback elements from `RF01_INDEX_HTML`.
+
+---
+
 ## [1.2.0] - 2026-10-31
 
 **Spec 120 — Realtime Multimodal Perception (Live Meta SAM 3.1, Muse Voice 24 kHz ASR & Multi-Action Trajectory)**: Wired live outbound HTTPS inference for `sam-3.1` (`SamSegmenter::segment_live`, `MetaGatewayClient::send_sam_segmentation`), `muse-voice-transcribe-1.0` (`AsrTranscriber::transcribe_live`, `MetaGatewayClient::send_asr_transcription` with 24 kHz mono PCM WAV validation), and `BoundedRepairClient` / `ModelPool`, added multi-step `ActionTrajectory` extraction (`RoiDiffer::detect_trajectory`), enforced honest offline provenance (`local_diff_heuristic` / `simulated_fixture`), and added `.env` + Windows Registry (`HKCU\Environment`) credential resolution. Full notes: [docs/release-notes/v1.2.0.md](docs/release-notes/v1.2.0.md).

@@ -184,17 +184,14 @@ const RF01_INDEX_HTML: &str = r#"<!DOCTYPE html>
   <main>
     <h1>Shopping Cart</h1>
     <button id="refresh-cart-btn" data-testid="cart-refresh-btn" style="position:fixed;left:100px;top:100px;width:120px;height:40px;">Refresh Cart</button>
-    <button id="btn-publish-quote" data-testid="btn-publish-quote" style="position:fixed;left:470px;top:350px;width:130px;height:45px;">Publish Quote</button>
     <div id="cart-summary-output" data-testid="cart-summary-output">Pending</div>
   </main>
   <script type="module">
     import { cartItemCount } from './src/cart-summary.js';
-    const trigger = () => {
+    document.getElementById('refresh-cart-btn').addEventListener('click', () => {
       const count = cartItemCount({});
       document.getElementById('cart-summary-output').textContent = 'Items: ' + count;
-    };
-    document.getElementById('refresh-cart-btn')?.addEventListener('click', trigger);
-    document.getElementById('btn-publish-quote')?.addEventListener('click', trigger);
+    });
   </script>
 </body>
 </html>
@@ -346,9 +343,9 @@ impl Fixture {
         Fixture {
             task_id: "RF-01",
             target_path: "public/app.js",
-            buggy_source: "async function handlePublishQuote() {\n  const comment = elements.quoteCommentInput.value;\n  let session;\n  console.log(\"Processing quote repost with profile:\", session.currentUser.profileId);\n}\n",
-            builtin_diff: "--- a/public/app.js\n+++ b/public/app.js\n@@ -226,3 +226,3 @@\n   const comment = elements.quoteCommentInput.value;\n-  let session;\n+  let session = { currentUser: { profileId: 'default' } };\n   console.log(\"Processing quote repost with profile:\", session.currentUser.profileId);\n",
-            index_html: "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\" /><title>MetaPulse Quote Repost — RF-01</title></head><body style=\"margin:0;padding:0;font-family:sans-serif;\"><main><button id=\"btn-publish-quote\" data-testid=\"btn-publish-quote\" style=\"position:fixed;left:470px;top:350px;width:130px;height:45px;\">Publish Quote</button><div id=\"cart-summary-output\" data-testid=\"cart-summary-output\">Pending</div></main><script>document.getElementById('btn-publish-quote').addEventListener('click', async () => { const resp = await fetch('/public/app.js'); const code = await resp.text(); if (code.includes('let session;') && !code.includes('let session =')) { let session; console.log(session.currentUser.profileId); } document.getElementById('cart-summary-output').textContent = 'Quote Published'; });</script></body></html>",
+            buggy_source: "function handlePublishQuote() {\n  const comment = elements.quoteCommentInput.value;\n  let session;\n  console.log(\"Processing quote repost with profile:\", session.currentUser.profileId, comment);\n  const out = document.getElementById(\"cart-summary-output\");\n  if (out) {\n    out.textContent = \"Quote Published\";\n  }\n}\n",
+            builtin_diff: "--- a/public/app.js\n+++ b/public/app.js\n@@ -2,3 +2,3 @@\n   const comment = elements.quoteCommentInput.value;\n-  let session;\n+  let session = { currentUser: { profileId: 'default' } };\n   console.log(\"Processing quote repost with profile:\", session.currentUser.profileId, comment);\n",
+            index_html: "",
             click_x: 532,
             click_y: 374,
             viewport_width: 1280,

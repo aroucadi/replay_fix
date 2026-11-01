@@ -188,6 +188,52 @@ pub struct LiveBrowserOptions {
     pub mock_regression: bool,
     pub execution_mode: Option<crate::gateway::ExecutionMode>,
     pub gateway_client: Option<crate::gateway::MetaGatewayClient>,
+    pub attached_url: Option<String>,
+}
+
+enum LiveServerRuntime {
+    Attached {
+        endpoint: crate::environment::AttachedSpaEndpoint,
+    },
+    Managed {
+        server: crate::environment::ManagedSpaServer,
+    },
+    EmbeddedStatic {
+        server: SandboxServer,
+    },
+}
+
+impl LiveServerRuntime {
+    fn port(&self) -> u16 {
+        match self {
+            Self::Attached { endpoint } => endpoint.port(),
+            Self::Managed { server } => server.port(),
+            Self::EmbeddedStatic { server } => server.port(),
+        }
+    }
+
+    fn page_url(&self) -> String {
+        match self {
+            Self::Attached { endpoint } => endpoint.url().to_string(),
+            Self::Managed { server } => server.base_url(),
+            Self::EmbeddedStatic { server } => format!("{}/index.html", server.base_url()),
+        }
+    }
+
+    fn shutdown(&mut self) {
+        match self {
+            Self::Attached { .. } => {}
+            Self::Managed { server } => server.shutdown(),
+            Self::EmbeddedStatic { server } => server.shutdown(),
+        }
+    }
+
+    fn check_healthy(&mut self) -> Result<()> {
+        match self {
+            Self::Attached { .. } | Self::EmbeddedStatic { .. } => Ok(()),
+            Self::Managed { server } => server.check_healthy(),
+        }
+    }
 }
 
 /// Terminal result of a mock-heal or live-browser run.
@@ -333,6 +379,11 @@ impl MockHealer {
 
         // 2. Create isolated scratch sandbox.
         let mut sandbox = ScratchSandbox::create_with_excludes(repo_path, task_id, extra_excludes)?;
+        let active_substrate = if options.attached_url.is_some() {
+            crate::receipt::SUBSTRATE_ATTACHED_SPA
+        } else {
+            SUBSTRATE_LIVE_BROWSER
+        };
 
         macro_rules! reject_live {
             ($status:expr, $reason:expr) => {{
@@ -343,7 +394,7 @@ impl MockHealer {
                         $status,
                         $reason,
                         task_id,
-                        SUBSTRATE_LIVE_BROWSER,
+                        active_substrate,
                         fsm.trace(),
                     ),
                 )));
@@ -356,7 +407,7 @@ impl MockHealer {
                         $status,
                         $reason,
                         task_id,
-                        SUBSTRATE_LIVE_BROWSER,
+                        active_substrate,
                         fsm.trace(),
                     )
                     .with_repair_telemetry($rtel, $tokens),
@@ -364,13 +415,19 @@ impl MockHealer {
             }};
         }
 
-        // 3. Materialize target source file and HTML host shell inside the scratch sandbox.
+        // 3. Materialize target source file and HTML host shell inside the scratch sandbox
+        // only when not operating against a managed SPA or attached external server.
+        let is_managed_spa = crate::environment::ManagedSpaServer::has_package_json(sandbox.root());
         let sandbox_target_file = sandbox.resolve_safe_path(fixture.target_path)?;
         if !sandbox_target_file.exists() {
             sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
         }
         let sandbox_index_html = sandbox.resolve_safe_path("index.html")?;
-        if !sandbox_index_html.exists() {
+        if options.attached_url.is_none()
+            && !is_managed_spa
+            && !sandbox_index_html.exists()
+            && !fixture.index_html.is_empty()
+        {
             sandbox.write_file("index.html", fixture.index_html)?;
         }
         let initial_source = sandbox.read_file(fixture.target_path)?;
@@ -420,13 +477,28 @@ impl MockHealer {
                 (None, fixture.click_x, fixture.click_y)
             };
 
-        // 5. Start embedded localhost HTTP server on an OS-assigned ephemeral port (127.0.0.1:0).
-        let mut server = match SandboxServer::start(sandbox.root(), None) {
-            Ok(s) => s,
-            Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
+        // 5. Select server substrate: Attached URL (--url), Managed SPA (package.json), or Embedded Static.
+        let mut server = if let Some(ref raw_url) = options.attached_url {
+            match crate::environment::AttachedSpaEndpoint::validate(raw_url) {
+                Ok(endpoint) => LiveServerRuntime::Attached { endpoint },
+                Err(e) => reject_live!(TriageStatus::EnvironmentSetupFailed, e.to_string()),
+            }
+        } else if is_managed_spa {
+            match crate::environment::ManagedSpaServer::spawn(sandbox.root(), Some(repo_path)) {
+                Ok(s) => {
+                    sandbox.register_child_pid(s.pid());
+                    LiveServerRuntime::Managed { server: s }
+                }
+                Err(e) => reject_live!(TriageStatus::EnvironmentSetupFailed, e.to_string()),
+            }
+        } else {
+            match SandboxServer::start(sandbox.root(), None) {
+                Ok(s) => LiveServerRuntime::EmbeddedStatic { server: s },
+                Err(e) => reject_live!(TriageStatus::BridgeExecutionFailed, e.to_string()),
+            }
         };
         let ephemeral_port = server.port();
-        let page_url = format!("{}/index.html", server.base_url());
+        let mut page_url = server.page_url();
 
         // 6. Start Playwright Node.js stdio bridge.
         let mut bridge = match PlaywrightBridge::start(
@@ -451,6 +523,8 @@ impl MockHealer {
             &page_url,
             (target_click_x, target_click_y),
             options.candidate_override.as_deref(),
+            false,
+            None,
         ) {
             Ok(pair) => pair,
             Err(CoreError::Grounding(msg)) => {
@@ -493,6 +567,7 @@ impl MockHealer {
             );
         }
 
+        let is_attached_mode = options.attached_url.is_some();
         let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
             if let Some((model_config, client_mode)) = autonomous_config {
                 let mut eval_error: Option<(TriageStatus, String)> = None;
@@ -503,16 +578,43 @@ impl MockHealer {
                     &freeze_guard,
                     model_config,
                     client_mode,
-                    &mut |_sandbox_ref| {
+                    &mut |sandbox_ref| {
+                        let shadow_body = if is_attached_mode {
+                            sandbox_ref.read_file(fixture.target_path).ok()
+                        } else {
+                            None
+                        };
+                        let shadow_override = shadow_body
+                            .as_deref()
+                            .map(|body| (fixture.target_path, body));
                         // Run 2 consecutive live-browser Gate 2 verifications.
                         let mut last_events = Vec::new();
                         for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                            if server.check_healthy().is_err() {
+                                let _ =
+                                    sandbox_ref.write_file(fixture.target_path, &initial_source);
+                                if is_managed_spa {
+                                    server.shutdown();
+                                    if let Ok(restarted) =
+                                        crate::environment::ManagedSpaServer::spawn(
+                                            sandbox_ref.root(),
+                                            Some(repo_path),
+                                        )
+                                    {
+                                        page_url = restarted.base_url();
+                                        server = LiveServerRuntime::Managed { server: restarted };
+                                    }
+                                }
+                                return Ok((false, Vec::new()));
+                            }
                             match Self::execute_browser_gate(
                                 &mut bridge,
                                 fixture,
                                 &page_url,
                                 (target_click_x, target_click_y),
                                 options.candidate_override.as_deref(),
+                                is_attached_mode,
+                                shadow_override,
                             ) {
                                 Ok((g2_grounded, g2_events)) => {
                                     if g2_grounded.selector != gate1_grounded.selector {
@@ -649,14 +751,24 @@ impl MockHealer {
                     reject_live!(TriageStatus::PatchApplyFailed, e.to_string());
                 }
 
+                let shadow_override =
+                    is_attached_mode.then_some((fixture.target_path, outcome.patched.as_str()));
+
                 let mut final_events = Vec::new();
                 for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                    if let Err(health_err) = server.check_healthy() {
+                        bridge.shutdown();
+                        server.shutdown();
+                        reject_live!(TriageStatus::PatchApplyFailed, health_err.to_string());
+                    }
                     let (gate2_grounded, gate2_events) = match Self::execute_browser_gate(
                         &mut bridge,
                         fixture,
                         &page_url,
                         (target_click_x, target_click_y),
                         options.candidate_override.as_deref(),
+                        is_attached_mode,
+                        shadow_override,
                     ) {
                         Ok(pair) => pair,
                         Err(CoreError::Grounding(msg)) => {
@@ -754,7 +866,7 @@ impl MockHealer {
                     parity.new_failures.join(", ")
                 ),
                 task_id,
-                SUBSTRATE_LIVE_BROWSER,
+                active_substrate,
                 fsm.trace(),
             )
             .with_regression_parity(Some(parity.clone()));
@@ -780,7 +892,7 @@ impl MockHealer {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
             task_id: task_id.to_string(),
-            substrate: SUBSTRATE_LIVE_BROWSER.to_string(),
+            substrate: active_substrate.to_string(),
             disclaimer: DISCLAIMER_LIVE_BROWSER.to_string(),
             provenance: Some("deterministic-fixture".to_string()),
             model_provenance: None,
@@ -1158,12 +1270,21 @@ impl MockHealer {
         page_url: &str,
         click_coords: (i32, i32),
         candidate_override: Option<&[DomCandidate]>,
+        reload_page: bool,
+        shadow_override: Option<(&str, &str)>,
     ) -> Result<(GroundedTarget, Vec<OracleEvent>)> {
         let (click_x, click_y) = click_coords;
+        let (shadow_script_path, shadow_script_body) = match shadow_override {
+            Some((p, b)) => (Some(p.to_string()), Some(b.to_string())),
+            None => (None, None),
+        };
         let probe_resp = bridge.send_command(&BridgeCommand::ProbePage {
             url: page_url.to_string(),
             click_x,
             click_y,
+            reload_page,
+            shadow_script_path,
+            shadow_script_body,
         })?;
 
         let (navigated, aria_snapshot, live_candidates, probe_errors) = match probe_resp {

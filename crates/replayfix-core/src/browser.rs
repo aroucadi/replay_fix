@@ -127,6 +127,42 @@ function sendLine(obj, requestId) {
   let page = null;
   let pageCrashed = false;
   let pageErrors = [];
+  let activeShadowPath = null;
+  let activeShadowBody = null;
+
+  async function settleDomAndNetwork(activePage) {
+    await Promise.race([
+      activePage.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
+    await activePage
+      .evaluate(
+        () =>
+          new Promise((resolve) => {
+            let quietTimer = setTimeout(done, 200);
+            const maxCap = setTimeout(done, 1000);
+            const target = document.documentElement || document.body;
+            if (!target) {
+              clearTimeout(quietTimer);
+              clearTimeout(maxCap);
+              resolve();
+              return;
+            }
+            const obs = new MutationObserver(() => {
+              clearTimeout(quietTimer);
+              quietTimer = setTimeout(done, 200);
+            });
+            obs.observe(target, { childList: true, subtree: true, attributes: true });
+            function done() {
+              clearTimeout(quietTimer);
+              clearTimeout(maxCap);
+              obs.disconnect();
+              resolve();
+            }
+          })
+      )
+      .catch(() => {});
+  }
 
   function ensureActivePage(cmdName) {
     if (!browser || !browserConnected) {
@@ -184,6 +220,26 @@ function sendLine(obj, requestId) {
         });
         context.setDefaultTimeout(5000);
         context.setDefaultNavigationTimeout(10000);
+        await context.route('**/*', async (route) => {
+          try {
+            const reqUrl = new URL(route.request().url());
+            if (
+              activeShadowPath &&
+              typeof activeShadowBody === 'string' &&
+              (reqUrl.pathname === '/' + activeShadowPath ||
+                reqUrl.pathname.endsWith('/' + activeShadowPath))
+            ) {
+              await route.fulfill({
+                status: 200,
+                contentType: 'application/javascript; charset=utf-8',
+                headers: { 'Cache-Control': 'no-store' },
+                body: activeShadowBody,
+              });
+              return;
+            }
+          } catch (_) {}
+          await route.continue();
+        });
         page = await context.newPage();
         pageErrors = [];
         page.on('pageerror', (err) => {
@@ -199,7 +255,13 @@ function sendLine(obj, requestId) {
       } else if (cmd.cmd === 'PROBE_PAGE') {
         ensureActivePage('PROBE_PAGE');
         pageErrors = [];
+        activeShadowPath = cmd.shadow_script_path ? String(cmd.shadow_script_path).replace(/^\/+/, '') : null;
+        activeShadowBody = typeof cmd.shadow_script_body === 'string' ? cmd.shadow_script_body : null;
         await page.goto(cmd.url, { waitUntil: 'load', timeout: 10000 });
+        if (cmd.reload_page) {
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
+        }
+        await settleDomAndNetwork(page);
         ensureActivePage('PROBE_PAGE(post-goto)');
         const ariaSnapshot = await withTimeout(
           page.locator('body').ariaSnapshot({ timeout: 5000 }),
@@ -351,6 +413,12 @@ pub enum BridgeCommand {
         url: String,
         click_x: i32,
         click_y: i32,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reload_page: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shadow_script_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shadow_script_body: Option<String>,
     },
     ClickAndObserve {
         role: String,
@@ -971,6 +1039,9 @@ mod tests {
             url: "http://127.0.0.1:41234/index.html".into(),
             click_x: 160,
             click_y: 120,
+            reload_page: false,
+            shadow_script_path: None,
+            shadow_script_body: None,
         };
         let encoded = serde_json::to_string(&cmd).unwrap();
         assert!(!encoded.contains('\n'));
@@ -1061,6 +1132,9 @@ rl.on('line', (line) => {
                 url: "http://127.0.0.1:9999/index.html".into(),
                 click_x: 100,
                 click_y: 100,
+                reload_page: false,
+                shadow_script_path: None,
+                shadow_script_body: None,
             })
             .unwrap_err();
         let elapsed = start.elapsed();
@@ -1147,6 +1221,9 @@ rl.on('line', (line) => {
                 url: "http://127.0.0.1:9999/".into(),
                 click_x: 10,
                 click_y: 10,
+                reload_page: false,
+                shadow_script_path: None,
+                shadow_script_body: None,
             })
             .unwrap();
         assert!(matches!(
@@ -1207,6 +1284,9 @@ rl.on('line', (line) => {
                 url: "http://127.0.0.1:9999/".into(),
                 click_x: 10,
                 click_y: 10,
+                reload_page: false,
+                shadow_script_path: None,
+                shadow_script_body: None,
             })
             .unwrap_err();
         assert!(eof_err.to_string().contains("closed stdout unexpectedly"));
@@ -1244,6 +1324,9 @@ rl.on('line', (line) => {
                 url: "http://127.0.0.1:9999/".into(),
                 click_x: 10,
                 click_y: 10,
+                reload_page: false,
+                shadow_script_path: None,
+                shadow_script_body: None,
             })
             .unwrap_err();
         assert!(json_err.to_string().contains("Invalid JSON"));
@@ -1273,6 +1356,9 @@ rl.on('line', (line) => {
                 url,
                 click_x: fixture.click_x,
                 click_y: fixture.click_y,
+                reload_page: false,
+                shadow_script_path: None,
+                shadow_script_body: None,
             })
             .unwrap();
 

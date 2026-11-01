@@ -66,6 +66,11 @@ impl fmt::Display for EphemeralPort {
 pub struct Platform;
 
 impl Platform {
+    /// Pre-allocate an OS-assigned ephemeral localhost TCP port (`127.0.0.1:0`).
+    pub fn allocate_ephemeral_port() -> Result<u16> {
+        Ok(EphemeralPort::allocate()?.get())
+    }
+
     #[must_use]
     pub const fn os_family() -> OsFamily {
         if cfg!(windows) {
