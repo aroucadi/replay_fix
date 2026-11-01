@@ -24,8 +24,20 @@ pub const SCORE_SCALE_BPS: u32 = 10_000;
 /// Minimum required score margin between the top candidate and runner-up (`0.2500`).
 pub const MIN_AMBIGUITY_MARGIN_BPS: u32 = 2_500;
 
+/// Threshold for a near-exact candidate tie ($|\Delta\text{score}| < 0.05$, i.e. `< 500` bps)
+/// where an interactive copilot session can present the developer with an ambiguity tie-breaker picker.
+pub const AMBIGUITY_TIE_THRESHOLD_BPS: u32 = 500;
+
 /// Minimum score required for the winning candidate (`0.5000`).
 pub const MIN_ACCEPTABLE_SCORE_BPS: u32 = 5_000;
+
+/// Candidate entry surfaced when a near-exact tie ($|\Delta\text{score}| < 0.05$) is detected.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AmbiguousTieCandidate {
+    pub candidate: DomCandidate,
+    pub selector: String,
+    pub score_bps: u32,
+}
 
 /// Axis-aligned bounding box in CSS logical viewport pixels.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -353,6 +365,100 @@ impl LocatorResolver {
             )));
         }
         Ok(matching[0])
+    }
+
+    /// Detects if the top candidates at `(click_x, click_y)` form a close tie ($|\Delta\text{score}| < 0.05$,
+    /// i.e. `< 500` bps). Returns the tied candidates when a tie exists.
+    #[must_use]
+    pub fn detect_ambiguous_tie(
+        click_x: i32,
+        click_y: i32,
+        aria_snapshot: &str,
+        candidates: &[DomCandidate],
+    ) -> Vec<AmbiguousTieCandidate> {
+        let snapshot_trimmed = aria_snapshot.trim();
+        if snapshot_trimmed.is_empty() {
+            return Vec::new();
+        }
+        let mut scored: Vec<AmbiguousTieCandidate> = Vec::new();
+        for cand in candidates {
+            let (score_bps, aria_ok) =
+                Self::score_candidate(cand, click_x, click_y, snapshot_trimmed);
+            if score_bps < MIN_ACCEPTABLE_SCORE_BPS {
+                continue;
+            }
+            if let Ok(selector) = Self::synthesize_selector_for_grounding(cand, aria_ok) {
+                scored.push(AmbiguousTieCandidate {
+                    candidate: cand.clone(),
+                    selector,
+                    score_bps,
+                });
+            }
+        }
+        scored.sort_by(|a, b| {
+            b.score_bps
+                .cmp(&a.score_bps)
+                .then_with(|| a.selector.cmp(&b.selector))
+        });
+        if scored.len() < 2 {
+            return Vec::new();
+        }
+        let top_score = scored[0].score_bps;
+        let second_score = scored[1].score_bps;
+        if top_score.saturating_sub(second_score) < AMBIGUITY_TIE_THRESHOLD_BPS {
+            scored
+                .into_iter()
+                .filter(|c| top_score.saturating_sub(c.score_bps) < AMBIGUITY_TIE_THRESHOLD_BPS)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Resolves `(click_x, click_y)` using an optional interactive tie-breaker callback when
+    /// top candidates tie within $|\Delta\text{score}| < 0.05$ (`500` bps). If `tie_breaker` returns `None`
+    /// (e.g. non-interactive mode or user cancellation), fails closed with `AMBIGUOUS_GROUNDING`.
+    pub fn resolve_with_tie_breaker<F>(
+        click_x: i32,
+        click_y: i32,
+        viewport_width: u32,
+        viewport_height: u32,
+        aria_snapshot: &str,
+        candidates: &[DomCandidate],
+        tie_breaker: F,
+    ) -> Result<GroundedTarget>
+    where
+        F: FnOnce(&[AmbiguousTieCandidate]) -> Option<usize>,
+    {
+        match Self::resolve(
+            click_x,
+            click_y,
+            viewport_width,
+            viewport_height,
+            aria_snapshot,
+            candidates,
+        ) {
+            Ok(grounded) => Ok(grounded),
+            Err(e) => {
+                let tied = Self::detect_ambiguous_tie(click_x, click_y, aria_snapshot, candidates);
+                if tied.len() >= 2 {
+                    if let Some(chosen_idx) = tie_breaker(&tied) {
+                        if let Some(chosen) = tied.get(chosen_idx) {
+                            let single = std::slice::from_ref(&chosen.candidate);
+                            return Self::resolve(
+                                click_x,
+                                click_y,
+                                viewport_width,
+                                viewport_height,
+                                aria_snapshot,
+                                single,
+                            );
+                        }
+                    }
+                }
+                Err(e)
+            }
+        }
     }
 }
 

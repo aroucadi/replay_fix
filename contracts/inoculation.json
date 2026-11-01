@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplayFix Inoculation Registry Contract (v1.5.0)",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "updated_at",
+    "registry_sha256",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.5"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "registry_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "bug_id",
+          "spec_path",
+          "spec_sha256",
+          "patch_sha256",
+          "contract_sha256",
+          "grounded_selector",
+          "execution_time_ms",
+          "created_at"
+        ],
+        "properties": {
+          "bug_id": { "type": "string" },
+          "spec_path": { "type": "string" },
+          "spec_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "patch_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "grounded_selector": { "type": "string" },
+          "execution_time_ms": { "type": "integer", "minimum": 0 },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

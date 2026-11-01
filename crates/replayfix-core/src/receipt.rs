@@ -5,11 +5,13 @@ use crate::crypto::{AttestationRecord, KeypairManager};
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::{DifferentialDiagnosisReport, Phase};
+use crate::inoculate::InoculationEntry;
 use crate::locator::GroundingTelemetry;
 use crate::merkle::{EvidenceLeaf, MerkleTree};
 use crate::perception::VideoTelemetry;
 use crate::regression::RegressionParityReport;
 use crate::repair::{RepairTelemetry, TokenAccounting};
+use crate::stress::StressQuorumReport;
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -90,6 +92,10 @@ pub struct AuditReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression_parity: Option<RegressionParityReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stress_quorum: Option<StressQuorumReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inoculation_entry: Option<InoculationEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merkle_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation: Option<AttestationRecord>,
@@ -130,6 +136,12 @@ impl AuditReceipt {
         if let Some(ref reg) = self.regression_parity {
             store.write_json_pretty("regression_parity.json", reg)?;
             store.write_json_pretty("04_regression_parity.json", reg)?;
+        }
+        if let Some(ref sq) = self.stress_quorum {
+            store.write_json_pretty("05_stress_quorum.json", sq)?;
+        }
+        if let Some(ref inoc) = self.inoculation_entry {
+            store.write_json_pretty("06_inoculation_entry.json", inoc)?;
         }
 
         // Ensure 04_audit_receipt.json is serialized as the pre-Merkle core receipt payload
@@ -932,6 +944,8 @@ mod tests {
             token_accounting: None,
             differential_diagnosis: None,
             regression_parity: None,
+            stress_quorum: None,
+            inoculation_entry: None,
             merkle_root: None,
             attestation: None,
             created_at: timestamp_now(),

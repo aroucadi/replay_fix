@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplayFix MCP Tools & Protocol Contract (v1.5.0)",
+  "protocolVersion": "2024-11-05",
+  "serverInfo": {
+    "name": "replayfix-mcp-server",
+    "version": "1.5.0"
+  },
+  "tools": [
+    {
+      "name": "replayfix_reproduce",
+      "description": "Ingests bug video/recording or task ID, executes Gate 1 in an isolated scratch sandbox, and returns verified RED failure telemetry and DOM ariaSnapshot."
+    },
+    {
+      "name": "replayfix_verify_patch",
+      "description": "Applies a candidate unified diff patch to an ephemeral scratch sandbox, executes Gate 2 stability pass (and optional Gate 3 stress quorum), and returns a cryptographically signed RFC 6962 Merkle receipt."
+    },
+    {
+      "name": "replayfix_inoculate",
+      "description": "Synthesizes a permanent, self-healing Playwright regression test (tests/repro/rf_<id>.spec.ts) with semantic accessibility locators and updates .replayfix/inoculations.json."
+    },
+    {
+      "name": "replayfix_inspect_trace",
+      "description": "Queries DOM candidates, action trajectory timestamps, keyframe paths, and ASR spoken audio transcripts for a task."
+    },
+    {
+      "name": "replayfix_doctor",
+      "description": "Returns host toolchain health and environment diagnostics (Git, Node.js, Playwright, FFmpeg)."
+    }
+  ]
+}

@@ -11,7 +11,9 @@
 )]
 
 pub mod approval;
+pub mod git_packager;
 pub mod intent;
+pub mod mcp;
 pub mod permissions;
 pub mod session;
 pub mod shell;
@@ -206,6 +208,30 @@ pub struct ReproArgs {
     #[arg(long)]
     pub mock_regression: bool,
 
+    /// Execute Gate 3 concurrency perturbation (3G / 500ms latency) and 3-run stability quorum (Release 1.5)
+    #[arg(long)]
+    pub stress_quorum: bool,
+
+    /// Simulate an intermittent flaky patch during Gate 3 stress quorum to verify FLAKY_NON_DETERMINISTIC (exit 21)
+    #[arg(long)]
+    pub mock_flaky: bool,
+
+    /// Synthesize permanent Playwright regression test (tests/repro/rf_<id>.spec.ts) and update .replayfix/inoculations.json
+    #[arg(long)]
+    pub inoculate: bool,
+
+    /// Package verified repair and inoculation test into an isolated Git branch with cryptographic trailers and PR Evidence Matrix
+    #[arg(long)]
+    pub package_pr: bool,
+
+    /// Write SARIF v2.1.0 report (results.sarif) to the specified path
+    #[arg(long)]
+    pub sarif: Option<PathBuf>,
+
+    /// Write JUnit XML report (junit.xml) to the specified path
+    #[arg(long)]
+    pub junit: Option<PathBuf>,
+
     /// Candidate patch for --mock-heal or --live-browser: 'builtin', 'noop' (empty patch), or a path to a unified diff
     #[arg(long, default_value = "builtin")]
     pub mock_patch: String,
@@ -285,6 +311,45 @@ enum Commands {
         /// Emit machine-readable JSON output
         #[arg(long)]
         json: bool,
+        /// Write SARIF v2.1.0 report to the specified path
+        #[arg(long)]
+        sarif: Option<PathBuf>,
+        /// Write JUnit XML report to the specified path
+        #[arg(long)]
+        junit: Option<PathBuf>,
+    },
+    /// Synthesize permanent Playwright regression test (tests/repro/rf_<id>.spec.ts) and update .replayfix/inoculations.json (Release 1.5)
+    Inoculate {
+        /// Bug identifier (e.g. RF-01)
+        #[arg(long)]
+        bug: String,
+        /// Path to repository root
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Output destination directory (default: .replayfix)
+        #[arg(long, visible_alias = "output-dir", default_value = ".replayfix")]
+        output: PathBuf,
+        /// Package the inoculation test into an isolated Git branch and PR Evidence Matrix
+        #[arg(long)]
+        package_pr: bool,
+        /// Emit machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Launch Model Context Protocol (MCP) JSON-RPC 2.0 server over stdio or Streamable HTTP/SSE (Release 1.5)
+    Mcp {
+        /// Transport mode: 'stdio' or 'sse' (Streamable HTTP + SSE)
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+        /// TCP port for 'sse' transport on 127.0.0.1
+        #[arg(long, default_value = "3847")]
+        port: u16,
+        /// Default repository root path
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Default output artifacts directory
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
     },
     /// Export Judge Proof Portal bundle and deterministic cryptographic demo presets
     ExportProof {
@@ -454,6 +519,12 @@ struct ReproExtras {
     mock_pkg_test_mutation: bool,
     verify_matrix: bool,
     mock_regression: bool,
+    stress_quorum: bool,
+    mock_flaky: bool,
+    inoculate: bool,
+    package_pr: bool,
+    sarif: Option<PathBuf>,
+    junit: Option<PathBuf>,
     mock_patch: String,
     output_dir: String,
     dry_run: bool,
@@ -494,6 +565,12 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_pkg_test_mutation,
         verify_matrix,
         mock_regression,
+        stress_quorum,
+        mock_flaky,
+        inoculate,
+        package_pr,
+        sarif,
+        junit,
         mock_patch,
         output_dir,
         dry_run,
@@ -624,6 +701,12 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         mock_pkg_test_mutation,
         verify_matrix,
         mock_regression,
+        stress_quorum: stress_quorum || mock_flaky,
+        mock_flaky,
+        inoculate,
+        package_pr,
+        sarif,
+        junit,
         mock_patch,
         output_dir: output_dir.clone(),
         dry_run,
@@ -932,6 +1015,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             clean_ref: m.clean_ref.clone(),
             verify_matrix: extras.verify_matrix,
             mock_regression: extras.mock_regression,
+            stress_quorum: extras.stress_quorum,
+            mock_flaky: extras.mock_flaky,
             execution_mode: extras.execution_mode,
             gateway_client,
             attached_url: extras.url.clone(),
@@ -954,12 +1039,14 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             mode,
         )
     } else {
-        MockHealer::run_in_repo_with_regression(
+        MockHealer::run_in_repo_with_stress(
             &fixture,
             &diff,
             &repo_dir,
             std::slice::from_ref(&out_dir),
             extras.mock_regression,
+            extras.stress_quorum,
+            extras.mock_flaky,
         )
     }
     .unwrap_or_else(|e| {
@@ -1200,6 +1287,28 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     receipt.base_repo_unmodified_verified
                 )),
             );
+            if let Some(ref sq) = receipt.stress_quorum {
+                let passed_count = sq
+                    .concurrency_passes
+                    .iter()
+                    .filter(|p| {
+                        p.deterministic_match && p.verdict == replayfix_core::GateVerdict::Green
+                    })
+                    .count();
+                print_step(
+                    theme,
+                    "Gate 3 (STRESS)",
+                    StepStatus::Done,
+                    "Concurrency perturbation & 3-run stability quorum passed",
+                    Some(&format!(
+                        "{}/{} runs passed (3G / {}ms latency, {}ms total)",
+                        passed_count,
+                        sq.concurrency_passes.len(),
+                        sq.perturbation_profile.latency_ms,
+                        sq.total_duration_ms
+                    )),
+                );
+            }
             println!("  {}", theme.muted(&"─".repeat(60)));
             println!();
             println!(
@@ -1254,6 +1363,62 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             let artifacts_dir = out_dir.join("artifacts");
             if let Ok(store) = replayfix_core::artifacts::ArtifactStore::new(&artifacts_dir) {
                 let _ = store.write_text("candidate.patch", &diff);
+            }
+
+            // Spec 150: SARIF & JUnit Reporters
+            let verified_outcome = HealOutcome::Verified(receipt.clone());
+            if let Some(ref sarif_path) = extras.sarif {
+                let sarif_doc = replayfix_core::SarifReporter::from_heal_outcome(&verified_outcome);
+                let _ = replayfix_core::SarifReporter::write_to_file(&sarif_doc, sarif_path);
+                println!(
+                    "    {} SARIF     : {}",
+                    theme.muted(Symbols::STEP),
+                    sarif_path.display()
+                );
+            }
+            if let Some(ref junit_path) = extras.junit {
+                let junit_xml = replayfix_core::JunitReporter::from_heal_outcome(&verified_outcome);
+                let _ = replayfix_core::JunitReporter::write_to_file(&junit_xml, junit_path);
+                println!(
+                    "    {} JUnit XML : {}",
+                    theme.muted(Symbols::STEP),
+                    junit_path.display()
+                );
+            }
+
+            // Spec 150: Permanent Inoculation & Autonomous Git PR Packaging
+            let mut inoc_spec_opt = None;
+            if extras.inoculate {
+                if let Ok((spec, _entry, spec_path)) =
+                    replayfix_core::InoculationGenerator::inoculate_workspace(
+                        &fixture, &repo_dir, &out_dir, None,
+                    )
+                {
+                    println!(
+                        "    {} Inoculate : {} (SHA-256: {})",
+                        theme.muted(Symbols::STEP),
+                        spec_path.display(),
+                        short(&spec.spec_sha256)
+                    );
+                    inoc_spec_opt = Some(spec);
+                }
+            }
+            if extras.package_pr {
+                if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
+                    &fixture,
+                    &receipt,
+                    &repo_dir,
+                    &out_dir,
+                    inoc_spec_opt.as_ref(),
+                    false,
+                ) {
+                    println!(
+                        "    {} PR Bundle : {} (branch: {})",
+                        theme.muted(Symbols::STEP),
+                        pkg.pr_markdown_path,
+                        pkg.branch_name
+                    );
+                }
             }
 
             // Spec 080: Human Confirmation Gate
@@ -1333,6 +1498,15 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         }
         HealOutcome::Rejected(report) => {
             let path = write_artifact(&out_dir, |dir| write_triage_report(dir, &report));
+            let rejected_outcome = HealOutcome::Rejected(report.clone());
+            if let Some(ref sarif_path) = extras.sarif {
+                let sarif_doc = replayfix_core::SarifReporter::from_heal_outcome(&rejected_outcome);
+                let _ = replayfix_core::SarifReporter::write_to_file(&sarif_doc, sarif_path);
+            }
+            if let Some(ref junit_path) = extras.junit {
+                let junit_xml = replayfix_core::JunitReporter::from_heal_outcome(&rejected_outcome);
+                let _ = replayfix_core::JunitReporter::write_to_file(&junit_xml, junit_path);
+            }
             let err_theme = Theme::for_stderr(ColorOption::Auto, OutputMode::Human);
             eprintln!();
             eprintln!(
@@ -1534,13 +1708,16 @@ fn handle_verify_receipt(
     exit(exit_codes::SUCCESS);
 }
 
-fn handle_sweep(
+#[allow(clippy::too_many_arguments)]
+pub fn handle_sweep(
     bugs: Option<String>,
     mock_heal: bool,
     live_browser: bool,
     repo: String,
     output: PathBuf,
     json_output: bool,
+    sarif: Option<PathBuf>,
+    junit: Option<PathBuf>,
     theme: &Theme,
 ) -> ! {
     let bug_ids = match bugs {
@@ -1591,6 +1768,15 @@ fn handle_sweep(
         }
     };
 
+    if let Some(ref sarif_path) = sarif {
+        let sarif_doc = replayfix_core::SarifReporter::from_sweep_receipt(&receipt);
+        let _ = replayfix_core::SarifReporter::write_to_file(&sarif_doc, sarif_path);
+    }
+    if let Some(ref junit_path) = junit {
+        let junit_xml = replayfix_core::JunitReporter::from_sweep_receipt(&receipt);
+        let _ = replayfix_core::JunitReporter::write_to_file(&junit_xml, junit_path);
+    }
+
     if json_output {
         println!(
             "{}",
@@ -1637,6 +1823,20 @@ fn handle_sweep(
             theme.muted(Symbols::STEP),
             options.output_dir.join("sweep_receipt.json").display()
         );
+        if let Some(ref sarif_path) = sarif {
+            println!(
+                "    {} SARIF       : {}",
+                theme.muted(Symbols::STEP),
+                sarif_path.display()
+            );
+        }
+        if let Some(ref junit_path) = junit {
+            println!(
+                "    {} JUnit XML   : {}",
+                theme.muted(Symbols::STEP),
+                junit_path.display()
+            );
+        }
     }
 
     if receipt.failed_bugs > 0 {
@@ -1644,6 +1844,217 @@ fn handle_sweep(
     } else {
         exit(exit_codes::SUCCESS);
     }
+}
+
+pub fn handle_inoculate(
+    bug: String,
+    repo: String,
+    output: PathBuf,
+    package_pr: bool,
+    json_output: bool,
+    theme: &Theme,
+) {
+    let repo_dir = TaskManifest::assert_safe_path(&repo, "repo")
+        .unwrap_or_else(|e| usage_error(&format!("Invalid --repo path: {e}"), theme));
+    let out_dir = TaskManifest::assert_safe_path(&output.display().to_string(), "output")
+        .unwrap_or_else(|e| usage_error(&format!("Invalid --output-dir path: {e}"), theme));
+    if !repo_dir.exists() || !repo_dir.is_dir() {
+        usage_error(
+            &format!("Target repository directory '{repo}' does not exist or is not a directory"),
+            theme,
+        );
+    }
+    let fixture = Fixture::for_task(&bug).unwrap_or_else(|| {
+        usage_error(
+            &format!(
+                "Unknown task '{bug}'. Supported tasks: {}",
+                Fixture::supported_tasks().join(", ")
+            ),
+            theme,
+        )
+    });
+
+    let target_root = if repo.trim() == "." {
+        &out_dir
+    } else {
+        &repo_dir
+    };
+
+    let (spec, entry, written_path) = replayfix_core::InoculationGenerator::inoculate_workspace(
+        &fixture,
+        target_root,
+        &out_dir,
+        None,
+    )
+    .unwrap_or_else(|e| fail(e, "Failed to generate inoculation spec", theme));
+
+    let mut pr_result = None;
+    if package_pr {
+        if let Ok(HealOutcome::Verified(receipt)) = MockHealer::run_in_repo_with_stress(
+            &fixture,
+            fixture.builtin_diff,
+            &repo_dir,
+            std::slice::from_ref(&output),
+            false,
+            true,
+            false,
+        ) {
+            if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
+                &fixture,
+                &receipt,
+                &repo_dir,
+                &output,
+                Some(&spec),
+                false,
+            ) {
+                pr_result = Some(pkg);
+            }
+        }
+    }
+
+    if json_output {
+        let out = serde_json::json!({
+            "status": "INOCULATED",
+            "bug_id": spec.bug_id,
+            "spec_rel_path": spec.spec_rel_path,
+            "written_path": written_path.display().to_string(),
+            "spec_sha256": spec.spec_sha256,
+            "grounded_selector": spec.grounded_selector,
+            "registry_entry": entry,
+            "pr_package": pr_result,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
+    } else {
+        print_banner(theme, "Permanent Codebase Inoculation");
+        print_field(theme, "Bug ID", &spec.bug_id, None);
+        print_field(
+            theme,
+            "Spec Path",
+            &written_path.display().to_string(),
+            None,
+        );
+        print_field(theme, "Spec SHA-256", &spec.spec_sha256, None);
+        print_field(theme, "Selector", &spec.grounded_selector, None);
+        print_field(
+            theme,
+            "Registry",
+            &output.join("inoculations.json").display().to_string(),
+            Some("tamper-evident SHA-256 registry"),
+        );
+        if let Some(ref pkg) = pr_result {
+            print_field(theme, "Git Branch", &pkg.branch_name, None);
+            print_field(theme, "PR Markdown", &pkg.pr_markdown_path, None);
+        }
+        println!();
+        println!(
+            "  {} {}",
+            theme.success(Symbols::CHECK),
+            theme.success("Permanent Playwright regression test synthesized and registered.")
+        );
+    }
+}
+
+pub fn handle_package_pr_for_task(
+    task_id: &str,
+    repo_dir: &Path,
+    output_dir: &Path,
+    with_inoculation: bool,
+    theme: &Theme,
+) {
+    let fixture = match Fixture::for_task(task_id) {
+        Some(f) => f,
+        None => {
+            println!(
+                "  {} Unknown task '{}'. Supported tasks: {}",
+                theme.error(Symbols::CROSS),
+                task_id,
+                Fixture::supported_tasks().join(", ")
+            );
+            return;
+        }
+    };
+    let outcome = match MockHealer::run_in_repo_with_stress(
+        &fixture,
+        fixture.builtin_diff,
+        repo_dir,
+        &[output_dir.to_path_buf()],
+        false,
+        true,
+        false,
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            println!("  {} Verification error: {e}", theme.error(Symbols::CROSS));
+            return;
+        }
+    };
+    if let HealOutcome::Verified(mut receipt) = outcome {
+        let _ = receipt.write_disaggregated_artifacts(output_dir, Some(fixture.builtin_diff), None);
+        let inoc_spec = if with_inoculation {
+            replayfix_core::InoculationGenerator::inoculate_workspace(
+                &fixture, repo_dir, output_dir, None,
+            )
+            .ok()
+            .map(|(spec, _, _)| spec)
+        } else {
+            None
+        };
+        match git_packager::GitPrPackager::package_verified_repair(
+            &fixture,
+            &receipt,
+            repo_dir,
+            output_dir,
+            inoc_spec.as_ref(),
+            false,
+        ) {
+            Ok(pkg) => {
+                println!(
+                    "  {} Packaged verified repair for {} -> branch '{}' ({})",
+                    theme.success(Symbols::CHECK),
+                    task_id,
+                    pkg.branch_name,
+                    pkg.pr_markdown_path
+                );
+            }
+            Err(e) => {
+                println!(
+                    "  {} Failed to package PR: {e}",
+                    theme.error(Symbols::CROSS)
+                );
+            }
+        }
+    }
+}
+
+fn handle_mcp(
+    transport: &str,
+    port: u16,
+    repo: &str,
+    output: PathBuf,
+    theme: &Theme,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo_dir = TaskManifest::assert_safe_path(repo, "repo")
+        .unwrap_or_else(|e| fail(e, "Invalid --repo path", theme));
+    let config = mcp::McpServerConfig {
+        default_repo_path: repo_dir,
+        default_output_dir: output,
+    };
+    let server = mcp::McpServer::new(config);
+    match transport.to_ascii_lowercase().as_str() {
+        "stdio" => {
+            mcp::stdio::run_stdio_server(&server)?;
+        }
+        "sse" | "http" => {
+            mcp::sse::run_sse_foreground(server, port, None)?;
+        }
+        other => {
+            usage_error(
+                &format!("Unsupported MCP transport '{other}'; expected 'stdio' or 'sse'"),
+                theme,
+            );
+        }
+    }
+    Ok(())
 }
 
 fn handle_export_proof(output: PathBuf, json_output: bool, theme: &Theme) -> ! {
@@ -1709,6 +2120,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             repo,
             output,
             json,
+            sarif,
+            junit,
         }) => {
             handle_sweep(
                 bugs,
@@ -1717,8 +2130,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 repo,
                 output,
                 json,
+                sarif,
+                junit,
                 &stdout_theme,
             );
+        }
+        Some(Commands::Inoculate {
+            bug,
+            repo,
+            output,
+            package_pr,
+            json,
+        }) => {
+            handle_inoculate(bug, repo, output, package_pr, json, &stdout_theme);
+        }
+        Some(Commands::Mcp {
+            transport,
+            port,
+            repo,
+            output,
+        }) => {
+            handle_mcp(&transport, port, &repo, output, &stderr_theme)?;
         }
         Some(Commands::ExportProof { output, json }) => {
             handle_export_proof(output, json, &stdout_theme);

@@ -139,6 +139,50 @@ impl KeypairManager {
         to_hex(self.verifying_key().as_bytes())
     }
 
+    /// Sign arbitrary payload bytes and return the 128-character hex Ed25519 signature.
+    #[must_use]
+    pub fn sign_bytes(&self, payload: &[u8]) -> String {
+        let signature: Signature = self.signing_key.sign(payload);
+        to_hex(&signature.to_bytes())
+    }
+
+    /// Verify a raw hex Ed25519 signature over `payload` against `public_key_hex`.
+    pub fn verify_raw_signature(
+        public_key_hex: &str,
+        payload: &[u8],
+        signature_hex: &str,
+    ) -> Result<()> {
+        let pubkey_bytes = from_hex(public_key_hex)
+            .map_err(|e| CoreError::SecurityViolation(format!("Invalid hex in public key: {e}")))?;
+        if pubkey_bytes.len() != 32 {
+            return Err(CoreError::SecurityViolation(
+                "Ed25519 public key must be exactly 32 bytes".to_string(),
+            ));
+        }
+        let mut pubkey_arr = [0u8; 32];
+        pubkey_arr.copy_from_slice(&pubkey_bytes);
+        let verifying_key = VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| {
+            CoreError::SecurityViolation(format!("Invalid Ed25519 public key bytes: {e}"))
+        })?;
+
+        let sig_bytes = from_hex(signature_hex)
+            .map_err(|e| CoreError::SecurityViolation(format!("Invalid hex in signature: {e}")))?;
+        if sig_bytes.len() != 64 {
+            return Err(CoreError::SecurityViolation(
+                "Ed25519 signature must be exactly 64 bytes".to_string(),
+            ));
+        }
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(&sig_bytes);
+        let signature = Signature::from_bytes(&sig_arr);
+
+        verifying_key.verify(payload, &signature).map_err(|e| {
+            CoreError::SecurityViolation(format!(
+                "Ed25519 cryptographic signature verification failed: {e}"
+            ))
+        })
+    }
+
     /// Sign a canonical signing payload and emit an `AttestationRecord`.
     pub fn sign(
         &self,

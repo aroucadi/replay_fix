@@ -1,11 +1,19 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.3.0` (`130-v1.3.0-substrate-truth-spa` — Substrate Truth & Universal SPA Grounding)
-- **Status**: Production Release Qualification Complete; 250/250 Tests Passing, Zero Panics, 0 Clippy Warnings. Enforced execution-derived provenance and billing integrity in `audit_receipt.json`, implemented Universal SPA Attached Mode (`--url <endpoint> --repo <path>`) and Managed Mode (`--repo <path>` via `ManagedSpaServer` on dynamic port `:0` with 30s health polling and RAII process-tree cleanup), and decoupled real workspaces (`benchmarks/metapulse/`) from synthetic HTML fixture fallbacks.
+- **Active Milestone**: `v1.5.0` (`150-v1.5.0-autonomous-inoculation-mcp` — Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation)
+- **Status**: Production Release Qualification Complete; 283/283 Tests Passing, Zero Panics, 0 Clippy Warnings. Delivered Permanent Codebase Inoculation ("Dreaming" into `tests/repro/rf_<id>.spec.ts` + `.replayfix/inoculations.json`), Model Context Protocol (MCP) Universal Server (`replayfix mcp --transport stdio|sse`), Autonomous Git Branch & PR Packaging (`--package-pr` with Ed25519 commit trailers and `pr_description.md`), Gate 3 Concurrency & Stress Quorum (`--stress-quorum` with `FLAKY_NON_DETERMINISTIC` Exit 21 quarantine), Multi-Modal Copilot ASR keyframe alignment and interactive ambiguity tie-breaker, and SARIF v2.1.0 / JUnit XML CI/CD reporters (`action.yml`).
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.5.0 Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation (Spec 150)**:
+  - Implemented `crates/replayfix-core/src/inoculate.rs` (`InoculationGenerator`, `InoculationSpec`, `InoculationRegistry`) and `contracts/inoculation.json`, synthesizing standalone `@playwright/test` TypeScript specs (`tests/repro/rf_<id>.spec.ts`) with grounded accessibility locators and RED/GREEN parity verification.
+  - Implemented `crates/replayfix-cli/src/mcp/` (`mod.rs`, `stdio.rs`, `sse.rs`) and `contracts/mcp_tools.json`, exposing 5 tools, 3 resources, and `triage_bug` prompt over JSON-RPC 2.0 `stdio` and Streamable HTTP / `SSE`.
+  - Implemented `crates/replayfix-cli/src/git_packager.rs` (`GitPrPackager`, `CommitTrailers`), packaging verified fixes onto `replayfix/fix-<bug_id>` branches with Ed25519-signed RFC 6962 commit trailers and `pr_description.md`.
+  - Implemented `crates/replayfix-core/src/stress.rs` (`StressQuorumRunner`, `PerturbationProfile`, `StressQuorumReport`), executing 3G/500ms network perturbation and a 3-pass concurrency quorum, quarantining flaky patches with `FLAKY_NON_DETERMINISTIC` (`Exit 21`).
+  - Implemented interactive ambiguity tie-breaker ($|\Delta\text{score}| < 0.05$ / `500` bps) in `locator.rs`, ASR keyframe transcript alignment in `shell.rs`, and `SarifReporter` / `JunitReporter` in `reporters.rs` + `action.yml`.
+- [x] **v1.4.0 Agent Experience Revolution (Spec 140)**:
+  - Implemented interactive conversational agent shell (`replayfix chat`), natural language `IntentParser`, 13-state observable lifecycle, tiered `PermissionManager` (`Low`, `Medium`, `High`), `StatusSpinner`, virtualized `DiffReviewer`, and durable multi-turn `AgentSession` persistence.
 - [x] **v1.3.0 Substrate Truth & Universal SPA Grounding (Spec 130)**:
   - Implemented `crates/replayfix-core/src/environment.rs` (`SpaToolchain`, `ManagedSpaServer`, `AttachedSpaEndpoint`) supporting `vite`, `next`, `react-scripts`, and Node dev scripts on dynamic port `:0` with 30s HTTP readiness polling and RAII `Drop` process-tree teardown.
   - Added `--url <endpoint>` CLI option for Attached SPA Mode, connecting Playwright CDP directly to external dev servers, synchronizing candidate repairs to `--repo` during Gate 2, and rolling back on failure.

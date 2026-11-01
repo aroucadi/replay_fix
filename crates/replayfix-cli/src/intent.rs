@@ -25,6 +25,10 @@ pub enum AgentIntent {
     VerifyReceipt { path: PathBuf },
     /// Evaluate all 5 benchmark defect scenarios in MetaPulse.
     BenchmarkSweep { bugs: Vec<String> },
+    /// Synthesize permanent Playwright regression inoculation test for a task.
+    InoculateTask { task_id: String },
+    /// Package a verified repair and Evidence Matrix PR into an isolated Git branch.
+    PackagePr { task_id: String },
     /// Export Judge Proof Portal package and demo presets.
     ExportProof,
     /// Display current session and workspace context.
@@ -241,6 +245,20 @@ impl IntentParser {
                     .unwrap_or_else(|| PathBuf::from(".replayfix/audit_receipt.json"));
                 AgentIntent::VerifyReceipt { path }
             }
+            "inoculate" | "dream" => {
+                let task_id = parts
+                    .get(1)
+                    .map(|s| s.to_uppercase())
+                    .unwrap_or_else(|| "RF-01".to_string());
+                AgentIntent::InoculateTask { task_id }
+            }
+            "package-pr" | "pr" => {
+                let task_id = parts
+                    .get(1)
+                    .map(|s| s.to_uppercase())
+                    .unwrap_or_else(|| "RF-01".to_string());
+                AgentIntent::PackagePr { task_id }
+            }
             "proof" | "export-proof" => AgentIntent::ExportProof,
             "status" => AgentIntent::ShowStatus,
             "history" | "log" => AgentIntent::ShowHistory,
@@ -321,6 +339,21 @@ impl IntentParser {
         // Export proof
         if lower.contains("export proof") || lower.contains("proof bundle") {
             return AgentIntent::ExportProof;
+        }
+
+        // Permanent Inoculation
+        if lower.contains("inoculate") || lower.contains("permanent test") {
+            let task_id = Self::extract_task_id(&lower).unwrap_or_else(|| "RF-01".to_string());
+            return AgentIntent::InoculateTask { task_id };
+        }
+
+        // Package PR
+        if lower.contains("package pr")
+            || lower.contains("pull request")
+            || lower.contains("create pr")
+        {
+            let task_id = Self::extract_task_id(&lower).unwrap_or_else(|| "RF-01".to_string());
+            return AgentIntent::PackagePr { task_id };
         }
 
         // Reproduction & Repair Intent

@@ -129,6 +129,8 @@ function sendLine(obj, requestId) {
   let pageErrors = [];
   let activeShadowPath = null;
   let activeShadowBody = null;
+  let networkLatencyMs = 0;
+  let networkJitterMs = 0;
 
   async function settleDomAndNetwork(activePage) {
     await Promise.race([
@@ -222,6 +224,10 @@ function sendLine(obj, requestId) {
         context.setDefaultNavigationTimeout(10000);
         await context.route('**/*', async (route) => {
           try {
+            if (networkLatencyMs > 0 || networkJitterMs > 0) {
+              const jitter = networkJitterMs > 0 ? Math.floor(Math.random() * networkJitterMs) : 0;
+              await new Promise((r) => setTimeout(r, networkLatencyMs + jitter));
+            }
             const reqUrl = new URL(route.request().url());
             if (
               activeShadowPath &&
@@ -264,8 +270,8 @@ function sendLine(obj, requestId) {
         await settleDomAndNetwork(page);
         ensureActivePage('PROBE_PAGE(post-goto)');
         const ariaSnapshot = await withTimeout(
-          page.locator('body').ariaSnapshot({ timeout: 5000 }),
-          5500,
+          page.locator('body').ariaSnapshot({ timeout: 10000 }),
+          12000,
           'ariaSnapshot'
         );
         const candidates = await withTimeout(
@@ -373,6 +379,14 @@ function sendLine(obj, requestId) {
           page_errors: pageErrors.slice(),
           result_text: resultText,
         }, reqId);
+      } else if (cmd.cmd === 'SET_NETWORK_PERTURBATION') {
+        networkLatencyMs = typeof cmd.latency_ms === 'number' ? Math.max(0, cmd.latency_ms) : 0;
+        networkJitterMs = typeof cmd.jitter_ms === 'number' ? Math.max(0, cmd.jitter_ms) : 0;
+        sendLine({
+          kind: 'PERTURBATION_SET',
+          latency_ms: networkLatencyMs,
+          jitter_ms: networkJitterMs,
+        }, reqId);
       } else if (cmd.cmd === 'SHUTDOWN') {
         if (browser) {
           await withTimeout(browser.close(), 2000, 'browser.close').catch(() => {});
@@ -427,6 +441,10 @@ pub enum BridgeCommand {
         test_id: Option<String>,
         output_selector: String,
     },
+    SetNetworkPerturbation {
+        latency_ms: u64,
+        jitter_ms: u64,
+    },
     Shutdown,
 }
 
@@ -445,6 +463,10 @@ pub enum BridgeResponse {
         clicked: bool,
         page_errors: Vec<String>,
         result_text: String,
+    },
+    PerturbationSet {
+        latency_ms: u64,
+        jitter_ms: u64,
     },
     ShutdownOk,
     Error {
