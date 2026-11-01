@@ -27,6 +27,7 @@ pub mod ingestion;
 pub mod locator;
 pub mod manifest;
 pub mod merkle;
+pub mod observer;
 pub mod patch;
 pub mod perception;
 pub mod platform;
@@ -88,6 +89,9 @@ pub use ingestion::{
 pub use locator::{BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry, LocatorResolver};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use merkle::{EvidenceLeaf, MerkleInclusionProof, MerkleReceipt, MerkleTree};
+pub use observer::{
+    BroadcastObserver, ChannelObserver, NullObserver, SubstrateEvent, SubstrateObserver,
+};
 pub use patch::{PatchOutcome, UnifiedPatcher};
 pub use perception::{
     ActionTrajectory, ActionType, AsrRequestConfig, AsrTranscriber, NarrationCue, SamContourBox,

@@ -6,7 +6,7 @@ ReplayFix is a deterministic Rust harness for reproducing, verifying, and autono
 3. **Anti-cheat guards** (`TestFreezeGuard` + surgical `DiffGuard` on `package.json` `"scripts.test*"`) and **active regression parity** (`F_patched \ F_baseline = empty`) pass, and
 4. Disaggregated evidence artifacts are bound into an **RFC 6962 Merkle Tree** (`0x00` leaf / `0x01` internal node domain separation) and signed with **pure RFC 8032 Ed25519** attestation, independently verifiable via `replayfix verify-receipt` or the air-gapped **`proof_viewer.html`** Judge Proof Portal.
 
-> **Current Release: `v1.3.0` (Substrate Truth & Universal SPA Grounding).** All roadmap specifications (`Spec 000` through `Spec 130`) are complete, verified, and qualified across 251 automated tests with 0 non-test panics and 0 Clippy warnings.
+> **Current Release: `v1.4.0` (Agent Experience Revolution).** Featuring an interactive conversational agent shell (`replayfix chat`), natural language intent parser, 13-state observable lifecycle, tiered risk permissions, in-place reactive progress spinners, virtualized diff reviewer, and multi-turn session persistence. All roadmap specifications (`Spec 000` through `Spec 140`) are complete, verified, and qualified across 263 automated tests with 0 non-test panics and 0 Clippy warnings.
 
 ---
 
@@ -59,7 +59,23 @@ Set-Content -Path .env -Value 'META_API_KEY="your-meta-api-key"'
 
 (`ReplayFix` automatically checks process environment variables, `.env` in the working/binary directory tree, and the Windows `HKCU\Environment` / `HKLM` registry hives.)
 
-### 3. Environment Diagnostics: `replayfix doctor`
+### 3. Interactive Conversational Agent Workspace (Release 1.4)
+
+Launch the natural-language agentic workspace directly in your terminal:
+
+```bash
+# Launch interactive agent REPL (or simply run `replayfix` in any interactive terminal)
+replayfix chat
+
+# Example conversational requests inside the shell:
+# > "Reproduce and fix the cart quantity bug in metapulse"
+# > "Run doctor to check my environment"
+# > "Benchmark all 5 defect scenarios"
+# > "Verify receipt at .replayfix/audit_receipt.json"
+# > "/help" (see full command guide)
+```
+
+### 4. Environment Diagnostics: `replayfix doctor`
 
 ```bash
 replayfix doctor

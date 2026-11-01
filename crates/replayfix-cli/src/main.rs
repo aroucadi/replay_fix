@@ -11,6 +11,11 @@
 )]
 
 pub mod approval;
+pub mod intent;
+pub mod permissions;
+pub mod session;
+pub mod shell;
+pub mod tui;
 pub mod ui;
 
 use approval::{evaluate_approval_gate, write_approval_audit, ApprovalDecision, ApprovalMode};
@@ -289,6 +294,16 @@ enum Commands {
         /// Emit machine-readable JSON output
         #[arg(long)]
         json: bool,
+    },
+    /// Launch interactive conversational agent workspace (Release 1.4)
+    #[command(visible_alias = "agent", visible_alias = "interactive")]
+    Chat {
+        /// Target repository root
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Output destination directory
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
     },
 }
 
@@ -891,6 +906,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             execution_mode: extras.execution_mode,
             gateway_client,
             attached_url: extras.url.clone(),
+            observer: None,
         };
         MockHealer::run_live_browser_in_repo(
             &fixture,
@@ -1678,6 +1694,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::ExportProof { output, json }) => {
             handle_export_proof(output, json, &stdout_theme);
         }
+        Some(Commands::Chat { repo, output }) => {
+            let mut shell = shell::AgentShell::new(PathBuf::from(repo), output, stdout_theme);
+            shell.run()?;
+        }
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args, &stderr_theme);
             let repo_dir = TaskManifest::assert_safe_path(&manifest.repo_path, "repo_path")
@@ -1706,19 +1726,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         None => {
-            print_banner(&stdout_theme, "Deterministic Verification Harness");
-            print_field(&stdout_theme, "Version", env!("CARGO_PKG_VERSION"), None);
-            print_field(
-                &stdout_theme,
-                "Host OS",
-                &format!("{:?}", Platform::os_family()),
-                None,
-            );
-            println!();
-            println!(
-                "  Run '{}' to explore available commands and options.",
-                stdout_theme.brand("fixtream --help")
-            );
+            if std::io::stdin().is_terminal() {
+                let mut shell = shell::AgentShell::new(
+                    PathBuf::from("."),
+                    PathBuf::from(".replayfix"),
+                    stdout_theme,
+                );
+                shell.run()?;
+            } else {
+                print_banner(&stdout_theme, "Deterministic Verification Harness");
+                print_field(&stdout_theme, "Version", env!("CARGO_PKG_VERSION"), None);
+                print_field(
+                    &stdout_theme,
+                    "Host OS",
+                    &format!("{:?}", Platform::os_family()),
+                    None,
+                );
+                println!();
+                println!(
+                    "  Run '{}' to explore available commands and options.",
+                    stdout_theme.brand("replayfix --help")
+                );
+            }
         }
     }
 

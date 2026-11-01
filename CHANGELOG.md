@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-11-01
+
+**Spec 140 — Agent Experience Revolution**: Major transformation from a traditional flags-only CLI utility into a conversational, human-centered **Agentic Terminal Workspace**. Introduces an interactive conversational shell (`replayfix chat` / default interactive `replayfix`), natural language intent parser, 13-state observable agent lifecycle, context-aware tiered permissions (Low, Medium, High risk gates with session-level persistence), real-time reactive execution feedback with live spinners and duration timers, an interactive virtualized hunk diff reviewer (`j/k`, `Space`, `Tab` navigation), and durable multi-turn session persistence with checkpoint resumption. All existing CLI flags and 241+ tests maintain 100% backward compatibility. Full notes: [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md).
+
+### Added
+- **Interactive Conversational Shell (`replayfix-cli::shell`, `replayfix-cli::intent`)**:
+  - `AgentShell` REPL launched when `replayfix` is executed without arguments in an interactive TTY, or via `replayfix chat` / `replayfix agent`.
+  - `IntentParser` translating conversational English (e.g. *"Fix the cart quantity bug in metapulse"*, *"Inspect RF-03 with live browser"*, *"Run doctor check"*) and slash commands (`/repro`, `/doctor`, `/sweep`, `/verify`, `/proof`, `/status`, `/history`, `/resume`, `/exit`) into structured `AgentIntent`s.
+  - `ExecutionPlan` card generator formulating explicit, step-by-step verification plans with risk ratings prior to execution.
+  - Contextual clarification dialogues when natural language input is ambiguous.
+- **Real-Time Substrate Event Pipeline (`replayfix-core::observer`, `replayfix-cli::tui::spinner`)**:
+  - `SubstrateObserver` trait and `SubstrateEvent` stream capturing phase transitions, tool invocations, grounding candidate evaluations, and gate outcomes in real-time.
+  - `StatusSpinner` in-place reactive terminal status line with animated Braille frames, phase indicators, and millisecond timers that reflect substrate events without screen flicker.
+- **Context-Aware Tiered Permission Engine (`replayfix-cli::permissions`, `replayfix-cli::tui::dialog`)**:
+  - `PermissionManager` categorizing actions into `Low` (auto-granted), `Medium` (ephemeral dev server / external AI API; `Allow Once` or `Allow for Session`), and `High` (base repo patch mutation requiring explicit affirmative review).
+  - High-risk security boundary dialogs displaying affected files, insertions/deletions, and SHA-256 digests.
+- **Interactive In-Terminal Diff Reviewer (`replayfix-cli::tui::diff_view`, `replayfix-cli::tui::screen`)**:
+  - `DiffReviewer` providing a keyboard-navigable (`j/k`, `Space`, `d/u`, `Home/End`, `a`, `r`, `q`) virtualized diff viewer with ANSI syntax highlighting and viewport bounding.
+  - `ScreenGuard` RAII raw mode and alternate screen buffer manager with guaranteed cursor restoration on drop or cancellation.
+- **Session Lifecycle & Resumption (`replayfix-cli::session`)**:
+  - `AgentSession` tracking multi-turn conversation logs, active task context, and linking with `SessionStateCheckpoint` in `.replayfix/session_state.json`.
+  - Resumption of interrupted workflows via `/resume` or `AgentIntent::ResumeSession`.
+
+---
+
 ## [1.3.0] - 2026-11-01
 
 **Spec 130 — Substrate Truth & Universal SPA Grounding**: Enforced execution-derived provenance and billing integrity in `audit_receipt.json`, added Universal SPA **Attached Mode** (`--url <endpoint> --repo <path>`) and **Managed Mode** (`--repo <path>` via `ManagedSpaServer` with dynamic `:0` port capture, 30s health polling, and RAII process-tree teardown), and decoupled real workspaces (`benchmarks/metapulse/`) from synthetic HTML fixture fallbacks. Full notes: [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md).

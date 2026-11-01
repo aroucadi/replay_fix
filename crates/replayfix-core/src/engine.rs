@@ -189,6 +189,7 @@ pub struct LiveBrowserOptions {
     pub execution_mode: Option<crate::gateway::ExecutionMode>,
     pub gateway_client: Option<crate::gateway::MetaGatewayClient>,
     pub attached_url: Option<String>,
+    pub observer: Option<std::sync::Arc<dyn crate::observer::SubstrateObserver>>,
 }
 
 enum LiveServerRuntime {
@@ -552,6 +553,21 @@ impl MockHealer {
                 )
             );
         }
+        if let Some(obs) = &options.observer {
+            obs.on_event(crate::observer::SubstrateEvent::GateEvaluated {
+                gate: 1,
+                verdict: gate1_verdict,
+                duration_ms: 0,
+            });
+            obs.on_event(crate::observer::SubstrateEvent::PhaseCompleted {
+                phase: Phase::Gate1Red,
+                duration_ms: 0,
+            });
+            obs.on_event(crate::observer::SubstrateEvent::PhaseStarted {
+                phase: Phase::Repair,
+                description: "Synthesizing and applying bounded repair".to_string(),
+            });
+        }
         fsm.advance(Phase::Gate1Red)?;
         let gate1_at = timestamp_now();
 
@@ -874,6 +890,21 @@ impl MockHealer {
         }
 
         fsm.advance(Phase::Gate2Green)?;
+        if let Some(obs) = &options.observer {
+            obs.on_event(crate::observer::SubstrateEvent::PhaseCompleted {
+                phase: Phase::Repair,
+                duration_ms: 0,
+            });
+            obs.on_event(crate::observer::SubstrateEvent::GateEvaluated {
+                gate: 2,
+                verdict: GateVerdict::Green,
+                duration_ms: 0,
+            });
+            obs.on_event(crate::observer::SubstrateEvent::PhaseCompleted {
+                phase: Phase::Gate2Green,
+                duration_ms: 0,
+            });
+        }
         let gate2_at = timestamp_now();
 
         let diag = crate::fsm::DifferentialMatrix::evaluate(

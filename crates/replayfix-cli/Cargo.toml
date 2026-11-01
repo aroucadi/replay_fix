@@ -1,6 +1,6 @@
 [package]
 name = "replayfix-cli"
-version = "1.3.0"
+version = "1.4.0"
 edition = "2021"
 authors = ["ReplayFix Contributors"]
 description = "ReplayFix CLI — Deterministic verification and repair harness"
@@ -12,12 +12,13 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-replayfix-core = { path = "../replayfix-core", version = "1.3.0" }
+replayfix-core = { path = "../replayfix-core", version = "1.4.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossterm = "0.28"
 
 [dev-dependencies]
 temp-env = "0.3"

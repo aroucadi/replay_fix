@@ -120,6 +120,7 @@ pub fn run_sweep(options: &SweepOptions, base_repo: &Path) -> Result<SweepReceip
                 execution_mode: None,
                 gateway_client: None,
                 attached_url: None,
+                observer: None,
             };
             MockHealer::run_live_browser_in_repo(
                 &fixture,
