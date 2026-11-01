@@ -31,7 +31,8 @@ pub struct ApprovalAudit {
 }
 
 /// Strip or neutralize raw ANSI escape codes to prevent terminal injection.
-fn sanitize_ansi(s: &str) -> String {
+#[must_use]
+pub fn sanitize_ansi(s: &str) -> String {
     s.replace('\x1b', "^[")
 }
 
