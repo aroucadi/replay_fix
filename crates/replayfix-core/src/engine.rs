@@ -91,6 +91,11 @@ pub fn run_oracle(contract: &BehavioralContract, source: &str) -> Vec<OracleEven
     let target_marker = format!("function {}", contract.target);
     let defect_fixed = match contract.target.as_str() {
         "cartItemCount" => !source.contains("cart.items.length") || source.contains("cart.items?"),
+        "handlePublishQuote" => {
+            !source.contains("let session;")
+                || source.contains("let session =")
+                || source.contains("session?.currentUser")
+        }
         "applyDiscount" => !source.contains("0.8 * 0.8"),
         "decrementQuantity" => source.contains("Math.max") || source.contains("currentQty > 0"),
         "switchTab" => !source.contains("return [];"),
@@ -777,7 +782,7 @@ impl MockHealer {
             task_id: task_id.to_string(),
             substrate: SUBSTRATE_LIVE_BROWSER.to_string(),
             disclaimer: DISCLAIMER_LIVE_BROWSER.to_string(),
-            provenance: None,
+            provenance: Some("deterministic-fixture".to_string()),
             model_provenance: None,
             contract_id: fixture.contract.contract_id.clone(),
             contract_sha256: contract_sha256.clone(),
@@ -1241,7 +1246,9 @@ impl MockHealer {
             role: click_role,
             accessible_name: click_name,
             test_id: grounded.candidate.test_id.clone(),
-            output_selector: "#cart-summary-output".to_string(),
+            output_selector:
+                "#cart-summary-output, #discount-output, #inventory-output, #tab-output, #order-output"
+                    .to_string(),
         })?;
 
         let (clicked, click_errors, result_text) = match click_resp {
@@ -1555,7 +1562,7 @@ impl MockHealer {
             task_id: task_id.to_string(),
             substrate: SUBSTRATE.to_string(),
             disclaimer: DISCLAIMER.to_string(),
-            provenance: None,
+            provenance: Some("deterministic-fixture".to_string()),
             model_provenance: None,
             contract_id: fixture.contract.contract_id.clone(),
             contract_sha256: contract_sha256.clone(),

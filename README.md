@@ -6,7 +6,7 @@ ReplayFix is a deterministic Rust harness for reproducing, verifying, and autono
 3. **Anti-cheat guards** (`TestFreezeGuard` + surgical `DiffGuard` on `package.json` `"scripts.test*"`) and **active regression parity** (`F_patched \ F_baseline = empty`) pass, and
 4. Disaggregated evidence artifacts are bound into an **RFC 6962 Merkle Tree** (`0x00` leaf / `0x01` internal node domain separation) and signed with **pure RFC 8032 Ed25519** attestation, independently verifiable via `replayfix verify-receipt` or the air-gapped **`proof_viewer.html`** Judge Proof Portal.
 
-> **Current Release: `v1.0.0` (Production MMP).** All ten roadmap specifications (`Spec 000` through `Spec 100`) are complete, verified, and qualified across 224 automated tests with 0 non-test panics and 0 Clippy warnings.
+> **Current Release: `v1.2.0` (Realtime Multimodal Perception & MetaPulse 20-Bug Suite).** All roadmap specifications (`Spec 000` through `Spec 120`) are complete, verified, and qualified across 235 automated tests with 0 non-test panics and 0 Clippy warnings.
 
 ---
 
@@ -45,18 +45,35 @@ powershell -ExecutionPolicy Bypass -File ./scripts/setup-dev-cert.ps1
 powershell -ExecutionPolicy Bypass -File ./scripts/sign-binary.ps1 target/release/replayfix.exe
 ```
 
-### 2. Environment Diagnostics: `replayfix doctor`
+### 2. Configure `META_API_KEY` for `--mode live-ai` (Global or `.env`)
+
+Note: Running `$env:META_API_KEY = "your-key"` in PowerShell only sets the variable for the current terminal tab. To make `META_API_KEY` globally accessible across all terminals and child processes, use **either** of the following:
+
+```powershell
+# Option A: Persist globally in your Windows User environment (survives terminal restarts)
+[Environment]::SetEnvironmentVariable("META_API_KEY", "your-meta-api-key", "User")
+
+# Option B: Save in the gitignored `.env` file in the workspace root
+Set-Content -Path .env -Value 'META_API_KEY="your-meta-api-key"'
+```
+
+(`ReplayFix` automatically checks process environment variables, `.env` in the working/binary directory tree, and the Windows `HKCU\Environment` / `HKLM` registry hives.)
+
+### 3. Environment Diagnostics: `replayfix doctor`
 
 ```bash
 replayfix doctor
 replayfix doctor --json
 ```
 
-### 3. Single-Bug Reproduction, Autonomous Repair & Human Approval: `replayfix run`
+### 4. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
 
 ```bash
-# Simulated two-gate repair in isolated scratch sandbox (emits Merkle + Ed25519 receipt)
-replayfix run --bug RF-01 --mock-heal
+# Offline deterministic fixture mode against real MetaPulse MP4 recording (zero API tokens billed)
+replayfix run --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture
+
+# Live AI mode (Meta SAM 3.1 + Muse Voice 24kHz ASR + Muse Spark 1.3 / Wonder 1.0 over HTTPS)
+replayfix run --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode live-ai --model-intent muse-spark-1.3 --model-repair muse-wonder-1.0
 
 # Live Chromium browser + multimodal video ingestion + Meta Muse repair
 replayfix run --bug RF-01 --live-browser --headed --model muse-spark-1.3
@@ -65,7 +82,7 @@ replayfix run --bug RF-01 --live-browser --headed --model muse-spark-1.3
 replayfix run --bug RF-01 --issue https://github.com/org/repo/issues/42 --mock-heal --apply --yes
 ```
 
-### 4. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
+### 5. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
 
 Executes isolated scratch-sandbox repairs across `RF-01` through `RF-05`, enforces `Delta-Repo = 0`, and emits a signed `.replayfix/sweep_receipt.json` in < 60s (~4.5s offline):
 
@@ -74,7 +91,7 @@ replayfix sweep --mock-heal
 replayfix sweep --bugs RF-01,RF-02,RF-03,RF-04,RF-05 --mock-heal --json
 ```
 
-### 5. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
+### 6. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
 
 Verifies Layer 1 (on-disk artifact SHA-256 & byte size), Layer 2 (RFC 6962 Merkle inclusion proofs), Layer 3 (RFC 8032 pure Ed25519 signature), and Layer 4 (signer public-key pinning):
 
@@ -84,7 +101,7 @@ replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <64_CHAR_HE
 replayfix verify-receipt .replayfix/sweep_receipt.json --json
 ```
 
-### 6. Freeze Reproduction Spec & Export Proof Bundle
+### 7. Freeze Reproduction Spec & Export Proof Bundle
 
 ```bash
 replayfix freeze-spec --bug RF-01 --repo .
@@ -111,7 +128,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 | **`22`** | `AMBIGUOUS_GROUNDING` | Spatial-semantic locator grounding margin `< 0.25` |
 | **`23`** | `ISSUE_NOT_FOUND_OR_RATE_LIMITED` | GitHub issue HTTP 404/403/429 |
 | **`24`** | `ISSUE_MALFORMED_OR_UNPARSEABLE` | GitHub issue payload missing required reproduction fields |
-| **`30`** | `REPAIR_REJECTED` | Empty/no-op patch (`REPAIR_NOOP_REJECTED`), patch failed to apply, or Gate 2 remained RED |
+| **`30`** | `REPAIR_REJECTED` / `ERR_GATEWAY_AUTH_MISSING` | Empty/no-op patch (`REPAIR_NOOP_REJECTED`), patch failed to apply, Gate 2 remained RED, or `--mode live-ai` invoked without `META_API_KEY` |
 | **`31`** | `REGRESSION_DETECTED` | Candidate patch broke pre-existing regression tests (`F_patched \ F_baseline != empty`) |
 | **`32`** | `QUARANTINE_INVERTED_BASELINE` | Clean reference failed or baseline was already GREEN (`AlreadyHealthy`) |
 | **`40`** | `RECEIPT_VERIFICATION_FAILED` | On-disk artifact tampering, invalid RFC 6962 Merkle proof, invalid Ed25519 signature, or untrusted signer key |
@@ -119,7 +136,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 
 ---
 
-## Completed Release Roadmap (`v0.0.0` -> `v1.0.0`)
+## Completed Release Roadmap (`v0.0.0` -> `v1.2.0`)
 
 | Release | Scope | Status |
 | :--- | :--- | :--- |
@@ -134,7 +151,9 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 | **v0.8.0–0.8.2** | `--trace` viewer, live GitHub `--issue` ingestion, ANSI-safe `--apply` approval gate, atomic `ArtifactStore` | **Delivered** |
 | **v0.9.0–0.9.1** | RFC 6962 Merkle receipts, pure RFC 8032 Ed25519 attestation, 4-layer `verify-receipt`, 5-bug `sweep`, `ModelPool` | **Delivered** |
 | **v0.9.5** | Offline `proof_viewer.html` Judge Proof Portal, bounded `MultimodalGateway`, rate pool & circuit breaker | **Delivered** |
-| **v1.0.0** | **Production LTO/abort optimization, Windows Authenticode signing, 3-Act demo video & submission package** | **Delivered** |
+| **v1.0.0** | Production LTO/abort optimization, Windows Authenticode signing, 3-Act demo video & submission package | **Delivered** |
+| **v1.1.0** | Real MetaPulse 20-bug benchmark suite (`RF-01`..`RF-20`), `MetaGatewayClient` (`rustls-tls`), dual execution modes | **Delivered** |
+| **v1.2.0** | **Live Meta SAM 3.1 wire segmentation, Muse Voice 24kHz PCM ASR, multi-step `ActionTrajectory`, `.env`/Registry auth** | **Delivered** |
 
 ---
 

@@ -462,6 +462,16 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
     };
 
     if parsed_mode == Some(ExecutionMode::LiveAi) {
+        if mock_syntax_retry
+            || mock_failing_repair
+            || mock_pkg_test_mutation
+            || mock_patch != "builtin"
+        {
+            usage_error(
+                "'--mode live-ai' cannot be combined with mock flags ('--mock-syntax-retry', '--mock-failing-repair', '--mock-pkg-test-mutation', or '--mock-patch')",
+                theme,
+            );
+        }
         let gw_client = MetaGatewayClient::default();
         if let Err(e) = gw_client.require_live_auth() {
             eprintln!("  {} {e}", theme.error(Symbols::CROSS));
@@ -469,7 +479,15 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
                 "  {} Set META_API_KEY=<token> (or REPLAYFIX_AI_KEY=<token>) for live-ai, or use --mode deterministic-fixture.",
                 theme.muted("→")
             );
-            exit(exit_codes::REPAIR_REJECTED);
+            eprintln!(
+                "  {} Persist globally on Windows: [Environment]::SetEnvironmentVariable(\"META_API_KEY\", \"your-key\", \"User\")",
+                theme.muted("→")
+            );
+            eprintln!(
+                "  {} Or add META_API_KEY=\"your-key\" to a gitignored .env file in the workspace root.",
+                theme.muted("→")
+            );
+            exit(exit_codes::ERR_GATEWAY_AUTH_MISSING);
         }
     }
 
@@ -527,26 +545,6 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
             "'--mock-patch' and '--output-dir' require '--mock-heal', '--live-browser', '--mode', or '--model'",
             theme,
         );
-    }
-
-    if parsed_mode == Some(ExecutionMode::LiveAi) {
-        let gw = MetaGatewayClient::default();
-        if let Err(e) = gw.require_live_auth() {
-            eprintln!();
-            eprintln!(
-                "  {} [GATEWAY AUTH ERROR] {}",
-                theme.error(Symbols::CROSS),
-                e
-            );
-            eprintln!(
-                "  Please set META_API_KEY (or REPLAYFIX_AI_KEY) in your environment to run in live-ai mode:"
-            );
-            eprintln!("    $env:META_API_KEY = \"your-api-key\"");
-            eprintln!(
-                "  Or run in offline calibrated fixture mode with: --mode deterministic-fixture\n"
-            );
-            exit(exit_codes::ERR_GATEWAY_AUTH_MISSING);
-        }
     }
 
     let extras = ReproExtras {
@@ -903,43 +901,72 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
 
     match outcome {
         HealOutcome::Verified(mut receipt) => {
-            if extras.execution_mode.is_some()
-                || extras.model_intent.is_some()
-                || extras.model_repair.is_some()
-            {
-                let mode_str = extras
-                    .execution_mode
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_else(|| "deterministic-fixture".to_string());
-                receipt.provenance = Some(mode_str.clone());
+            if receipt.video_telemetry.is_none() {
+                let vpath = Path::new(&m.video_path);
+                if vpath.exists() {
+                    let kf_dir = out_dir.join("keyframes");
+                    let exec_mode = extras
+                        .execution_mode
+                        .unwrap_or(ExecutionMode::DeterministicFixture);
+                    let gw_opt = if exec_mode == ExecutionMode::LiveAi {
+                        Some(MetaGatewayClient::default())
+                    } else {
+                        None
+                    };
+                    if let Ok(vtel) = replayfix_core::VideoTelemetry::ingest_with_mode(
+                        vpath,
+                        &kf_dir,
+                        (fixture.viewport_width, fixture.viewport_height),
+                        &m.task_id,
+                        exec_mode,
+                        gw_opt.as_ref(),
+                    ) {
+                        receipt.video_telemetry = Some(vtel);
+                    }
+                }
+            }
+            let live_repair_verified = receipt
+                .repair_telemetry
+                .as_ref()
+                .is_some_and(|r| r.provider_mode == "live-meta-muse-api");
+            let live_sam_verified = receipt
+                .video_telemetry
+                .as_ref()
+                .is_some_and(|v| v.sam_snap.model == "sam-3.1" && v.sam_latency_ms.is_some());
 
+            let genuine_live_ai = (live_repair_verified || live_sam_verified)
+                && extras.execution_mode == Some(ExecutionMode::LiveAi)
+                && !extras.mock_syntax_retry
+                && !extras.mock_failing_repair
+                && !extras.mock_pkg_test_mutation
+                && extras.mock_patch == "builtin";
+
+            if genuine_live_ai {
                 let intent = extras
                     .model_intent
                     .clone()
                     .unwrap_or_else(|| "muse-spark-1.3".to_string());
-                let repair = extras.model_repair.clone().unwrap_or_else(|| {
-                    extras
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| "muse-wonder-1.0".to_string())
+                let repair = receipt
+                    .repair_telemetry
+                    .as_ref()
+                    .map(|r| r.serving_model.clone())
+                    .or_else(|| extras.model_repair.clone())
+                    .unwrap_or_else(|| "muse-wonder-1.0".to_string());
+                receipt.provenance = Some("live-ai".to_string());
+                receipt.disclaimer = format!(
+                    "Live AI verification: gates verified with authenticated Meta AI models (intent={intent}, repair={repair})."
+                );
+                receipt.model_provenance = Some(ModelProvenanceRecord {
+                    execution_mode: "live-ai".to_string(),
+                    model_intent: intent,
+                    model_repair: repair,
                 });
-
-                if mode_str == "deterministic-fixture" {
-                    receipt.provenance = Some("deterministic-fixture".to_string());
-                    receipt.model_provenance = None;
-                    receipt.disclaimer =
-                        "Deterministic fixture replay: offline gates verified against calibrated fixture. Zero live external AI tokens billed.".to_string();
-                } else if mode_str == "live-ai" {
-                    receipt.provenance = Some("live-ai".to_string());
-                    receipt.disclaimer = format!(
-                        "Live AI verification: gates verified with authenticated Meta AI models (intent={intent}, repair={repair})."
-                    );
-                    receipt.model_provenance = Some(ModelProvenanceRecord {
-                        execution_mode: mode_str,
-                        model_intent: intent,
-                        model_repair: repair,
-                    });
-                }
+            } else {
+                receipt.provenance = Some("deterministic-fixture".to_string());
+                receipt.model_provenance = None;
+                receipt.disclaimer =
+                    "Deterministic fixture replay: offline gates verified against calibrated fixture. Zero live external AI tokens billed.".to_string();
+                receipt.token_accounting = None;
             }
             write_artifact(&out_dir, |dir| {
                 receipt.write_disaggregated_artifacts(dir, Some(&diff), None)

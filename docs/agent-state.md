@@ -1,11 +1,16 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.1.0` (`110-v1.1.0-real-metapulse-muse-integration` — Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI HTTPS Gateway & Dual Execution Modes)
-- **Status**: Production Release Qualification Complete; 226/226 Tests Passing, Zero Panics, 0 Clippy Warnings. 20 real MetaPulse `.mp4` videos (`RF-01`..`RF-20`) + `MANIFEST.json`, `MetaGatewayClient` (`reqwest` + `rustls-tls`), `--mode <live-ai | deterministic-fixture>`, Option B real MetaPulse demo video, and `release/v1.1.0/` package verified.
+- **Active Milestone**: `v1.2.0` (`120-v1.2.0-real-perception-sam-asr` — Realtime Multimodal Perception: Live Meta SAM 3.1, Muse Voice 24kHz ASR & Multi-Action Trajectory)
+- **Status**: Production Release Qualification Complete; 235/235 Tests Passing, Zero Panics, 0 Clippy Warnings. Live SAM 3.1 wire segmentation (`SamWirePayload`, `SamSegmenter::segment_live`), Muse Voice 24kHz PCM ASR (`AsrPayload`, `AsrTranscriber::transcribe_live`), multi-step `ActionTrajectory` extraction, honest offline vs. live provenance, `.env` + Windows Registry `META_API_KEY` resolution, and `release/v1.2.0/` package verified.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.2.0 Realtime Multimodal Perception: Live Meta SAM 3.1, Muse Voice 24kHz ASR & Multi-Action Trajectory (Spec 120)**:
+  - Implemented `SamWirePayload`, `MetaGatewayClient::send_sam_segmentation`, and `SamSegmenter::segment_live` (`sam-3.1`) with CDP `document.elementFromPoint` centroid verification and fail-closed `AMBIGUOUS_GROUNDING` (`Exit 22`).
+  - Implemented `AsrPayload` (`PCM_24KHZ`, `ENDPOINTING`, `DELTA`), 44-byte RIFF/WAVE header verification (`24,000 Hz`, mono, 16-bit PCM), `MetaGatewayClient::send_asr_transcription`, and `AsrTranscriber::transcribe_live` / `parse_asr_events` (`muse-voice-transcribe-1.0`).
+  - Added multi-step `ActionTrajectory` (`RoiDiffer::detect_trajectory`, `UserAction` `click`/`input`/`navigate`), honest offline provenance (`local_diff_heuristic`, `simulated_fixture`), and `.env` + Windows Registry (`HKCU\Environment`) `META_API_KEY` resolution.
+  - Packaged `release/v1.2.0/` with signed `replayfix.exe` (`v1.2.0`), `proof_viewer.html`, and `SHA256SUMS.txt`.
 - [x] **v1.1.0 Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI Gateway & Dual Execution Modes (Spec 110)**:
   - Migrated all 20 real MetaPulse `.mp4` defect recordings (`RF-01`..`RF-20`) into `benchmarks/metapulse/videos/` with cryptographic `MANIFEST.json` verification (`MetaPulseManifest`) and `MetaPulseRepoRunner`.
   - Implemented `MetaGatewayClient` (`reqwest` + `rustls-tls`, 30s connect / 90s read timeouts, `META_API_KEY` / `REPLAYFIX_AI_KEY` Bearer auth, `<UNTRUSTED_DOM_CONTEXT>` XML escaping, and Llama-3.2/3.3 fallback slugs).
@@ -121,8 +126,8 @@
 ## 4. Deferred Items (documented, not hidden)
 - `tracing_subscriber` is initialised for structured diagnostic logging.
 
-## 5. v1.0.0 Readiness
-- **Shipping status**: Spec 000 through Spec 090 (`v0.9.1`) complete and verified. Ready for final v1.0.0 packaging and submission.
+## 5. v1.2.0 Readiness
+- **Shipping status**: Spec 000 through Spec 120 (`v1.2.0`) complete, verified, and packaged in `release/v1.2.0/`.
 
 ## 6. Next Immediate Task
-- Stand by for v0.9.1 release tagging / v1.0.0 Grand Finale packaging instructions.
+- Stand by for `v1.2.0` release tagging or live Meta AI execution runs.

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-10-31
+
+**Spec 120 — Realtime Multimodal Perception (Live Meta SAM 3.1, Muse Voice 24 kHz ASR & Multi-Action Trajectory)**: Wired live outbound HTTPS inference for `sam-3.1` (`SamSegmenter::segment_live`, `MetaGatewayClient::send_sam_segmentation`), `muse-voice-transcribe-1.0` (`AsrTranscriber::transcribe_live`, `MetaGatewayClient::send_asr_transcription` with 24 kHz mono PCM WAV validation), and `BoundedRepairClient` / `ModelPool`, added multi-step `ActionTrajectory` extraction (`RoiDiffer::detect_trajectory`), enforced honest offline provenance (`local_diff_heuristic` / `simulated_fixture`), and added `.env` + Windows Registry (`HKCU\Environment`) credential resolution. Full notes: [docs/release-notes/v1.2.0.md](docs/release-notes/v1.2.0.md).
+
+### Added
+- **Live Meta SAM 3.1 Segmentation (`replayfix-core::gateway`, `replayfix-core::perception`)**:
+  - `SamWirePayload`, `MetaGatewayClient::send_sam_segmentation`, and `SamSegmenter::segment_live` parsing `<|box;x1=...;y1=...;x2=...;y2=...|><|mask;...|>` tokens and snapping to calibrated CSS viewport centroids verified via CDP `document.elementFromPoint`.
+- **Live Muse Voice 24 kHz PCM ASR (`replayfix-core::gateway`, `replayfix-core::perception`)**:
+  - `AsrPayload` (`PCM_24KHZ`, `ENDPOINTING`, `DELTA`), 44-byte RIFF/WAVE header verifier, `MetaGatewayClient::send_asr_transcription`, and SSE/JSON `AsrTranscriber::parse_asr_events`.
+- **Multi-Action Trajectory Engine (`replayfix-core::video`, `replayfix-core::perception`)**:
+  - `RoiDiffer::detect_trajectory`, `ActionTrajectory`, and `UserAction` (`click`, `input`, `navigate`) across multi-step defect recordings (`RF-01_quote_repost_crash_with_cursor.mp4`).
+- **Global & `.env` Credential Resolution (`replayfix-core::gateway`)**:
+  - Automatic `META_API_KEY` / `REPLAYFIX_AI_KEY` lookup across process env, `.env` files (`KEY="val"`, `$env:KEY = "val"`, `export KEY="val"`), and Windows Registry (`HKCU\Environment` and `HKLM`).
+
+---
+
 ## [1.1.0] - 2026-10-30
 
 **Spec 110 — Real MetaPulse 20-Bug Benchmark Suite, Authenticated Meta AI HTTPS Gateway & Dual Execution Modes**: Migrated all 20 real MetaPulse `.mp4` cursor recordings (`RF-01` through `RF-20`) with immutable `benchmarks/metapulse/MANIFEST.json`, added `MetaGatewayClient` (`reqwest` + `rustls-tls`, 30s connect / 90s read timeouts, `<UNTRUSTED_DOM_CONTEXT>` escaping, Llama-3.2/3.3 fallbacks), exposed `--mode <live-ai | deterministic-fixture>`, `--model-intent`, and `--model-repair` CLI flags, and generated the Option B real MetaPulse demonstration video in `release/v1.1.0/`. Full notes: [docs/release-notes/v1.1.0.md](docs/release-notes/v1.1.0.md).

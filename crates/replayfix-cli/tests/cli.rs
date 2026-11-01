@@ -67,10 +67,11 @@ fn mock_heal_verifies_and_writes_receipt() {
     assert_eq!(receipt["sandbox_tree_sha256"].as_str().unwrap().len(), 64);
     assert_ne!(receipt["base_tree_sha256"], receipt["sandbox_tree_sha256"]);
     assert!(receipt["ephemeral_port"].as_u64().unwrap() > 0);
+    assert_eq!(receipt["provenance"], "deterministic-fixture");
     assert!(receipt["disclaimer"]
         .as_str()
         .unwrap()
-        .contains("No browser"));
+        .contains("Deterministic fixture replay"));
     assert!(!dir.join(".replayfix/triage_report.json").exists());
 }
 
@@ -407,8 +408,8 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
 }
 
 #[test]
-fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
-    let dir = scratch("model-autonomous-v06");
+fn model_autonomous_repair_and_syntax_retry_write_receipt() {
+    let dir = scratch("model-autonomous-retry");
     let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
         .current_dir(&dir)
         .args([
@@ -432,6 +433,7 @@ fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
 
     let receipt = json(&dir.join("out-retry/audit_receipt.json"));
     assert_eq!(receipt["schema_version"], "0.9");
+    assert_eq!(receipt["provenance"], "deterministic-fixture");
     assert_eq!(
         receipt["repair_telemetry"]["requested_model"],
         "muse-spark-1.3"
@@ -449,10 +451,8 @@ fn model_autonomous_repair_and_syntax_retry_write_v06_receipt() {
         true
     );
     assert!(
-        receipt["token_accounting"]["total_cost_micros_usd"]
-            .as_u64()
-            .unwrap()
-            > 0
+        receipt.get("token_accounting").is_none() || receipt["token_accounting"].is_null(),
+        "token_accounting must be None on deterministic-fixture runs"
     );
 }
 
@@ -978,14 +978,15 @@ fn test_export_proof_bundle_cli() {
 }
 
 #[test]
-fn test_v1_0_0_version_and_release_package_integrity() {
-    let dir = scratch("v1-version");
+fn test_version_and_release_package_integrity() {
+    let dir = scratch("release-package-version");
     let ver_out = run_cmd(&dir, &["--version"]);
     assert_eq!(code(&ver_out), 0);
     let stdout = String::from_utf8_lossy(&ver_out.stdout);
+    let expected_ver = format!("replayfix {}", env!("CARGO_PKG_VERSION"));
     assert!(
-        stdout.contains("replayfix 1.2.0") || stdout.contains("replayfix 1.1.0"),
-        "Expected 'replayfix 1.2.0' in --version output, got: {stdout}"
+        stdout.contains(&expected_ver),
+        "Expected '{expected_ver}' in --version output, got: {stdout}"
     );
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1073,8 +1074,8 @@ fn test_v1_0_0_version_and_release_package_integrity() {
 }
 
 #[test]
-fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
-    let dir = scratch("v110-modes");
+fn test_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
+    let dir = scratch("execution-modes");
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -1150,13 +1151,139 @@ fn test_v1_1_0_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
         assert_eq!(receipt["task_id"], bug_id);
         assert_eq!(receipt["provenance"], "deterministic-fixture");
         assert!(receipt.get("model_provenance").is_none() || receipt["model_provenance"].is_null());
-        if let Some(vtel) = receipt.get("video_telemetry") {
-            assert!(vtel.get("sam_snap").is_some());
-            assert!(vtel.get("action_trajectory").is_some());
-            let actions = &vtel["action_trajectory"]["actions"];
-            assert!(actions.is_array());
-            assert!(!actions.as_array().unwrap().is_empty());
-            assert_eq!(actions[0]["sam_snap"]["model"], "local_diff_heuristic");
-        }
+        let vtel = receipt
+            .get("video_telemetry")
+            .expect("video_telemetry must be populated for real MetaPulse recording");
+        assert!(vtel.get("sam_snap").is_some());
+        assert_eq!(vtel["sam_snap"]["model"], "local_diff_heuristic");
+        assert!(vtel.get("action_trajectory").is_some());
+        let actions = &vtel["action_trajectory"]["actions"];
+        assert!(actions.is_array());
+        assert!(!actions.as_array().unwrap().is_empty());
+        assert_eq!(actions[0]["sam_snap"]["model"], "local_diff_heuristic");
     }
+
+    // 4. End-to-end live-browser verification against RF-01_quote_repost_crash_with_cursor.mp4 (Task 120-10)
+    let rf01_mp4 = repo_root
+        .join("benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4")
+        .display()
+        .to_string();
+    let out_live = run_cmd(
+        &dir,
+        &[
+            "run",
+            "--video",
+            &rf01_mp4,
+            "--repo",
+            ".",
+            "--output-dir",
+            ".replayfix/rf01_live_video",
+        ],
+    );
+    assert_eq!(
+        code(&out_live),
+        0,
+        "RF-01 live-browser video verification failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&out_live.stdout),
+        String::from_utf8_lossy(&out_live.stderr)
+    );
+    let live_receipt = json(&dir.join(".replayfix/rf01_live_video/audit_receipt.json"));
+    assert_eq!(live_receipt["status"], "VERIFIED_REPAIRED");
+    assert_eq!(
+        live_receipt["video_telemetry"]["sam_snap"]["calibrated_x_css"],
+        532
+    );
+    assert_eq!(
+        live_receipt["video_telemetry"]["sam_snap"]["calibrated_y_css"],
+        374
+    );
+    assert_eq!(
+        live_receipt["grounding_telemetry"]["matched_selector"],
+        "page.getByRole('button', { name: 'Publish Quote', exact: true })"
+    );
+}
+
+#[test]
+fn test_provenance_honest_on_default_run() {
+    let dir = scratch("provenance-default");
+    let out = run_cmd(
+        &dir,
+        &[
+            "run",
+            "--bug",
+            "RF-01",
+            "--mock-heal",
+            "--output-dir",
+            "out-default",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let receipt = json(&dir.join("out-default/audit_receipt.json"));
+    assert_eq!(receipt["provenance"], "deterministic-fixture");
+    assert!(receipt.get("model_provenance").is_none() || receipt["model_provenance"].is_null());
+    assert!(receipt.get("token_accounting").is_none() || receipt["token_accounting"].is_null());
+}
+
+#[test]
+fn test_provenance_rejects_mock_with_live_mode() {
+    let dir = scratch("provenance-reject-mock-live");
+    let out = run_cmd(
+        &dir,
+        &[
+            "run",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "live-ai",
+            "--mock-syntax-retry",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        2,
+        "Expected exit code 2 (ERR_USAGE) when combining --mode live-ai with --mock-syntax-retry, got {}: {}",
+        code(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn test_deterministic_fixture_clears_token_accounting() {
+    let dir = scratch("provenance-clear-tokens");
+    let out = run_cmd(
+        &dir,
+        &[
+            "run",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "deterministic-fixture",
+            "--model",
+            "muse-wonder-1.0",
+            "--output-dir",
+            "out-det-tokens",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let receipt = json(&dir.join("out-det-tokens/audit_receipt.json"));
+    assert_eq!(receipt["provenance"], "deterministic-fixture");
+    assert!(receipt.get("model_provenance").is_none() || receipt["model_provenance"].is_null());
+    assert!(
+        receipt.get("token_accounting").is_none() || receipt["token_accounting"].is_null(),
+        "token_accounting must be None when provenance == deterministic-fixture"
+    );
+    assert!(receipt["disclaimer"]
+        .as_str()
+        .unwrap()
+        .contains("Zero live external AI tokens billed"));
 }

@@ -154,6 +154,7 @@ fn parse_dotenv_var(path: &std::path::Path, var_name: &str) -> Option<String> {
             continue;
         }
         let line = line.strip_prefix("export ").map_or(line, str::trim);
+        let line = line.strip_prefix("$env:").map_or(line, str::trim);
         if let Some((k, v)) = line.split_once('=') {
             if k.trim().eq_ignore_ascii_case(var_name) {
                 let mut val = v.trim();
@@ -182,9 +183,9 @@ pub fn resolve_env_key(var_name: &str) -> Option<String> {
             return Some(val);
         }
     }
-    // Check .env in current working directory and up to 3 parent directories
+    // Check .env in current working directory and up to 4 parent directories
     if let Ok(mut dir) = std::env::current_dir() {
-        for _ in 0..4 {
+        for _ in 0..5 {
             let env_path = dir.join(".env");
             if env_path.is_file() {
                 if let Some(val) = parse_dotenv_var(&env_path, var_name) {
@@ -193,6 +194,22 @@ pub fn resolve_env_key(var_name: &str) -> Option<String> {
             }
             if !dir.pop() {
                 break;
+            }
+        }
+    }
+    // Also check .env next to the binary executable and up to 4 parent directories
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(mut dir) = exe_path.parent().map(std::path::Path::to_path_buf) {
+            for _ in 0..5 {
+                let env_path = dir.join(".env");
+                if env_path.is_file() {
+                    if let Some(val) = parse_dotenv_var(&env_path, var_name) {
+                        return Some(val);
+                    }
+                }
+                if !dir.pop() {
+                    break;
+                }
             }
         }
     }
@@ -1707,5 +1724,36 @@ mod tests {
             ExecutionMode::DeterministicFixture
         );
         assert!(ExecutionMode::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn test_parse_dotenv_var_supports_standard_export_and_powershell_syntax() {
+        let dir =
+            std::env::temp_dir().join(format!("replayfix-dotenv-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let env_file = dir.join(".env");
+
+        std::fs::write(
+            &env_file,
+            "# Comment line\nMETA_API_KEY=\"meta-secret-1\"\nexport REPLAYFIX_AI_KEY='meta-secret-2'\n$env:BASETEN_API_KEY = \"baseten-secret-3\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_dotenv_var(&env_file, "META_API_KEY").as_deref(),
+            Some("meta-secret-1")
+        );
+        assert_eq!(
+            parse_dotenv_var(&env_file, "REPLAYFIX_AI_KEY").as_deref(),
+            Some("meta-secret-2")
+        );
+        assert_eq!(
+            parse_dotenv_var(&env_file, "BASETEN_API_KEY").as_deref(),
+            Some("baseten-secret-3")
+        );
+        assert_eq!(parse_dotenv_var(&env_file, "MISSING_KEY"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

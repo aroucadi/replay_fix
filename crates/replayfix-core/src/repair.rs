@@ -1498,47 +1498,96 @@ impl BoundedRepairClient {
             })
             .to_string(),
             _ => {
-                if request.user_prompt.contains("RF-02")
+                if request.user_prompt.contains("public/app.js")
+                    || request.user_prompt.contains("handlePublishQuote")
+                {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Initialize session object with default currentUser profileId in handlePublishQuote", serving.as_str()),
+                        "target_file": "public/app.js",
+                        "search_block": "  let session;",
+                        "replace_block": "  let session = { currentUser: { profileId: 'default' } };",
+                        "touched_symbols": ["handlePublishQuote"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("RF-02")
                     || request.user_prompt.contains("discount.js")
                 {
+                    let (search_b, replace_b) =
+                        if request.user_prompt.contains("subtotal * 0.8 * 0.8") {
+                            ("    return subtotal * 0.8 * 0.8;", "    return subtotal * 0.8;")
+                        } else {
+                            ("  return discounted * 0.8;", "  return discounted;")
+                        };
                     serde_json::json!({
                         "explanation": format!("[{}] Remove secondary multiplication causing double discount in applyDiscount", serving.as_str()),
                         "target_file": "src/discount.js",
-                        "search_block": "  return discounted * 0.8;",
-                        "replace_block": "  return discounted;",
+                        "search_block": search_b,
+                        "replace_block": replace_b,
                         "touched_symbols": ["applyDiscount"]
                     })
                     .to_string()
                 } else if request.user_prompt.contains("RF-03")
                     || request.user_prompt.contains("inventory.js")
                 {
+                    let (search_b, replace_b) =
+                        if request.user_prompt.contains("return currentQty - 1;") {
+                            (
+                                "  return currentQty - 1;",
+                                "  return Math.max(0, currentQty - 1);",
+                            )
+                        } else {
+                            (
+                                "  item.quantity -= 1;\n  return item.quantity;",
+                                "  if (item.quantity > 0) {\n    item.quantity -= 1;\n  }\n  return item.quantity;",
+                            )
+                        };
                     serde_json::json!({
                         "explanation": format!("[{}] Prevent inventory underflow below 0 in decrementQuantity", serving.as_str()),
                         "target_file": "src/inventory.js",
-                        "search_block": "  item.quantity -= 1;\n  return item.quantity;",
-                        "replace_block": "  if (item.quantity > 0) {\n    item.quantity -= 1;\n  }\n  return item.quantity;",
+                        "search_block": search_b,
+                        "replace_block": replace_b,
                         "touched_symbols": ["decrementQuantity"]
                     })
                     .to_string()
                 } else if request.user_prompt.contains("RF-04")
                     || request.user_prompt.contains("cart-store.js")
                 {
+                    let (search_b, replace_b) = if request.user_prompt.contains("return [];") {
+                        ("  return [];", "  return currentCart || [];")
+                    } else {
+                        (
+                            "  store.items = [];\n  store.currentTab = newTab;",
+                            "  store.currentTab = newTab;",
+                        )
+                    };
                     serde_json::json!({
                         "explanation": format!("[{}] Preserve cart items during tab switch in switchTab", serving.as_str()),
                         "target_file": "src/cart-store.js",
-                        "search_block": "  store.items = [];\n  store.currentTab = newTab;",
-                        "replace_block": "  store.currentTab = newTab;",
+                        "search_block": search_b,
+                        "replace_block": replace_b,
                         "touched_symbols": ["switchTab"]
                     })
                     .to_string()
                 } else if request.user_prompt.contains("RF-05")
                     || request.user_prompt.contains("order.js")
                 {
+                    let (search_b, replace_b) =
+                        if request.user_prompt.contains("submitOrder(order, isSubmitting)") {
+                            (
+                                "  return true;",
+                                "  if (isSubmitting) {\n    return false;\n  }\n  return true;",
+                            )
+                        } else {
+                            (
+                                "  isSubmitting = true;\n  orders.push(order);",
+                                "  if (isSubmitting) {\n    return false;\n  }\n  isSubmitting = true;\n  orders.push(order);",
+                            )
+                        };
                     serde_json::json!({
                         "explanation": format!("[{}] Enforce submit idempotency with isSubmitting guard in submitOrder", serving.as_str()),
                         "target_file": "src/order.js",
-                        "search_block": "  isSubmitting = true;\n  orders.push(order);",
-                        "replace_block": "  if (isSubmitting) {\n    return false;\n  }\n  isSubmitting = true;\n  orders.push(order);",
+                        "search_block": search_b,
+                        "replace_block": replace_b,
                         "touched_symbols": ["submitOrder"]
                     })
                     .to_string()

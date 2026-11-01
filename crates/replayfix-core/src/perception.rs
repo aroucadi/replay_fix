@@ -678,7 +678,13 @@ impl VideoTelemetry {
         let safe_video = VideoPreprocessor::validate_source(path_str)?;
         let video_metadata = VideoPreprocessor::probe_video(&safe_video)?;
         let frames = VideoPreprocessor::extract_gray_frames(&safe_video, &video_metadata)?;
-        let interaction = RoiDiffer::detect_interaction(&frames, DetectionParams::default())?;
+        let raw_trajectory = RoiDiffer::detect_trajectory(&frames, DetectionParams::default())?;
+        let interaction = match RoiDiffer::detect_interaction(&frames, DetectionParams::default()) {
+            Ok(hit) => hit,
+            Err(_) => raw_trajectory.first().cloned().ok_or_else(|| {
+                CoreError::Grounding("No visual interaction detected in the recording".to_string())
+            })?,
+        };
 
         let frame_idx = ((interaction.t_ms * u64::from(frames.sample_fps)) / 1000) as usize;
         let after_idx = frame_idx.clamp(1, frames.frames.len().saturating_sub(1));
@@ -757,9 +763,6 @@ impl VideoTelemetry {
                 AsrTranscriber::align_wav_narration(wav.as_deref(), interaction.t_ms, task_id)?
             }
         };
-
-        let raw_trajectory = RoiDiffer::detect_trajectory(&frames, DetectionParams::default())
-            .unwrap_or_else(|_| vec![interaction.clone()]);
 
         let mut actions = Vec::new();
         for (idx, ev) in raw_trajectory.into_iter().enumerate() {
