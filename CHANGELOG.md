@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-11-01
+
+**Spec 150 — Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation**: Evolves ReplayFix into a universal verification, permanent codebase inoculation ("Dreaming"), and Model Context Protocol (MCP) platform across six architectural pillars. Introduces standalone `@playwright/test` spec synthesis (`tests/repro/rf_<id>.spec.ts`) and a tamper-evident `.replayfix/inoculations.json` registry (`contracts/inoculation.json`), a native JSON-RPC 2.0 MCP server (`replayfix mcp --transport stdio|sse`, `contracts/mcp_tools.json`), autonomous Git branch and Evidence Matrix PR packaging (`--package-pr` with Ed25519 + RFC 6962 commit trailers), Gate 3 Concurrency Perturbation & Stress Quorum (`--stress-quorum` with 3G latency/500ms jitter and 3-pass concurrency quorum, quarantining flaky patches as `FLAKY_NON_DETERMINISTIC` Exit 21), Multi-Modal Copilot ASR keyframe alignment and interactive ambiguity tie-breaker ($|\Delta\text{score}| < 0.05$), and headless SARIF v2.1.0 (`results.sarif`) + JUnit XML (`junit.xml`) CI/CD reporters with a composite GitHub Actions `action.yml`. Full notes: [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md).
+
+### Added
+- **Permanent Codebase Inoculation ("Dreaming") (`replayfix-core::inoculate`, `replayfix inoculate`)**:
+  - `InoculationGenerator`, `InoculationSpec`, `InoculationEntry`, and `InoculationRegistry` synthesizing standalone `@playwright/test` TypeScript regression specs (`tests/repro/rf_<id>.spec.ts`) using grounded accessibility locators (`getByRole`, `getByText`, `getByTestId`) with zero positional selectors.
+  - `InoculationGenerator::verify_inoculation_parity` ensuring every synthesized spec fails on the unpatched baseline and passes on the repaired state before recording in `.replayfix/inoculations.json`.
+- **Model Context Protocol (MCP) Universal Server (`replayfix-cli::mcp`, `contracts/mcp_tools.json`)**:
+  - `replayfix mcp --transport stdio|sse [--port <port>]` implementing JSON-RPC 2.0 over bounded `stdio` and Streamable HTTP / `SSE`.
+  - Exposes 5 tools (`replayfix_reproduce`, `replayfix_verify_patch`, `replayfix_inoculate`, `replayfix_inspect_trace`, `replayfix_doctor`), 3 resources (`replayfix://receipts/{task_id}`, `replayfix://sessions/{session_id}`, `replayfix://benchmarks`), and the `triage_bug` prompt.
+- **Autonomous Git Branch & PR Packaging Engine (`replayfix-cli::git_packager`)**:
+  - `GitPrPackager` and `CommitTrailers` isolating repairs onto `replayfix/fix-<bug_id>` branches, signing commits with Ed25519 + RFC 6962 Merkle trailers (`ReplayFix-Verified`, `ReplayFix-Merkle-Root`, `ReplayFix-Signature`), and emitting `pr_description.md` with keyframe bounding boxes and side-by-side DOM `ariaSnapshot` diffs.
+- **Gate 3 Concurrency Perturbation & Stress Quorum (`replayfix-core::stress`)**:
+  - `StressQuorumRunner`, `PerturbationProfile`, and `StressQuorumReport` executing network latency/jitter perturbation (`SET_NETWORK_PERTURBATION`) and a 3-pass randomized-interval concurrency quorum, quarantining flaky patches with `TriageStatus::FlakyNonDeterministic` (Exit Code 21).
+- **Multi-Modal Copilot & Ambiguity Picker (`replayfix-core::locator`, `replayfix-cli::shell`)**:
+  - `LocatorResolver::detect_ambiguous_tie` and `resolve_with_tie_breaker` prompting an interactive terminal candidate picker when $|\Delta\text{score}| < 0.05$ (`500` bps) in interactive sessions while failing closed (`AMBIGUOUS_GROUNDING`, Exit 22) in headless runs.
+  - ASR narration + keyframe timestamp alignment (`/trace`) and live `SubstrateEvent::CdpTelemetry` streaming.
+- **CI/CD Action & Headless Reporters (`replayfix-core::reporters`, `action.yml`)**:
+  - `SarifReporter` (SARIF v2.1.0 `results.sarif`), `JunitReporter` (`junit.xml`), `--sarif` / `--junit` flags on `repro` and `sweep`, and composite GitHub Action `action.yml`.
+
+---
+
 ## [1.4.0] - 2026-11-01
 
 **Spec 140 — Agent Experience Revolution**: Major transformation from a traditional flags-only CLI utility into a conversational, human-centered **Agentic Terminal Workspace**. Introduces an interactive conversational shell (`replayfix chat` / default interactive `replayfix`), natural language intent parser, 13-state observable agent lifecycle, context-aware tiered permissions (Low, Medium, High risk gates with session-level persistence), real-time reactive execution feedback with live spinners and duration timers, an interactive virtualized hunk diff reviewer (`j/k`, `Space`, `Tab` navigation), and durable multi-turn session persistence with checkpoint resumption. All existing CLI flags and 241+ tests maintain 100% backward compatibility. Full notes: [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md).

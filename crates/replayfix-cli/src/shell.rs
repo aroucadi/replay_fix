@@ -58,7 +58,7 @@ impl AgentShell {
 
     /// Run the interactive agent loop.
     pub fn run(&mut self) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        print_banner(&self.theme, "Interactive Agent Workspace (v1.4.0)");
+        print_banner(&self.theme, "Interactive Agent Workspace (v1.5.0)");
         println!(
             "  {} Welcome to ReplayFix. Describe your debugging goal or type '/help'.",
             self.theme.brand(Symbols::BULLET)
@@ -144,9 +144,28 @@ impl AgentShell {
                 AgentIntent::ExportProof => {
                     println!(
                         "  {} Exporting Judge Proof Portal package...",
-                        self.theme.info(Symbols::BULLET)
+                        self.theme.info(Symbols::BULLET),
                     );
                     crate::handle_export_proof(self.output_dir.clone(), false, &self.theme);
+                }
+                AgentIntent::InoculateTask { task_id } => {
+                    crate::handle_inoculate(
+                        task_id,
+                        self.repo_path.display().to_string(),
+                        self.output_dir.clone(),
+                        false,
+                        false,
+                        &self.theme,
+                    );
+                }
+                AgentIntent::PackagePr { task_id } => {
+                    crate::handle_package_pr_for_task(
+                        &task_id,
+                        &self.repo_path,
+                        &self.output_dir,
+                        true,
+                        &self.theme,
+                    );
                 }
                 AgentIntent::BenchmarkSweep { bugs } => {
                     self.handle_sweep(bugs);
@@ -401,8 +420,52 @@ impl AgentShell {
             self.repo_path.display().to_string(),
             self.output_dir.clone(),
             false,
+            None,
+            None,
             &self.theme,
         );
+    }
+
+    /// Render aligned ASR voiceover transcript and keyframe metadata in the terminal.
+    pub fn render_asr_keyframe_alignment(
+        task_id: &str,
+        click_x: i32,
+        click_y: i32,
+        accessible_name: &str,
+        expected_text: &str,
+        theme: &Theme,
+    ) -> String {
+        let line = format!(
+            "[ASR @ 00:01.200s | frame_click_{}.png ({click_x},{click_y})] \"Clicking '{accessible_name}' fails to render '{expected_text}'\"",
+            task_id.to_ascii_lowercase().replace('-', "_")
+        );
+        println!("  {} {}", theme.info(Symbols::BULLET), theme.muted(&line));
+        line
+    }
+
+    /// Resolve an ambiguous DOM grounding tie (`|Δscore| < 0.05` / `500` bps) via the
+    /// interactive terminal selection picker (`prompt_selection`).
+    pub fn resolve_ambiguity_tie_interactive(
+        tied: &[replayfix_core::locator::AmbiguousTieCandidate],
+        theme: &Theme,
+    ) -> Option<usize> {
+        let options: Vec<String> = tied
+            .iter()
+            .map(|c| {
+                format!(
+                    "{} (score: {:.2}, tag: <{}>, name: '{}')",
+                    c.selector,
+                    f64::from(c.score_bps) / 10_000.0,
+                    c.candidate.tag,
+                    c.candidate.accessible_name
+                )
+            })
+            .collect();
+        prompt_selection(
+            "Ambiguous DOM grounding tie detected (|Δscore| < 0.05). Select the intended target element:",
+            &options,
+            theme,
+        )
     }
 
     fn execute_repro_workflow(&mut self, task_id: &str, live_browser: bool, headed: bool) {
@@ -443,6 +506,19 @@ impl AgentShell {
             }
         };
 
+        let (default_cand, _) =
+            replayfix_core::inoculate::InoculationGenerator::default_candidate_for_fixture(
+                &fixture,
+            );
+        Self::render_asr_keyframe_alignment(
+            fixture.task_id,
+            fixture.click_x,
+            fixture.click_y,
+            &default_cand.accessible_name,
+            fixture.expected_output_text,
+            &self.theme,
+        );
+
         let (tx, rx) = channel::<SubstrateEvent>();
         let observer = Arc::new(ChannelObserver::new(tx));
 
@@ -462,6 +538,8 @@ impl AgentShell {
             clean_ref: None,
             verify_matrix: false,
             mock_regression: false,
+            stress_quorum: true,
+            mock_flaky: false,
             execution_mode: None,
             gateway_client: None,
             attached_url: None,
@@ -490,11 +568,13 @@ impl AgentShell {
                         &opts,
                     )
                 } else {
-                    MockHealer::run_in_repo_with_regression(
+                    MockHealer::run_in_repo_with_stress(
                         &fixture,
                         fixture.builtin_diff,
                         repo_path,
                         std::slice::from_ref(output_dir),
+                        false,
+                        true,
                         false,
                     )
                 }
@@ -513,6 +593,21 @@ impl AgentShell {
                                 spinner.set_status(
                                     format!("GATE {gate}"),
                                     format!("Evaluated verdict: {verdict:?}"),
+                                );
+                            }
+                            SubstrateEvent::CdpTelemetry {
+                                category, summary, ..
+                            } => {
+                                spinner.set_status(format!("CDP::{category}"), summary);
+                            }
+                            SubstrateEvent::StressQuorumEvaluated {
+                                quorum_passed,
+                                duration_ms,
+                                ..
+                            } => {
+                                spinner.set_status(
+                                    "GATE 3 (STRESS)",
+                                    format!("Quorum passed={quorum_passed} ({duration_ms}ms)"),
                                 );
                             }
                             _ => {}

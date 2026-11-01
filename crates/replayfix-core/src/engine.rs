@@ -190,6 +190,8 @@ pub struct LiveBrowserOptions {
     pub gateway_client: Option<crate::gateway::MetaGatewayClient>,
     pub attached_url: Option<String>,
     pub observer: Option<std::sync::Arc<dyn crate::observer::SubstrateObserver>>,
+    pub stress_quorum: bool,
+    pub mock_flaky: bool,
 }
 
 enum LiveServerRuntime {
@@ -889,6 +891,47 @@ impl MockHealer {
             return Ok(HealOutcome::Rejected(Box::new(triage)));
         }
 
+        let stress_quorum_report = if options.stress_quorum || options.mock_flaky {
+            match crate::stress::StressQuorumRunner::evaluate_simulated_quorum(
+                &fixture.contract,
+                &outcome.patched,
+                crate::stress::PerturbationProfile::default(),
+                options.mock_flaky,
+            ) {
+                Ok(report) => {
+                    if let Some(obs) = &options.observer {
+                        obs.on_event(crate::observer::SubstrateEvent::StressQuorumEvaluated {
+                            quorum_passed: true,
+                            flaky_detected: false,
+                            duration_ms: report.total_duration_ms,
+                        });
+                    }
+                    Some(report)
+                }
+                Err(e) => {
+                    fsm.advance(Phase::Rejected)?;
+                    if let Some(obs) = &options.observer {
+                        obs.on_event(crate::observer::SubstrateEvent::StressQuorumEvaluated {
+                            quorum_passed: false,
+                            flaky_detected: true,
+                            duration_ms: 0,
+                        });
+                    }
+                    let triage = TriageReport::with_substrate(
+                        TriageStatus::FlakyNonDeterministic,
+                        e.to_string(),
+                        task_id,
+                        active_substrate,
+                        fsm.trace(),
+                    )
+                    .with_regression_parity(Some(parity.clone()));
+                    return Ok(HealOutcome::Rejected(Box::new(triage)));
+                }
+            }
+        } else {
+            None
+        };
+
         fsm.advance(Phase::Gate2Green)?;
         if let Some(obs) = &options.observer {
             obs.on_event(crate::observer::SubstrateEvent::PhaseCompleted {
@@ -959,6 +1002,8 @@ impl MockHealer {
             token_accounting,
             differential_diagnosis: Some(diag),
             regression_parity: Some(parity),
+            stress_quorum: stress_quorum_report,
+            inoculation_entry: None,
             merkle_root: None,
             attestation: None,
             created_at: timestamp_now(),
@@ -1748,10 +1793,64 @@ impl MockHealer {
             token_accounting,
             differential_diagnosis: Some(diag),
             regression_parity: Some(parity),
+            stress_quorum: None,
+            inoculation_entry: None,
             merkle_root: None,
             attestation: None,
             created_at: timestamp_now(),
         })))
+    }
+
+    /// Execute the two-gate simulated loop plus Gate 3 Stress & Concurrency Quorum.
+    pub fn run_in_repo_with_stress(
+        fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        mock_regression: bool,
+        stress_quorum: bool,
+        mock_flaky: bool,
+    ) -> Result<HealOutcome> {
+        let outcome = Self::run_in_repo_with_regression(
+            fixture,
+            diff,
+            repo_path,
+            extra_excludes,
+            mock_regression,
+        )?;
+        if !stress_quorum && !mock_flaky {
+            return Ok(outcome);
+        }
+        match outcome {
+            HealOutcome::Verified(mut receipt) => {
+                let patch_outcome = UnifiedPatcher::apply_diff(fixture.buggy_source, diff)?;
+                match crate::stress::StressQuorumRunner::evaluate_simulated_quorum(
+                    &fixture.contract,
+                    &patch_outcome.patched,
+                    crate::stress::PerturbationProfile::default(),
+                    mock_flaky,
+                ) {
+                    Ok(report) => {
+                        receipt.stress_quorum = Some(report);
+                        Ok(HealOutcome::Verified(receipt))
+                    }
+                    Err(e) => {
+                        let phase_trace =
+                            vec![Phase::Init, Phase::Gate1Red, Phase::Repair, Phase::Rejected];
+                        let triage = TriageReport::with_substrate(
+                            TriageStatus::FlakyNonDeterministic,
+                            e.to_string(),
+                            fixture.task_id,
+                            &receipt.substrate,
+                            &phase_trace,
+                        )
+                        .with_regression_parity(receipt.regression_parity);
+                        Ok(HealOutcome::Rejected(Box::new(triage)))
+                    }
+                }
+            }
+            rejected => Ok(rejected),
+        }
     }
 }
 

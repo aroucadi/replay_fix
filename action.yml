@@ -1,0 +1,54 @@
+name: 'ReplayFix Autonomous Verification & Inoculation'
+description: 'Deterministic Rust harness for visual bug reproduction, causal verification, permanent inoculation, and cryptographic audit reporting'
+author: 'ReplayFix Contributors'
+
+inputs:
+  bug:
+    description: 'Bug identifier to reproduce and verify (e.g. RF-01)'
+    required: false
+    default: 'RF-01'
+  repo:
+    description: 'Target repository path to verify'
+    required: false
+    default: '.'
+  output-dir:
+    description: 'Output directory for receipts, SARIF, and triage reports'
+    required: false
+    default: '.replayfix'
+  stress-quorum:
+    description: 'Run Gate 3 3-pass concurrency & network perturbation quorum'
+    required: false
+    default: 'true'
+  inoculate:
+    description: 'Synthesize permanent Playwright regression test into tests/repro'
+    required: false
+    default: 'true'
+  sarif:
+    description: 'Export SARIF v2.1.0 report for GitHub Code Scanning'
+    required: false
+    default: 'true'
+  junit:
+    description: 'Export JUnit XML report for test results'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run ReplayFix Verification
+      shell: bash
+      run: |
+        ARGS=(repro --bug "${{ inputs.bug }}" --repo "${{ inputs.repo }}" --output-dir "${{ inputs.output-dir }}")
+        if [ "${{ inputs.stress-quorum }}" = "true" ]; then
+          ARGS+=(--stress-quorum)
+        fi
+        if [ "${{ inputs.inoculate }}" = "true" ]; then
+          ARGS+=(--inoculate)
+        fi
+        if [ "${{ inputs.sarif }}" = "true" ]; then
+          ARGS+=(--sarif "${{ inputs.output-dir }}/results.sarif")
+        fi
+        if [ "${{ inputs.junit }}" = "true" ]; then
+          ARGS+=(--junit "${{ inputs.output-dir }}/junit.xml")
+        fi
+        cargo run --release -p replayfix-cli -- "${ARGS[@]}"

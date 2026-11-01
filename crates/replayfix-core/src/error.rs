@@ -55,6 +55,18 @@ pub enum CoreError {
 
     #[error("Regression parity error: {0}")]
     Regression(String),
+
+    #[error("MCP protocol error: {0}")]
+    McpProtocol(String),
+
+    #[error("Inoculation error: {0}")]
+    Inoculation(String),
+
+    #[error("Gate 3 stress quorum failed: {0}")]
+    StressQuorumFailed(String),
+
+    #[error("Git PR packaging error: {0}")]
+    GitPackaging(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

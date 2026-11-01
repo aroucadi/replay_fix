@@ -24,6 +24,7 @@ pub mod fixtures;
 pub mod fsm;
 pub mod gateway;
 pub mod ingestion;
+pub mod inoculate;
 pub mod locator;
 pub mod manifest;
 pub mod merkle;
@@ -36,6 +37,8 @@ pub mod process;
 pub mod receipt;
 pub mod regression;
 pub mod repair;
+pub mod reporters;
+pub mod stress;
 pub mod sweep;
 pub mod trace;
 pub mod video;
@@ -86,7 +89,14 @@ pub use ingestion::{
     GitHubIssuePayload, GitHubIssueRef, GitHubLabel, GitHubUser, IngestionResult, IssueFetcher,
     MockIssueFetcher, SystemIssueFetcher, MAX_ISSUE_PAYLOAD_BYTES,
 };
-pub use locator::{BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry, LocatorResolver};
+pub use inoculate::{
+    InoculationEntry, InoculationGenerator, InoculationRegistry, InoculationSpec,
+    INOCULATION_REGISTRY_FILE, INOCULATION_SCHEMA_VERSION,
+};
+pub use locator::{
+    AmbiguousTieCandidate, BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry,
+    LocatorResolver, AMBIGUITY_TIE_THRESHOLD_BPS,
+};
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use merkle::{EvidenceLeaf, MerkleInclusionProof, MerkleReceipt, MerkleTree};
 pub use observer::{
@@ -117,6 +127,15 @@ pub use repair::{
     MAX_REPAIR_ATTEMPTS, MAX_REPAIR_WALL_CLOCK, MUSE_SPARK_13_CONTRIBUTOR_SLUG, MUSE_SPARK_13_SLUG,
     MUSE_SPARK_OPEN_FALLBACK_SLUG, MUSE_WONDER_10_SLUG, PROMPT_CACHE_KEY, PROMPT_CACHE_RETENTION,
     REASONING_ENCRYPTED_CONTENT_FIELD,
+};
+pub use reporters::{
+    JunitReporter, SarifArtifactLocation, SarifDriver, SarifLocation, SarifLog, SarifMessage,
+    SarifPhysicalLocation, SarifReporter, SarifResult, SarifRule, SarifRun, SarifTool,
+    SARIF_SCHEMA_URI, SARIF_VERSION,
+};
+pub use stress::{
+    PerturbationProfile, StressPassResult, StressQuorumReport, StressQuorumRunner,
+    DEFAULT_PERTURBATION_JITTER_MS, DEFAULT_PERTURBATION_LATENCY_MS, GATE3_QUORUM_PASS_COUNT,
 };
 pub use sweep::{run_sweep, SweepBugResult, SweepOptions, SweepReceipt};
 pub use trace::{is_ci_environment, launch_trace_viewer, TraceConfig, TraceLaunchOutcome};

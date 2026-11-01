@@ -45,6 +45,18 @@ pub enum SubstrateEvent {
     },
     /// Preflight syntax validation succeeded.
     SyntaxCheckPassed { target_path: String },
+    /// Live CDP, console error, or network roundtrip telemetry event.
+    CdpTelemetry {
+        category: String,
+        summary: String,
+        timestamp_ms: u64,
+    },
+    /// Gate 3 Stress & Concurrency Quorum evaluation completed.
+    StressQuorumEvaluated {
+        quorum_passed: bool,
+        flaky_detected: bool,
+        duration_ms: u64,
+    },
     /// Informational or status diagnostic message.
     StatusMessage { message: String },
 }

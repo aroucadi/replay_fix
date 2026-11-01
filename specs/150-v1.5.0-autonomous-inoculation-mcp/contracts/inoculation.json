@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReplayFix Inoculation Registry Contract (v1.5.0)",
+  "type": "object",
+  "required": ["schema_version", "updated_at", "registry_sha256", "entries"]
+}
