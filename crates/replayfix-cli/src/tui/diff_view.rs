@@ -182,3 +182,21 @@ impl<'a> DiffReviewer<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_large_diff_viewport_bounding_2000_lines() {
+        let mut large_diff = String::from("--- a/large.js\n+++ b/large.js\n@@ -1,10 +1,2000 @@\n");
+        for i in 0..2000 {
+            large_diff.push_str(&format!("+ console.log('line {i}');\n"));
+        }
+        let reviewer = DiffReviewer::new(&large_diff);
+        assert_eq!(reviewer.lines.len(), 2003);
+        assert_eq!(reviewer.insertions, 2000);
+        assert_eq!(reviewer.deletions, 0);
+        assert_eq!(reviewer.files, vec!["large.js"]);
+    }
+}

@@ -305,6 +305,35 @@ enum Commands {
         #[arg(long, default_value = ".replayfix")]
         output: PathBuf,
     },
+    /// Manage persistent agent conversational sessions
+    Session {
+        #[command(subcommand)]
+        action: SessionActions,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SessionActions {
+    /// List active or past recorded agent sessions
+    List {
+        /// Output destination directory
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
+        /// Emit machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume an active session by session ID
+    Resume {
+        /// Session identifier to resume (defaults to latest)
+        session_id: Option<String>,
+        /// Target repository root
+        #[arg(long, default_value = ".")]
+        repo: String,
+        /// Output destination directory
+        #[arg(long, default_value = ".replayfix")]
+        output: PathBuf,
+    },
 }
 
 /// Print an error and exit. Security violations use the dedicated exit code 11.
@@ -1698,6 +1727,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut shell = shell::AgentShell::new(PathBuf::from(repo), output, stdout_theme);
             shell.run()?;
         }
+        Some(Commands::Session { action }) => match action {
+            SessionActions::List { output, json } => {
+                let sessions = session::AgentSession::list_sessions(&output);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&sessions)?);
+                } else {
+                    print_banner(&stdout_theme, "Recorded Agent Sessions");
+                    if sessions.is_empty() {
+                        println!("  {}", stdout_theme.muted("No recorded sessions found."));
+                    } else {
+                        for s in &sessions {
+                            println!(
+                                "  {} {} (turns: {}, last active: {})",
+                                stdout_theme.brand(&s.session_id),
+                                stdout_theme.bold(s.active_task.as_deref().unwrap_or("none")),
+                                s.turns.len(),
+                                s.last_updated
+                            );
+                        }
+                    }
+                }
+            }
+            SessionActions::Resume {
+                session_id,
+                repo,
+                output,
+            } => {
+                let session_opt = if let Some(ref id) = session_id {
+                    session::AgentSession::load_by_id(&output, id)
+                } else {
+                    let list = session::AgentSession::list_sessions(&output);
+                    list.first().and_then(|rec| {
+                        session::AgentSession::load_by_id(&output, &rec.session_id)
+                    })
+                };
+                let session = session_opt.unwrap_or_else(|| {
+                    usage_error(
+                        &format!("Session not found in '{}'", output.display()),
+                        &stderr_theme,
+                    )
+                });
+                let mut shell = shell::AgentShell {
+                    session,
+                    theme: stdout_theme,
+                    output_dir: output,
+                    repo_path: PathBuf::from(repo),
+                };
+                shell.run()?;
+            }
+        },
         Some(Commands::Repro(args)) => {
             let (manifest, extras) = build_manifest(*args, &stderr_theme);
             let repo_dir = TaskManifest::assert_safe_path(&manifest.repo_path, "repo_path")

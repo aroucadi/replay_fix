@@ -102,10 +102,79 @@ impl AgentSession {
         if !output_dir.exists() {
             fs::create_dir_all(output_dir)?;
         }
-        let session_file = output_dir.join("session_state.json");
+        let sessions_dir = output_dir.join("sessions");
+        if !sessions_dir.exists() {
+            fs::create_dir_all(&sessions_dir)?;
+        }
+
         let serialized = serde_json::to_string_pretty(&self.record)?;
-        fs::write(&session_file, serialized)?;
+        let session_file = output_dir.join("session_state.json");
+        fs::write(&session_file, &serialized)?;
+
+        let id_file = sessions_dir.join(format!("{}.json", self.record.session_id));
+        fs::write(&id_file, serialized)?;
         Ok(())
+    }
+
+    /// List all recorded sessions in output directory.
+    pub fn list_sessions(output_dir: &Path) -> Vec<SessionRecord> {
+        let mut list = Vec::new();
+        let sessions_dir = output_dir.join("sessions");
+        if sessions_dir.exists() {
+            if let Ok(entries) = fs::read_dir(sessions_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "json") {
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            if let Ok(rec) = serde_json::from_str::<SessionRecord>(&content) {
+                                list.push(rec);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if list.is_empty() {
+            let single = output_dir.join("session_state.json");
+            if single.exists() {
+                if let Ok(content) = fs::read_to_string(single) {
+                    if let Ok(rec) = serde_json::from_str::<SessionRecord>(&content) {
+                        list.push(rec);
+                    }
+                }
+            }
+        }
+        list.sort_by(|a, b| b.last_updated.cmp(&a.last_updated));
+        list
+    }
+
+    /// Load a specific session by ID.
+    pub fn load_by_id(output_dir: &Path, session_id: &str) -> Option<Self> {
+        let id_file = output_dir.join("sessions").join(format!("{session_id}.json"));
+        if id_file.exists() {
+            if let Ok(content) = fs::read_to_string(id_file) {
+                if let Ok(record) = serde_json::from_str::<SessionRecord>(&content) {
+                    return Some(Self {
+                        record,
+                        permissions: PermissionManager::new(),
+                    });
+                }
+            }
+        }
+        let state_file = output_dir.join("session_state.json");
+        if state_file.exists() {
+            if let Ok(content) = fs::read_to_string(state_file) {
+                if let Ok(record) = serde_json::from_str::<SessionRecord>(&content) {
+                    if record.session_id == session_id {
+                        return Some(Self {
+                            record,
+                            permissions: PermissionManager::new(),
+                        });
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
