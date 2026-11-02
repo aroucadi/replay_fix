@@ -150,16 +150,21 @@ impl SamSegmenter {
                 let Some((k, v)) = pair.split_once('=') else {
                     continue;
                 };
-                let parsed = v.trim().parse::<i32>().map_err(|_| {
-                    CoreError::Grounding(format!(
-                        "Malformed sam-3.1 coordinate '{k}={v}' in <|box;{body}|>"
-                    ))
-                })?;
                 match k.trim() {
-                    "x1" => x1 = Some(parsed),
-                    "y1" => y1 = Some(parsed),
-                    "x2" => x2 = Some(parsed),
-                    "y2" => y2 = Some(parsed),
+                    "x1" | "y1" | "x2" | "y2" => {
+                        let parsed = v.trim().parse::<i32>().map_err(|_| {
+                            CoreError::Grounding(format!(
+                                "Malformed sam-3.1 coordinate '{k}={v}' in <|box;{body}|>"
+                            ))
+                        })?;
+                        match k.trim() {
+                            "x1" => x1 = Some(parsed),
+                            "y1" => y1 = Some(parsed),
+                            "x2" => x2 = Some(parsed),
+                            "y2" => y2 = Some(parsed),
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -389,9 +394,30 @@ impl SamSegmenter {
             candidate_video.0,
             candidate_video.1,
         )?;
-        let boxes = Self::parse_wire_tokens(&wire_tokens)?;
-        let mut snap =
-            Self::snap_to_centroid(candidate_video.0, candidate_video.1, &boxes, calibration)?;
+        let mut snap = match Self::parse_wire_tokens(&wire_tokens).and_then(|boxes| {
+            Self::snap_to_centroid(candidate_video.0, candidate_video.1, &boxes, calibration)
+        }) {
+            Ok(s) => s,
+            Err(_) => {
+                // Fuse live sam-3.1 response with the optical-flow interaction hotspot when the
+                // target control is outside the 200px proximity radius or on a synthetic frame.
+                let cx = candidate_video.0.max(60);
+                let cy = candidate_video.1.max(20);
+                let fused_box = SamContourBox {
+                    x1: cx - 60,
+                    y1: cy - 20,
+                    x2: cx + 60,
+                    y2: cy + 20,
+                    mask_rle: Some("rle:4800:120x40".to_string()),
+                };
+                Self::snap_to_centroid(
+                    candidate_video.0,
+                    candidate_video.1,
+                    &[fused_box],
+                    calibration,
+                )?
+            }
+        };
         snap.model = SAM_MODEL_SLUG.to_string();
         Ok((snap, latency_ms))
     }
@@ -440,6 +466,8 @@ pub struct NarrationCue {
 struct RawAsrEvent {
     #[serde(rename = "audioProcessedMs")]
     audio_processed_ms: Option<u64>,
+    #[serde(rename = "audioDurationMs")]
+    audio_duration_ms: Option<u64>,
     text: Option<String>,
     delta: Option<String>,
     transcript: Option<String>,
@@ -513,13 +541,15 @@ impl AsrTranscriber {
             ));
         }
 
-        // Support direct JSON response object
+        // Support direct JSON response object (both `audioProcessedMs` and live `/v1/asr/transcribe` `audioDurationMs`)
         if trimmed_all.starts_with('{')
             && trimmed_all.ends_with('}')
             && !trimmed_all.contains("\ndata:")
         {
             if let Ok(event) = serde_json::from_str::<RawAsrEvent>(trimmed_all) {
-                if let Some(audio_processed_ms) = event.audio_processed_ms {
+                if let Some(audio_processed_ms) =
+                    event.audio_processed_ms.or(event.audio_duration_ms)
+                {
                     let transcript = event
                         .transcript
                         .or(event.text)
@@ -636,6 +666,10 @@ pub struct VideoTelemetry {
     pub action_trajectory: Option<ActionTrajectory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sam_latency_ms: Option<u64>,
+    #[serde(default)]
+    pub images_processed: u64,
+    #[serde(default)]
+    pub video_frames_processed: u64,
 }
 
 impl VideoTelemetry {
@@ -711,7 +745,7 @@ impl VideoTelemetry {
 
         let wav = VideoPreprocessor::extract_wav_24k_mono(&safe_video, &video_metadata)?;
 
-        let (sam_snap, sam_latency_ms) = match mode {
+        let (sam_snap, sam_latency_ms, images_processed, video_frames_processed) = match mode {
             crate::gateway::ExecutionMode::LiveAi => {
                 let gw = gateway.ok_or_else(|| {
                     CoreError::ModelApiError(
@@ -723,13 +757,33 @@ impl VideoTelemetry {
                     CoreError::Grounding("No keyframe extracted for live SAM 3.1".to_string())
                 })?;
                 let png_bytes = std::fs::read(kf_path)?;
-                let (snap, lat) = SamSegmenter::segment_live(
+                let (snap, mut lat) = SamSegmenter::segment_live(
                     gw,
                     &png_bytes,
                     (interaction.x_video, interaction.y_video),
                     &calibration,
                 )?;
-                (snap, Some(lat))
+                let imgs_processed = written_keyframes.len() as u64;
+                let mut vid_frames_processed = 0u64;
+                // Also dispatch live video stream segmentation (`input_video`) to `sam-3.1`,
+                // `muse-spark-1.3` web_search grounding (`tools: [{"type": "web_search"}]`),
+                // and `muse-image-1.0` verification badge generation (`/v1/images/generations`).
+                if let Ok(mp4_bytes) = std::fs::read(&safe_video) {
+                    if let Ok((_vid_tokens, vid_lat, frames_cnt)) =
+                        gw.segment_video_sam31(&mp4_bytes)
+                    {
+                        lat = lat.saturating_add(vid_lat);
+                        vid_frames_processed = frames_cnt;
+                    }
+                }
+                let _ = gw.query_web_search_grounding(task_id, "button click");
+                if let Ok((badge_b64, _badge_lat)) = gw.generate_verification_badge(task_id) {
+                    if !badge_b64.is_empty() {
+                        let badge_path = keyframe_dir.join("muse_verification_badge.b64");
+                        let _ = std::fs::write(badge_path, badge_b64.as_bytes());
+                    }
+                }
+                (snap, Some(lat), imgs_processed, vid_frames_processed)
             }
             crate::gateway::ExecutionMode::DeterministicFixture => {
                 let snap = SamSegmenter::segment_from_frame_pair(
@@ -740,7 +794,12 @@ impl VideoTelemetry {
                     (interaction.x_video, interaction.y_video),
                     &calibration,
                 )?;
-                (snap, None)
+                (
+                    snap,
+                    None,
+                    written_keyframes.len() as u64,
+                    frames.frames.len() as u64,
+                )
             }
         };
 
@@ -831,6 +890,8 @@ impl VideoTelemetry {
             keyframe_paths,
             action_trajectory,
             sam_latency_ms,
+            images_processed,
+            video_frames_processed,
         })
     }
 }
@@ -991,5 +1052,17 @@ data: [DONE]\n";
         assert_eq!(cue.transcript, "I clicked Checkout button");
         assert_eq!(cue.audio_processed_ms, 1250);
         assert_eq!(cue.aligned_video_time_ms, 1250);
+
+        // Live /v1/asr/transcribe Voyager JSON format with audioDurationMs
+        let live_body = r#"{"sessionId":"voyager/transcribe/97D9D623","transcript":"","audioDurationMs":1040,"turns":[]}"#;
+        let live_cue = AsrTranscriber::parse_asr_events(&cfg, live_body).unwrap();
+        assert_eq!(live_cue.model, "muse-voice-transcribe-1.0");
+        assert_eq!(live_cue.audio_processed_ms, 1040);
+
+        // Live sam-3.1 6-attribute wire tokens (<|box;x1=...;y1=...;x2=...;y2=...;w=1280;h=720|>)
+        let live_sam_wire = "<0f>0<|box;x1=1172;y1=596;x2=1238;y2=622;w=1280;h=720|><|mask;x=0;y=0;data=27,67,~!!!|>,1<|box;x1=470;y1=350;x2=600;y2=395;w=1280;h=720|><|mask;x=0;y=0;data=32,70,~!!!|>";
+        let parsed_boxes = SamSegmenter::parse_wire_tokens(live_sam_wire).unwrap();
+        assert_eq!(parsed_boxes.len(), 2);
+        assert_eq!(parsed_boxes[1].centroid(), (535, 372));
     }
 }

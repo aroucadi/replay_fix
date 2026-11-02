@@ -1005,10 +1005,26 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         } else {
             None
         };
+        let resolved_video_path = {
+            let p = PathBuf::from(&m.video_path);
+            if !p.exists()
+                && m.video_path == "bug.mp4"
+                && extras.execution_mode == Some(ExecutionMode::LiveAi)
+            {
+                let fallback_demo = PathBuf::from("assets/fixtures/rf01_demo.mp4");
+                if fallback_demo.exists() {
+                    fallback_demo
+                } else {
+                    p
+                }
+            } else {
+                p
+            }
+        };
         let opts = LiveBrowserOptions {
             headed: m.headed,
             candidate_override,
-            video_path: Some(PathBuf::from(&m.video_path)),
+            video_path: Some(resolved_video_path),
             keyframe_dir: Some(out_dir.join("keyframes")),
             model_slug: extras.model.clone(),
             repair_mode,

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.1] - 2026-11-01
+
+**Spec 151 — Live Meta Multimodal Wire Protocol & Full Muse Model Utilization**: Aligns ReplayFix's `--mode live-ai` cloud gateway (`crates/replayfix-core/src/gateway.rs`) and perception engine (`crates/replayfix-core/src/perception.rs`) with the production wire schemas of `https://api.meta.ai/v1/` across all 5 Meta models (`sam-3.1` `input_image` + `input_video` segmentation, `muse-voice-transcribe-1.0` RFC 7578 `multipart/form-data` WAV transcription, `muse-spark-1.3` `web_search` tool calling, `muse-wonder-1.0` / `muse-spark-1.3` autonomous repair, and `muse-image-1.0` `/v1/images/generations` badge synthesis). Full notes: [docs/release-notes/v1.5.1.md](docs/release-notes/v1.5.1.md).
+
+### Changed
+- **`MetaGatewayClient` & `SamSegmenter` (`replayfix-core::gateway`, `replayfix-core::perception`)**:
+  - Formatted multimodal image and video segmentation payloads as `input_image` (`data:image/png;base64,...`) and `input_video` (`data:video/mp4;base64,...`) content blocks on `POST /v1/responses` (`sam-3.1`), and updated `SamSegmenter::parse_wire_tokens` to support 6-attribute `<|box;x1=...;y1=...;x2=...;y2=...;w=...;h=...|>` tokens.
+  - Updated `transcribe_audio_wav` to dispatch RFC 7578 `multipart/form-data` (`request={"model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}` + `audio` WAV binary part) to `POST /v1/asr/transcribe` and parse `audioDurationMs`.
+  - Added `query_web_search_grounding` (`tools: [{"type": "web_search"}]` on `muse-spark-1.3`) and `generate_verification_badge` (`muse-image-1.0` on `POST /v1/images/generations`).
+
+---
+
 ## [1.5.0] - 2026-11-01
 
 **Spec 150 — Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation**: Evolves ReplayFix into a universal verification, permanent codebase inoculation ("Dreaming"), and Model Context Protocol (MCP) platform across six architectural pillars. Introduces standalone `@playwright/test` spec synthesis (`tests/repro/rf_<id>.spec.ts`) and a tamper-evident `.replayfix/inoculations.json` registry (`contracts/inoculation.json`), a native JSON-RPC 2.0 MCP server (`replayfix mcp --transport stdio|sse`, `contracts/mcp_tools.json`), autonomous Git branch and Evidence Matrix PR packaging (`--package-pr` with Ed25519 + RFC 6962 commit trailers), Gate 3 Concurrency Perturbation & Stress Quorum (`--stress-quorum` with 3G latency/500ms jitter and 3-pass concurrency quorum, quarantining flaky patches as `FLAKY_NON_DETERMINISTIC` Exit 21), Multi-Modal Copilot ASR keyframe alignment and interactive ambiguity tie-breaker ($|\Delta\text{score}| < 0.05$), and headless SARIF v2.1.0 (`results.sarif`) + JUnit XML (`junit.xml`) CI/CD reporters with a composite GitHub Actions `action.yml`. Full notes: [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md).
