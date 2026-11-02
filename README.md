@@ -6,14 +6,14 @@ ReplayFix is a deterministic Rust harness for reproducing, verifying, and autono
 3. **Anti-cheat guards** (`TestFreezeGuard` + surgical `DiffGuard` on `package.json` `"scripts.test*"`) and **active regression parity** (`F_patched \ F_baseline = empty`) pass, and
 4. Disaggregated evidence artifacts are bound into an **RFC 6962 Merkle Tree** (`0x00` leaf / `0x01` internal node domain separation) and signed with **pure RFC 8032 Ed25519** attestation, independently verifiable via `replayfix verify-receipt` or the air-gapped **`proof_viewer.html`** Judge Proof Portal.
 
-> **Current Release: `v1.6.0` (Sovereign Autonomous Healer: Multi-Turn Muse Spark Agent Loop & Sub-60s Macro Pipeline).** Establishing **Meta Muse Spark 1.3** as the sovereign multi-turn agent loop cognitive orchestrator (`305 tok/s`, `reasoning: { effort: "xhigh" }`, `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`), paired with **Meta Muse Wonder 1.0** for AST block search/replace code repair with multi-turn Encrypted Deliberation Caching (`reasoning.encrypted_content`) and `previous_response_id` backtracking. Introduces the unified autonomous macro command (`replayfix heal --video <path> --repo <path>`) executing the complete verification chain (Video Ingestion ➔ SAM 3.1 ➔ Voice Lock ➔ Ephemeral Server :0 ➔ Spark Gate 1 RED ➔ Wonder AST Repair ➔ Spark Gate 2 GREEN ➔ Gate 3 Stress Quorum ➔ Permanent Inoculation ➔ RFC 6962 Signed Merkle Receipt) in **under 60 seconds**. Features an upgraded air-gapped `proof_viewer.html` Judge Proof Portal with a Turn-by-Turn Muse Spark Deliberation Timeline, side-by-side DOM accessibility tree diffs, and Merkle leaf verification. All roadmap specifications (`Spec 000` through `Spec 160`) are complete, verified, and qualified across 289 automated tests with 0 non-test panics and 0 Clippy warnings.
+> **Current Release: `v1.7.0` (Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine).** Introducing continuous autonomous GitHub issue ingestion (`replayfix bot --issue <url>`) and RFC 2104 constant-time HMAC-SHA256 authenticated webhook listener (`replayfix bot --listen <addr> --webhook-secret <secret>`) with anti-loop bot immunity (`BOT_LOOP_MARKER`). Autonomously ingests bug videos (`.mp4`, `.webm`, `.mov`, GitHub user attachments), reproduces failures in ephemeral scratch sandboxes ($\Delta\text{repo}=0$), synthesizes permanent Playwright regression specs (`tests/repro/rf_issue_<id>.spec.ts`), dispatches isolated Git branches (`replayfix/issue-<id>-<slug>`) with Ed25519-signed Merkle commit trailers, opens Pull Requests with the comprehensive Evidence Matrix, comments cryptographic proof back to the issue thread, and updates triage labels (`replayfix:verified-healed`, `replayfix:unreproduced`, `replayfix:ambiguous`). All roadmap specifications (`Spec 000` through `Spec 170`) are complete, verified, and qualified across 304 automated tests with 0 non-test panics and 0 Clippy warnings.
 
 ---
 
 ## Workspace & Deliverables
 
-- **`crates/replayfix-core`** — Core verification engine, monotonic phase FSM (`PhaseMachine`, 6-state `DifferentialMatrix`), Gate 3 `StressQuorumRunner` (`PerturbationProfile`, `StressQuorumReport`), Permanent Inoculation engine (`InoculationGenerator`, `InoculationRegistry`), SARIF v2.1.0 & JUnit XML reporters (`SarifReporter`, `JunitReporter`), platform abstractions (`EphemeralPort`, process-tree teardown), `Doctor` diagnostics, `TaskManifest`, `WorktreeManifest` & `ScratchSandbox`, `VideoPreprocessor` & 120x120px `RoiDiffer`, Meta multimodal perception (`SamSegmenter` `sam-3-1`, `AsrTranscriber` `muse-voice-transcribe-1.0`), CDP spatial-semantic grounding (`LocatorResolver` with interactive tie-breaker), live Playwright bridge (`SandboxServer`, `PlaywrightBridge`), bounded autonomous repair (`MuseModelConfig`, `ModelPool`, `TestFreezeGuard`, `DiffGuard`, `BlockPatcher`, `SyntaxPreflight`, `RegressionEvaluator`), bounded cloud gateway (`MultimodalGateway`, `RatePool`, `CircuitBreaker`), RFC 6962 `MerkleTree`, pure Ed25519 `KeypairManager`, 5-bug `sweep` runner, and `portal` verifier.
-- **`crates/replayfix-cli`** — The `replayfix` command-line tool (`chat`/`agent`, `mcp`, `inoculate`, `doctor`, `run`/`repro`, `freeze-spec`, `verify-receipt`, `sweep`, `export-proof`, `session`).
+- **`crates/replayfix-core`** — Core verification engine, GitHub triage engine (`GitHubClient`, `GitHubTransport`, RFC 2104 constant-time HMAC-SHA256 webhook verification, anti-loop bot filter, `IssueCommenter`, `TriageLabel`, issue-specific test synthesis), monotonic phase FSM (`PhaseMachine`, 6-state `DifferentialMatrix`), Gate 3 `StressQuorumRunner` (`PerturbationProfile`, `StressQuorumReport`), Permanent Inoculation engine (`InoculationGenerator`, `InoculationRegistry`), SARIF v2.1.0 & JUnit XML reporters (`SarifReporter`, `JunitReporter`), platform abstractions (`EphemeralPort`, process-tree teardown), `Doctor` diagnostics, `TaskManifest`, `WorktreeManifest` & `ScratchSandbox`, `VideoPreprocessor` & 120x120px `RoiDiffer`, Meta multimodal perception (`SamSegmenter` `sam-3-1`, `AsrTranscriber` `muse-voice-transcribe-1.0`), CDP spatial-semantic grounding (`LocatorResolver` with interactive tie-breaker), live Playwright bridge (`SandboxServer`, `PlaywrightBridge`), bounded autonomous repair (`MuseModelConfig`, `ModelPool`, `TestFreezeGuard`, `DiffGuard`, `BlockPatcher`, `SyntaxPreflight`, `RegressionEvaluator`), bounded cloud gateway (`MultimodalGateway`, `RatePool`, `CircuitBreaker`), RFC 6962 `MerkleTree`, pure Ed25519 `KeypairManager`, 5-bug `sweep` runner, and `portal` verifier.
+- **`crates/replayfix-cli`** — The `replayfix` command-line tool (`bot`, `heal`, `chat`/`agent`, `mcp`, `inoculate`, `doctor`, `run`/`repro`, `freeze-spec`, `verify-receipt`, `sweep`, `export-proof`, `session`).
 - **`proof_viewer.html`** — Standalone, air-gapped single-file HTML5/ES2022 Judge Proof Portal with client-side RFC 8785 / RFC 6962 / RFC 8032 Ed25519 cryptographic verification (`default-src 'none'; connect-src 'none'`).
 
 ---
@@ -77,7 +77,25 @@ replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with
 replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --package-pr
 ```
 
-### 4. Interactive Conversational Agent Workspace (Release 1.4)
+### 4. Autonomous GitHub Issue Triage Bot: `replayfix bot` (Release 1.7)
+
+Autonomously triage incoming GitHub bug issues with attached screen recordings (`.mp4`, `.webm`, `.mov`), reproduce failures in ephemeral scratch sandboxes ($\Delta\text{repo}=0$), open verified Pull Requests with permanent Playwright regression specs (`tests/repro/rf_issue_<id>.spec.ts`), and post cryptographic proof comments back to the issue thread:
+
+```bash
+# Ingest and autonomously triage a single GitHub issue with an attached video:
+replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo .
+
+# Ingest with automated PR creation, issue commenting, and triage labeling:
+replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo . --create-pr --comment-issue --apply-labels
+
+# Offline deterministic triage in CI (zero external network tokens billed):
+replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo . --mock-heal
+
+# Continuous webhook listener with RFC 2104 constant-time HMAC-SHA256 security:
+replayfix bot --listen 0.0.0.0:8080 --webhook-secret "$GITHUB_WEBHOOK_SECRET" --repo . --create-pr --comment-issue
+```
+
+### 5. Interactive Conversational Agent Workspace (Release 1.4)
 
 Launch the natural-language agentic workspace directly in your terminal:
 
@@ -93,14 +111,14 @@ replayfix chat
 # > "/help" (see full command guide)
 ```
 
-### 5. Environment Diagnostics: `replayfix doctor`
+### 6. Environment Diagnostics: `replayfix doctor`
 
 ```bash
 replayfix doctor
 replayfix doctor --json
 ```
 
-### 6. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
+### 7. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
 
 ```bash
 # Offline deterministic fixture mode against real MetaPulse MP4 recording (zero API tokens billed)
@@ -116,7 +134,7 @@ replayfix run --bug RF-01 --live-browser --headed --model muse-spark-1.3
 replayfix run --bug RF-01 --issue https://github.com/org/repo/issues/42 --mock-heal --apply --yes
 ```
 
-### 7. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
+### 8. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
 
 Executes isolated scratch-sandbox repairs across `RF-01` through `RF-05`, enforces `Delta-Repo = 0`, and emits a signed `.replayfix/sweep_receipt.json` in < 60s (~4.5s offline):
 
@@ -125,7 +143,7 @@ replayfix sweep --mock-heal
 replayfix sweep --bugs RF-01,RF-02,RF-03,RF-04,RF-05 --mock-heal --json
 ```
 
-### 8. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
+### 9. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
 
 Verifies Layer 1 (on-disk artifact SHA-256 & byte size), Layer 2 (RFC 6962 Merkle inclusion proofs), Layer 3 (RFC 8032 pure Ed25519 signature), and Layer 4 (signer public-key pinning):
 
@@ -135,7 +153,7 @@ replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <64_CHAR_HE
 replayfix verify-receipt .replayfix/sweep_receipt.json --json
 ```
 
-### 9. Freeze Reproduction Spec & Export Proof Bundle
+### 10. Freeze Reproduction Spec & Export Proof Bundle
 
 ```bash
 replayfix freeze-spec --bug RF-01 --repo .
@@ -170,7 +188,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 
 ---
 
-## Completed Release Roadmap (`v0.0.0` -> `v1.6.0`)
+## Completed Release Roadmap (`v0.0.0` -> `v1.7.0`)
 
 | Release | Scope | Status |
 | :--- | :--- | :--- |
@@ -193,6 +211,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 | **v1.5.0** | Permanent Inoculation ("Dreaming" into Playwright specs), Native MCP Server (`stdio`/`sse`), Gate 3 Stress Quorum, Git PR Packager | **Delivered** |
 | **v1.5.1** | Production Meta multimodal wire protocol across all 5 Meta Muse & SAM models | **Delivered** |
 | **v1.6.0** | **Sovereign Autonomous Healer (`replayfix heal`), Multi-Turn Meta Muse Spark 1.3 Agent Loop (`305 tok/s`), Wonder AST Encrypted Deliberation Caching, and Sub-60s Macro Pipeline** | **Delivered** |
+| **v1.7.0** | **Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (`replayfix bot`)** | **Delivered** |
 
 ---
 

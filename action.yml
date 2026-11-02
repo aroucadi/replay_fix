@@ -1,8 +1,12 @@
-name: 'ReplayFix Autonomous Verification & Inoculation'
-description: 'Deterministic Rust harness for visual bug reproduction, causal verification, permanent inoculation, and cryptographic audit reporting'
+name: 'ReplayFix Autonomous Verification, Inoculation & Issue Triage Bot'
+description: 'Deterministic Rust harness for visual bug reproduction, causal verification, permanent inoculation, autonomous GitHub issue triage, and cryptographic audit reporting'
 author: 'ReplayFix Contributors'
 
 inputs:
+  issue-url:
+    description: 'GitHub issue URL to autonomously triage (e.g. https://github.com/org/repo/issues/123). When provided, runs `replayfix bot` mode.'
+    required: false
+    default: ''
   bug:
     description: 'Bug identifier to reproduce and verify (e.g. RF-01)'
     required: false
@@ -23,6 +27,18 @@ inputs:
     description: 'Synthesize permanent Playwright regression test into tests/repro'
     required: false
     default: 'true'
+  create-pr:
+    description: 'Automatically dispatch pull request upon verified fix'
+    required: false
+    default: 'true'
+  comment-issue:
+    description: 'Post structured Evidence Matrix comment to issue thread'
+    required: false
+    default: 'true'
+  apply-labels:
+    description: 'Automatically apply triage labels to issue'
+    required: false
+    default: 'true'
   sarif:
     description: 'Export SARIF v2.1.0 report for GitHub Code Scanning'
     required: false
@@ -35,20 +51,34 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Run ReplayFix Verification
+    - name: Run ReplayFix Autonomous Engine
       shell: bash
       run: |
-        ARGS=(repro --bug "${{ inputs.bug }}" --repo "${{ inputs.repo }}" --output-dir "${{ inputs.output-dir }}")
-        if [ "${{ inputs.stress-quorum }}" = "true" ]; then
-          ARGS+=(--stress-quorum)
+        if [ -n "${{ inputs.issue-url }}" ]; then
+          ARGS=(bot --issue "${{ inputs.issue-url }}" --repo "${{ inputs.repo }}" --output "${{ inputs.output-dir }}")
+          if [ "${{ inputs.create-pr }}" = "true" ]; then
+            ARGS+=(--create-pr)
+          fi
+          if [ "${{ inputs.comment-issue }}" = "true" ]; then
+            ARGS+=(--comment-issue)
+          fi
+          if [ "${{ inputs.apply-labels }}" = "true" ]; then
+            ARGS+=(--apply-labels)
+          fi
+          cargo run --release -p replayfix-cli -- "${ARGS[@]}"
+        else
+          ARGS=(repro --bug "${{ inputs.bug }}" --repo "${{ inputs.repo }}" --output-dir "${{ inputs.output-dir }}")
+          if [ "${{ inputs.stress-quorum }}" = "true" ]; then
+            ARGS+=(--stress-quorum)
+          fi
+          if [ "${{ inputs.inoculate }}" = "true" ]; then
+            ARGS+=(--inoculate)
+          fi
+          if [ "${{ inputs.sarif }}" = "true" ]; then
+            ARGS+=(--sarif "${{ inputs.output-dir }}/results.sarif")
+          fi
+          if [ "${{ inputs.junit }}" = "true" ]; then
+            ARGS+=(--junit "${{ inputs.output-dir }}/junit.xml")
+          fi
+          cargo run --release -p replayfix-cli -- "${ARGS[@]}"
         fi
-        if [ "${{ inputs.inoculate }}" = "true" ]; then
-          ARGS+=(--inoculate)
-        fi
-        if [ "${{ inputs.sarif }}" = "true" ]; then
-          ARGS+=(--sarif "${{ inputs.output-dir }}/results.sarif")
-        fi
-        if [ "${{ inputs.junit }}" = "true" ]; then
-          ARGS+=(--junit "${{ inputs.output-dir }}/junit.xml")
-        fi
-        cargo run --release -p replayfix-cli -- "${ARGS[@]}"

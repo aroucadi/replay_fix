@@ -142,6 +142,12 @@ impl InoculationGenerator {
         format!("tests/repro/{normalized}.spec.ts")
     }
 
+    /// Relative path for an issue-specific permanent Playwright inoculation spec (`tests/repro/rf_issue_<id>.spec.ts`).
+    #[must_use]
+    pub fn spec_rel_path_for_issue(issue_number: u64) -> String {
+        format!("tests/repro/rf_issue_{issue_number}.spec.ts")
+    }
+
     /// Derive the default grounded `DomCandidate` and output selector for a built-in `Fixture`.
     #[must_use]
     pub fn default_candidate_for_fixture(fixture: &Fixture) -> (DomCandidate, String) {
@@ -256,6 +262,83 @@ impl InoculationGenerator {
 
         Ok(InoculationSpec {
             bug_id: fixture.task_id.to_string(),
+            spec_rel_path,
+            target_path: fixture.target_path.to_string(),
+            grounded_selector,
+            output_selector,
+            expected_output_text: fixture.expected_output_text.to_string(),
+            typescript_content: ts,
+            spec_sha256,
+        })
+    }
+
+    /// Synthesize a permanent `@playwright/test` TypeScript specification mapped to a GitHub issue number (`tests/repro/rf_issue_<id>.spec.ts`).
+    pub fn synthesize_for_issue(
+        issue_number: u64,
+        fixture: &Fixture,
+        candidate_override: Option<&DomCandidate>,
+    ) -> Result<InoculationSpec> {
+        let (default_cand, output_selector) = Self::default_candidate_for_fixture(fixture);
+        let candidate = candidate_override.unwrap_or(&default_cand);
+        let grounded_selector = LocatorResolver::synthesize_selector(candidate)?;
+        LocatorResolver::validate_selector(&grounded_selector)?;
+
+        let spec_rel_path = Self::spec_rel_path_for_issue(issue_number);
+        let contract_sha = fixture.contract.digest()?;
+        let _patch_outcome =
+            UnifiedPatcher::apply_diff(fixture.buggy_source, fixture.builtin_diff)?;
+        let patch_sha = sha256_hex(fixture.builtin_diff.as_bytes());
+
+        let fallback_testid_line = if let Some(ref tid) = candidate.test_id {
+            format!("    // Secondary resilient locator: page.getByTestId('{tid}')\n")
+        } else {
+            String::new()
+        };
+
+        let mut ts = String::new();
+        ts.push_str("// REPLAYFIX-INOCULATION-SPEC: v1.7\n");
+        ts.push_str(&format!("// ISSUE-NUMBER: {issue_number}\n"));
+        ts.push_str(&format!("// BUG-ID: {}\n", fixture.task_id));
+        ts.push_str(&format!(
+            "// CONTRACT-ID: {}\n",
+            fixture.contract.contract_id
+        ));
+        ts.push_str(&format!("// CONTRACT-SHA256: {contract_sha}\n"));
+        ts.push_str(&format!("// PATCH-SHA256: {patch_sha}\n"));
+        ts.push_str(&format!("// TARGET-PATH: {}\n", fixture.target_path));
+        ts.push_str("import { test, expect } from '@playwright/test';\n\n");
+        ts.push_str(&format!(
+            "test.describe('ReplayFix Permanent Inoculation // Issue #{issue_number} ({})', () => {{\n",
+            fixture.task_id
+        ));
+        ts.push_str(&format!(
+            "  test('Issue #{issue_number}: {} satisfies {}', async ({{ page }}) => {{\n",
+            fixture.contract.action, fixture.contract.postcondition_id
+        ));
+        ts.push_str("    const pageErrors: Error[] = [];\n");
+        ts.push_str("    page.on('pageerror', (err) => pageErrors.push(err));\n\n");
+        ts.push_str("    await page.goto('/');\n");
+        ts.push_str(&fallback_testid_line);
+        ts.push_str(&format!("    const target = {grounded_selector};\n"));
+        ts.push_str("    await expect(target).toBeVisible();\n");
+        ts.push_str("    await target.click();\n\n");
+        ts.push_str(&format!(
+            r#"    await expect(page.locator("{output_selector}")).toHaveText('{expected}');"#,
+            output_selector = output_selector,
+            expected = fixture.expected_output_text
+        ));
+        ts.push('\n');
+        ts.push_str("    expect(pageErrors).toHaveLength(0);\n");
+        ts.push_str("  });\n");
+        ts.push_str("});\n");
+
+        let spec_sha256 = sha256_hex(ts.as_bytes());
+
+        Ok(InoculationSpec {
+            bug_id: format!(
+                "issue-{issue_number}-{}",
+                fixture.task_id.to_ascii_lowercase()
+            ),
             spec_rel_path,
             target_path: fixture.target_path.to_string(),
             grounded_selector,

@@ -73,6 +73,15 @@ pub enum CoreError {
 
     #[error("Macro execution error: {0}")]
     MacroExecution(String),
+
+    #[error("GitHub API error: {0}")]
+    GitHubApi(String),
+
+    #[error("Webhook signature verification failed: {0}")]
+    WebhookVerification(String),
+
+    #[error("GitHub issue ingestion error: {0}")]
+    IssueIngestion(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
