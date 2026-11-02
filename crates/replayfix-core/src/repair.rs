@@ -603,6 +603,10 @@ pub struct RepairRequest {
     pub system_prefix: String,
     pub user_prompt: String,
     pub response_schema: serde_json::Value,
+    #[serde(default)]
+    pub enable_web_search: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyframe_png_bytes: Option<Vec<u8>>,
 }
 
 impl RepairRequest {
@@ -628,7 +632,23 @@ impl RepairRequest {
             system_prefix: STATIC_SYSTEM_PREFIX.to_string(),
             user_prompt,
             response_schema: PromptBuilder::response_json_schema(),
+            enable_web_search: true,
+            keyframe_png_bytes: None,
         }
+    }
+
+    /// Enable or disable native `"tools": [{"type": "web_search"}]` on the repair call.
+    #[must_use]
+    pub const fn with_web_search(mut self, enabled: bool) -> Self {
+        self.enable_web_search = enabled;
+        self
+    }
+
+    /// Attach an extracted keyframe PNG buffer (`input_image`) for multimodal visual defect context.
+    #[must_use]
+    pub fn with_keyframe_image(mut self, png_bytes: Option<Vec<u8>>) -> Self {
+        self.keyframe_png_bytes = png_bytes;
+        self
     }
 }
 
@@ -1409,6 +1429,8 @@ impl BoundedRepairClient {
                 request.user_prompt,
             );
 
+            let image_sha256 = request.keyframe_png_bytes.as_deref().map(sha256_hex);
+
             let req = crate::gateway::GatewayRequest {
                 role: crate::gateway::ModelRole::DeepReasoning,
                 requested_model: config.serving_model.as_str().to_string(),
@@ -1417,10 +1439,15 @@ impl BoundedRepairClient {
                 estimated_tokens: 2048,
                 include_audio: false,
                 audio_wav_bytes: None,
-                image_sha256: None,
+                image_sha256,
+                enable_web_search: request.enable_web_search,
             };
 
-            let resp = gateway_client.send_live_https(&req, None)?;
+            let resp = gateway_client.send_live_https_with_image(
+                &req,
+                request.keyframe_png_bytes.as_deref(),
+                None,
+            )?;
             let trimmed = resp.output_text.trim();
             let clean_json = if let Some(stripped) = trimmed.strip_prefix("```json") {
                 stripped.strip_suffix("```").unwrap_or(stripped).trim()

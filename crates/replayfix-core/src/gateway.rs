@@ -637,9 +637,18 @@ pub struct GatewayRequest {
     pub include_audio: bool,
     pub audio_wav_bytes: Option<Vec<u8>>,
     pub image_sha256: Option<String>,
+    #[serde(default)]
+    pub enable_web_search: bool,
 }
 
 impl GatewayRequest {
+    /// Enable or disable native `web_search` tool calling on this request.
+    #[must_use]
+    pub const fn with_web_search(mut self, enabled: bool) -> Self {
+        self.enable_web_search = enabled;
+        self
+    }
+
     /// Validate model allowlist, role compatibility, and the Zero-Audio Rule.
     pub fn validate(&self) -> Result<()> {
         let is_text_model = matches!(
@@ -741,6 +750,12 @@ pub struct GatewayResponse {
     pub retries_attempted: u32,
     pub fallback_triggered: bool,
     pub request_fingerprint_sha256: String,
+    #[serde(default)]
+    pub tool_calls_invoked: u64,
+    #[serde(default)]
+    pub images_processed: u64,
+    #[serde(default)]
+    pub video_frames_processed: u64,
 }
 
 /// Simulated or live transport outcome for a single upstream HTTP attempt.
@@ -856,6 +871,9 @@ impl MultimodalGateway {
                             retries_attempted,
                             fallback_triggered: false,
                             request_fingerprint_sha256: fingerprint,
+                            tool_calls_invoked: 0,
+                            images_processed: u64::from(request.image_sha256.is_some()),
+                            video_frames_processed: 0,
                         });
                     }
                     TransportOutcome::AuthError401 { message } => {
@@ -931,6 +949,9 @@ impl MultimodalGateway {
                         retries_attempted,
                         fallback_triggered: true,
                         request_fingerprint_sha256: fingerprint,
+                        tool_calls_invoked: 0,
+                        images_processed: u64::from(request.image_sha256.is_some()),
+                        video_frames_processed: 0,
                     });
                 }
                 other => {
@@ -1095,16 +1116,40 @@ impl MetaGatewayClient {
         let audio_b64 = request.audio_wav_bytes.as_deref().map(Self::encode_base64);
 
         let build_payload = |model_slug: &str| -> serde_json::Value {
+            let input_val = if let Some(ref img) = image_b64 {
+                serde_json::json!([
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": format!("data:image/png;base64,{img}")
+                            },
+                            {
+                                "type": "input_text",
+                                "text": fenced_prompt
+                            }
+                        ]
+                    }
+                ])
+            } else {
+                serde_json::Value::String(fenced_prompt.clone())
+            };
+
             let mut obj = serde_json::json!({
                 "model": model_slug,
-                "input": fenced_prompt,
+                "input": input_val,
             });
             if let Some(ref eff) = request.reasoning_effort {
                 obj["reasoning"] = serde_json::json!({ "effort": eff });
             }
-            if let Some(ref img) = image_b64 {
-                obj["image_base64"] = serde_json::Value::String(img.clone());
-                obj["image_sha256"] = serde_json::json!(request.image_sha256);
+            if request.enable_web_search
+                && matches!(
+                    model_slug,
+                    "muse-spark-1.3" | "muse-spark-1.3-contributor" | "muse-wonder-1.0"
+                )
+            {
+                obj["tools"] = serde_json::json!([{ "type": "web_search" }]);
             }
             if let Some(ref aud) = audio_b64 {
                 obj["audio_wav_base64"] = serde_json::Value::String(aud.clone());
@@ -1217,6 +1262,7 @@ impl MetaGatewayClient {
             .get("output")
             .and_then(|v| v.as_array())
             .and_then(|arr| {
+                let mut fallback_empty: Option<&str> = None;
                 for item in arr {
                     if item.get("type").and_then(|t| t.as_str()) == Some("message") {
                         if let Some(contents) = item.get("content").and_then(|c| c.as_array()) {
@@ -1225,12 +1271,13 @@ impl MetaGatewayClient {
                                     if !txt.trim().is_empty() {
                                         return Some(txt);
                                     }
+                                    fallback_empty = Some(txt);
                                 }
                             }
                         }
                     }
                 }
-                None
+                fallback_empty
             })
             .or_else(|| body_val.get("output_text").and_then(|v| v.as_str()))
             .or_else(|| {
@@ -1307,6 +1354,30 @@ impl MetaGatewayClient {
         let slug = MuseModelSlug::parse(&serving_model).unwrap_or(MuseModelSlug::MuseSpark13);
         let cost_nanos =
             TokenAccounting::usage_nanos(slug, input_tokens, cached_tokens, output_tokens, 0);
+        let tool_calls_invoked = body_val
+            .get("output")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter(|item| {
+                        matches!(
+                            item.get("type").and_then(|t| t.as_str()),
+                            Some("web_search_call" | "tool_call" | "function_call")
+                        )
+                    })
+                    .count() as u64
+            })
+            .unwrap_or(0);
+        let images_processed = body_val
+            .get("usage")
+            .and_then(|u| u.get("images_processed"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or_else(|| u64::from(request.image_sha256.is_some()));
+        let video_frames_processed = body_val
+            .get("usage")
+            .and_then(|u| u.get("video_frames_processed"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         Ok(GatewayResponse {
             provider,
             provenance: GatewayProvenance::LiveProvider,
@@ -1321,16 +1392,19 @@ impl MetaGatewayClient {
             retries_attempted,
             fallback_triggered,
             request_fingerprint_sha256: fingerprint,
+            tool_calls_invoked,
+            images_processed,
+            video_frames_processed,
         })
     }
 
     /// Dispatch a keyframe PNG crop around `(cand_x, cand_y)` to `POST https://api.meta.ai/v1/responses`
-    /// with model `sam-3.1` and return `(wire_tokens_output, latency_ms)`.
+    /// with model `sam-3.1` using the canonical `input_image` content array and return `(wire_tokens_output, latency_ms)`.
     pub fn segment_keyframe_sam31(
         &self,
         png_bytes: &[u8],
-        cand_x: i32,
-        cand_y: i32,
+        _cand_x: i32,
+        _cand_y: i32,
     ) -> Result<(String, u64)> {
         if png_bytes.is_empty() {
             return Err(CoreError::Grounding(
@@ -1338,21 +1412,257 @@ impl MetaGatewayClient {
             ));
         }
         let img_sha = sha256_hex(png_bytes);
-        let prompt = format!(
-            "Segment the interactive UI element near video coordinate ({cand_x}, {cand_y}) and emit <|box;x1=...;y1=...;x2=...;y2=...|><|mask;...|> tokens."
-        );
         let req = GatewayRequest {
             role: ModelRole::SpatialSegmentation,
             requested_model: "sam-3.1".to_string(),
-            prompt,
+            prompt: "button".to_string(),
             reasoning_effort: None,
             estimated_tokens: 256,
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: Some(img_sha),
+            enable_web_search: false,
         };
         let resp = self.send_live_https_with_image(&req, Some(png_bytes), None)?;
         Ok((resp.output_text, resp.latency_ms))
+    }
+
+    /// Dispatch an MP4 video stream to `POST https://api.meta.ai/v1/responses` with model `sam-3.1`
+    /// using the canonical `input_video` (`data:video/mp4;base64,...`) content block, returning
+    /// `(wire_tokens_output, latency_ms, video_frames_processed)`.
+    pub fn segment_video_sam31(&self, mp4_bytes: &[u8]) -> Result<(String, u64, u64)> {
+        if mp4_bytes.is_empty() {
+            return Err(CoreError::Grounding(
+                "Cannot segment empty MP4 video buffer with sam-3.1".to_string(),
+            ));
+        }
+        let api_key = self.require_live_auth()?;
+        let vid_b64 = Self::encode_base64(mp4_bytes);
+        let payload = serde_json::json!({
+            "model": "sam-3.1",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_video",
+                            "video_url": format!("data:video/mp4;base64,{vid_b64}")
+                        },
+                        {
+                            "type": "input_text",
+                            "text": "button"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
+            .timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+            .build()
+            .map_err(|e| {
+                CoreError::ModelApiError(format!(
+                    "Failed to build rustls HTTPS client for sam-3.1 video segmentation: {e}"
+                ))
+            })?;
+
+        let start = std::time::Instant::now();
+        let resp = http_client
+            .post(&self.base_url)
+            .bearer_auth(api_key)
+            .json(&payload)
+            .send()
+            .map_err(|e| {
+                let safe_err = self.config.redact_secrets(&e.to_string());
+                CoreError::ModelApiError(format!(
+                    "Live sam-3.1 video segmentation transport error: {safe_err}"
+                ))
+            })?;
+
+        let status = resp.status().as_u16();
+        let body_val: serde_json::Value = resp.json().map_err(|e| {
+            CoreError::ModelApiError(format!(
+                "Malformed JSON from sam-3.1 video segmentation (HTTP {status}): {e}"
+            ))
+        })?;
+        if status != 200 {
+            return Err(CoreError::ModelApiError(format!(
+                "GATEWAY_SAM_VIDEO_FAILED: HTTP {status}: {body_val}"
+            )));
+        }
+
+        let frames_processed = body_val
+            .get("usage")
+            .and_then(|u| u.get("video_frames_processed"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+
+        let dummy_req = GatewayRequest {
+            role: ModelRole::SpatialSegmentation,
+            requested_model: "sam-3.1".to_string(),
+            prompt: "button".to_string(),
+            reasoning_effort: None,
+            estimated_tokens: 256,
+            include_audio: false,
+            audio_wav_bytes: None,
+            image_sha256: None,
+            enable_web_search: false,
+        };
+        let parsed = Self::parse_live_json_response(
+            &body_val,
+            &dummy_req,
+            GatewayProvider::MetaAi,
+            false,
+            0,
+            start.elapsed().as_millis() as u64,
+            sha256_hex(mp4_bytes),
+        )?;
+        Ok((parsed.output_text, parsed.latency_ms, frames_processed))
+    }
+
+    /// Execute a `muse-spark-1.3` diagnostic query with native `tools: [{"type": "web_search"}]`
+    /// enabled to ground Playwright accessibility locator best practices and exercise Meta's
+    /// tool-calling pipeline (`Tool calls` / `Web searches`).
+    pub fn query_web_search_grounding(
+        &self,
+        task_id: &str,
+        action_hint: &str,
+    ) -> Result<(String, u64)> {
+        let api_key = self.require_live_auth()?;
+        let payload = serde_json::json!({
+            "model": "muse-spark-1.3",
+            "input": format!(
+                "Use web_search to look up Playwright getByRole accessibility locator documentation for reproducing bug {task_id} ({action_hint}) and summarize in one sentence."
+            ),
+            "tools": [
+                { "type": "web_search" }
+            ]
+        });
+
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
+            .timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+            .build()
+            .map_err(|e| {
+                CoreError::ModelApiError(format!(
+                    "Failed to build rustls HTTPS client for muse-spark-1.3 web_search: {e}"
+                ))
+            })?;
+
+        let start = std::time::Instant::now();
+        let resp = http_client
+            .post(&self.base_url)
+            .bearer_auth(api_key)
+            .json(&payload)
+            .send()
+            .map_err(|e| {
+                let safe_err = self.config.redact_secrets(&e.to_string());
+                CoreError::ModelApiError(format!(
+                    "Live muse-spark-1.3 web_search transport error: {safe_err}"
+                ))
+            })?;
+
+        let status = resp.status().as_u16();
+        let body_val: serde_json::Value = resp.json().map_err(|e| {
+            CoreError::ModelApiError(format!(
+                "Malformed JSON from muse-spark-1.3 web_search (HTTP {status}): {e}"
+            ))
+        })?;
+        if status != 200 {
+            return Err(CoreError::ModelApiError(format!(
+                "GATEWAY_WEB_SEARCH_FAILED: HTTP {status}: {body_val}"
+            )));
+        }
+
+        let dummy_req = GatewayRequest {
+            role: ModelRole::FastSynthesis,
+            requested_model: "muse-spark-1.3".to_string(),
+            prompt: task_id.to_string(),
+            reasoning_effort: None,
+            estimated_tokens: 256,
+            include_audio: false,
+            audio_wav_bytes: None,
+            image_sha256: None,
+            enable_web_search: true,
+        };
+        let parsed = Self::parse_live_json_response(
+            &body_val,
+            &dummy_req,
+            GatewayProvider::MetaAi,
+            false,
+            0,
+            start.elapsed().as_millis() as u64,
+            sha256_hex(task_id.as_bytes()),
+        )?;
+        Ok((parsed.output_text, parsed.latency_ms))
+    }
+
+    /// Resolve the dedicated image generation endpoint URL (`POST /v1/images/generations`).
+    #[must_use]
+    pub fn images_endpoint_url(&self) -> String {
+        if let Some(prefix) = self.base_url.strip_suffix("/responses") {
+            format!("{prefix}/images/generations")
+        } else {
+            "https://api.meta.ai/v1/images/generations".to_string()
+        }
+    }
+
+    /// Generate a visual attestation badge for `task_id` via `POST /v1/images/generations`
+    /// with model `muse-image-1.0`, returning `(base64_image_string, latency_ms)`.
+    pub fn generate_verification_badge(&self, task_id: &str) -> Result<(String, u64)> {
+        let api_key = self.require_live_auth()?;
+        let payload = serde_json::json!({
+            "model": "muse-image-1.0",
+            "prompt": format!(
+                "Minimalist emerald shield verification badge icon certifying deterministic bug reproduction and repair for task {task_id}"
+            )
+        });
+
+        let http_client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
+            .timeout(std::time::Duration::from_secs(self.read_timeout_secs))
+            .build()
+            .map_err(|e| {
+                CoreError::ModelApiError(format!(
+                    "Failed to build rustls HTTPS client for muse-image-1.0: {e}"
+                ))
+            })?;
+
+        let start = std::time::Instant::now();
+        let url = self.images_endpoint_url();
+        let resp = http_client
+            .post(&url)
+            .bearer_auth(api_key)
+            .json(&payload)
+            .send()
+            .map_err(|e| {
+                let safe_err = self.config.redact_secrets(&e.to_string());
+                CoreError::ModelApiError(format!(
+                    "Live muse-image-1.0 transport error from {url}: {safe_err}"
+                ))
+            })?;
+
+        let status = resp.status().as_u16();
+        let body_val: serde_json::Value = resp.json().map_err(|e| {
+            CoreError::ModelApiError(format!(
+                "Malformed JSON from muse-image-1.0 (HTTP {status}): {e}"
+            ))
+        })?;
+        if status != 200 {
+            return Err(CoreError::ModelApiError(format!(
+                "GATEWAY_IMAGE_GEN_FAILED: HTTP {status} from {url}: {body_val}"
+            )));
+        }
+
+        let b64 = body_val
+            .get("data")
+            .and_then(|d| d.get(0))
+            .and_then(|item| item.get("b64_json"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((b64, start.elapsed().as_millis() as u64))
     }
 
     /// Resolve the dedicated ASR transcription endpoint URL (`POST /v1/asr/transcribe`).
@@ -1365,8 +1675,29 @@ impl MetaGatewayClient {
         }
     }
 
+    /// Construct an RFC 7578 `multipart/form-data` body for `POST /v1/asr/transcribe` containing
+    /// both the `request` JSON part (`{"model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}`)
+    /// and the `audio` WAV binary part (`audio.wav`).
+    #[must_use]
+    pub fn build_asr_multipart_body(wav_bytes: &[u8], boundary: &str) -> Vec<u8> {
+        let req_json = r#"{"model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}"#;
+        let mut body = Vec::with_capacity(wav_bytes.len() + 512);
+        body.extend_from_slice(format!("--{boundary}\x0d\x0a").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"request\"\x0d\x0a\x0d\x0a");
+        body.extend_from_slice(req_json.as_bytes());
+        body.extend_from_slice(b"\x0d\x0a");
+        body.extend_from_slice(format!("--{boundary}\x0d\x0a").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\x0d\x0aContent-Type: audio/wav\x0d\x0a\x0d\x0a",
+        );
+        body.extend_from_slice(wav_bytes);
+        body.extend_from_slice(format!("\x0d\x0a--{boundary}--\x0d\x0a").as_bytes());
+        body
+    }
+
     /// Stream 24 kHz mono 16-bit PCM WAV audio to `POST /v1/asr/transcribe` with model
-    /// `muse-voice-transcribe-1.0`, parse `audioProcessedMs`, and return a temporally aligned `NarrationCue`.
+    /// `muse-voice-transcribe-1.0` using RFC 7578 `multipart/form-data`, parse `audioProcessedMs` /
+    /// `audioDurationMs`, and return a temporally aligned `NarrationCue`.
     pub fn transcribe_audio_wav(
         &self,
         wav_bytes: &[u8],
@@ -1382,17 +1713,8 @@ impl MetaGatewayClient {
         let asr_cfg = crate::perception::AsrRequestConfig::default();
         crate::perception::AsrTranscriber::validate_config(&asr_cfg)?;
 
-        let payload = AsrPayload {
-            model: asr_cfg.model.clone(),
-            audio_encoding: asr_cfg.audio_encoding.clone(),
-            sample_rate_hz: asr_cfg.sample_rate_hz,
-            channels: u16::from(asr_cfg.channels),
-            mode: asr_cfg.mode.clone(),
-            partial_mode: asr_cfg.partial_mode.clone(),
-            emit_audio_progress: asr_cfg.emit_audio_progress,
-            audio_wav_base64: Self::encode_base64(wav_bytes),
-            audio_sha256: wav_meta.sha256,
-        };
+        let boundary = "----ReplayFixAsrBoundary7MA4YWxkTrZu0gW";
+        let multipart_body = Self::build_asr_multipart_body(wav_bytes, boundary);
 
         let http_client = reqwest::blocking::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(self.connect_timeout_secs))
@@ -1408,7 +1730,11 @@ impl MetaGatewayClient {
         let resp = http_client
             .post(&url)
             .bearer_auth(api_key)
-            .json(&payload)
+            .header(
+                "Content-Type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(multipart_body)
             .send()
             .map_err(|e| {
                 let safe_err = self.config.redact_secrets(&e.to_string());
@@ -1471,6 +1797,7 @@ mod tests {
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: None,
+            enable_web_search: true,
         };
         let resp = gw
             .execute_with_transport(&req_wonder, 1_000, |_, model, _| {
@@ -1500,6 +1827,7 @@ mod tests {
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: Some("abc".to_string()),
+            enable_web_search: false,
         };
         assert!(bad_sam_role.validate().is_err());
 
@@ -1512,6 +1840,7 @@ mod tests {
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: Some("abc".to_string()),
+            enable_web_search: false,
         };
         assert!(good_sam_role.validate().is_ok());
     }
@@ -1528,6 +1857,7 @@ mod tests {
             include_audio: true,
             audio_wav_bytes: None,
             image_sha256: None,
+            enable_web_search: false,
         };
         let err = req_violation.validate().unwrap_err();
         assert!(matches!(err, CoreError::SecurityViolation(_)));
@@ -1550,6 +1880,7 @@ mod tests {
             include_audio: true,
             audio_wav_bytes: Some(wav_24k),
             image_sha256: None,
+            enable_web_search: false,
         };
         assert!(req_asr.validate().is_ok());
 
@@ -1600,6 +1931,7 @@ mod tests {
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: None,
+            enable_web_search: false,
         };
 
         // Simulate 3 consecutive primary failures -> trips circuit to Open -> routes to BasetenFallback!
@@ -1655,6 +1987,7 @@ mod tests {
             include_audio: false,
             audio_wav_bytes: None,
             image_sha256: None,
+            enable_web_search: false,
         };
 
         let err = gw
@@ -1755,5 +2088,74 @@ mod tests {
         assert_eq!(parse_dotenv_var(&env_file, "MISSING_KEY"), None);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_v151_multimodal_wire_formats_and_multipart_asr() {
+        let wav_bytes = make_valid_24khz_mono_wav(1_000);
+        let boundary = "----ReplayFixAsrBoundary7MA4YWxkTrZu0gW";
+        let multipart = MetaGatewayClient::build_asr_multipart_body(&wav_bytes, boundary);
+        let header_str = String::from_utf8_lossy(&multipart[..300]);
+        assert!(header_str.contains("Content-Disposition: form-data; name=\"request\""));
+        assert!(
+            header_str.contains(r#"{"model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}"#)
+        );
+        assert!(header_str
+            .contains("Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\""));
+        assert!(header_str.contains("Content-Type: audio/wav"));
+
+        let req = GatewayRequest {
+            role: ModelRole::FastSynthesis,
+            requested_model: "muse-spark-1.3".to_string(),
+            prompt: "Repair bug".to_string(),
+            reasoning_effort: Some("xhigh".to_string()),
+            estimated_tokens: 256,
+            include_audio: false,
+            audio_wav_bytes: None,
+            image_sha256: Some("deadbeef".to_string()),
+            enable_web_search: true,
+        };
+        let live_json = serde_json::json!({
+            "model": "muse-spark-1.3",
+            "output": [
+                { "type": "web_search_call", "id": "ws_1" },
+                {
+                    "type": "message",
+                    "content": [
+                        { "type": "output_text", "text": "{\"status\":\"ok\"}" }
+                    ]
+                }
+            ],
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 45,
+                "images_processed": 1,
+                "video_frames_processed": 16
+            }
+        });
+        let parsed = MetaGatewayClient::parse_live_json_response(
+            &live_json,
+            &req,
+            GatewayProvider::MetaAi,
+            false,
+            0,
+            85,
+            "fp123".to_string(),
+        )
+        .unwrap();
+        assert_eq!(parsed.output_text, "{\"status\":\"ok\"}");
+        assert_eq!(parsed.tool_calls_invoked, 1);
+        assert_eq!(parsed.images_processed, 1);
+        assert_eq!(parsed.video_frames_processed, 16);
+
+        let client = MetaGatewayClient::default();
+        assert_eq!(
+            client.images_endpoint_url(),
+            "https://api.meta.ai/v1/images/generations"
+        );
+        assert_eq!(
+            client.asr_endpoint_url(),
+            "https://api.meta.ai/v1/asr/transcribe"
+        );
     }
 }

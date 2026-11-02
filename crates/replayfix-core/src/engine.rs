@@ -586,6 +586,10 @@ impl MockHealer {
         }
 
         let is_attached_mode = options.attached_url.is_some();
+        let keyframe_png_bytes = video_telemetry
+            .as_ref()
+            .and_then(|vt| vt.keyframe_paths.first())
+            .and_then(|p| std::fs::read(p).ok());
         let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
             if let Some((model_config, client_mode)) = autonomous_config {
                 let mut eval_error: Option<(TriageStatus, String)> = None;
@@ -594,8 +598,7 @@ impl MockHealer {
                     &mut sandbox,
                     &initial_source,
                     &freeze_guard,
-                    model_config,
-                    client_mode,
+                    (model_config, client_mode, keyframe_png_bytes.as_deref()),
                     &mut |sandbox_ref| {
                         let shadow_body = if is_attached_mode {
                             sandbox_ref.read_file(fixture.target_path).ok()
@@ -1018,8 +1021,11 @@ impl MockHealer {
         sandbox: &mut ScratchSandbox,
         initial_source: &str,
         freeze_guard: &TestFreezeGuard,
-        mut model_config: MuseModelConfig,
-        client_mode: RepairClientMode,
+        (mut model_config, client_mode, keyframe_png_bytes): (
+            MuseModelConfig,
+            RepairClientMode,
+            Option<&[u8]>,
+        ),
         run_gate2_twice: &mut F,
     ) -> Result<AutonomousRepairResult>
     where
@@ -1086,7 +1092,8 @@ impl MockHealer {
                 user_prompt,
                 previous_response_id.clone(),
                 encrypted_content.clone(),
-            );
+            )
+            .with_keyframe_image(keyframe_png_bytes.map(<[u8]>::to_vec));
             let resp = client.generate(&req, &mut model_config)?;
             if resp.fallback_used {
                 any_fallback_used = true;
@@ -1578,8 +1585,7 @@ impl MockHealer {
                     &mut sandbox,
                     &initial_source,
                     &freeze_guard,
-                    model_config,
-                    client_mode,
+                    (model_config, client_mode, None),
                     &mut |sb| {
                         let mut last_events = Vec::new();
                         for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {

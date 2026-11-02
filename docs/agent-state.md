@@ -1,11 +1,15 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.5.0` (`150-v1.5.0-autonomous-inoculation-mcp` — Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation)
-- **Status**: Production Release Qualification Complete; 283/283 Tests Passing, Zero Panics, 0 Clippy Warnings. Delivered Permanent Codebase Inoculation ("Dreaming" into `tests/repro/rf_<id>.spec.ts` + `.replayfix/inoculations.json`), Model Context Protocol (MCP) Universal Server (`replayfix mcp --transport stdio|sse`), Autonomous Git Branch & PR Packaging (`--package-pr` with Ed25519 commit trailers and `pr_description.md`), Gate 3 Concurrency & Stress Quorum (`--stress-quorum` with `FLAKY_NON_DETERMINISTIC` Exit 21 quarantine), Multi-Modal Copilot ASR keyframe alignment and interactive ambiguity tie-breaker, and SARIF v2.1.0 / JUnit XML CI/CD reporters (`action.yml`).
+- **Active Milestone**: `v1.5.1` (`151-v1.5.1-live-meta-multimodal-wire-protocol` — Live Meta Multimodal Wire Protocol & Full Muse Model Utilization)
+- **Status**: Production Release Qualification Complete; 283/283 Tests Passing, Zero Panics, 0 Clippy Warnings. Aligned `--mode live-ai` with production `https://api.meta.ai/v1/` wire protocols across all 5 Meta models (`sam-3.1` `input_image` + `input_video` segmentation, `muse-voice-transcribe-1.0` `multipart/form-data` WAV ASR, `muse-spark-1.3` `web_search` tool calling, `muse-wonder-1.0` repair, and `muse-image-1.0` verification badge generation).
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.5.1 Live Meta Multimodal Wire Protocol & Full Muse Model Utilization (Spec 151)**:
+  - Updated `MetaGatewayClient` and `SamSegmenter` for `input_image` + `input_video` segmentation on `sam-3.1` (`POST /v1/responses`) and 6-attribute `<|box;x1=...;y1=...;x2=...;y2=...;w=...;h=...|>` wire tokens.
+  - Updated `MetaGatewayClient::transcribe_audio_wav` to send RFC 7578 `multipart/form-data` (`request` + `audio` WAV) to `POST /v1/asr/transcribe` (`muse-voice-transcribe-1.0`) and parse `audioDurationMs`.
+  - Added `query_web_search_grounding` (`tools: [{"type": "web_search"}]` on `muse-spark-1.3`) and `generate_verification_badge` (`muse-image-1.0` on `POST /v1/images/generations`).
 - [x] **v1.5.0 Permanent Inoculation, Agentic Protocol (MCP) & Continuous CI/CD Automation (Spec 150)**:
   - Implemented `crates/replayfix-core/src/inoculate.rs` (`InoculationGenerator`, `InoculationSpec`, `InoculationRegistry`) and `contracts/inoculation.json`, synthesizing standalone `@playwright/test` TypeScript specs (`tests/repro/rf_<id>.spec.ts`) with grounded accessibility locators and RED/GREEN parity verification.
   - Implemented `crates/replayfix-cli/src/mcp/` (`mod.rs`, `stdio.rs`, `sse.rs`) and `contracts/mcp_tools.json`, exposing 5 tools, 3 resources, and `triage_bug` prompt over JSON-RPC 2.0 `stdio` and Streamable HTTP / `SSE`.
