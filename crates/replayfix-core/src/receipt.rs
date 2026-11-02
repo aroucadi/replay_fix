@@ -2,6 +2,7 @@
 
 use crate::artifacts::ArtifactStore;
 use crate::crypto::{AttestationRecord, KeypairManager};
+use crate::deliberation::SparkDeliberationSession;
 use crate::engine::{GateVerdict, OracleEvent};
 use crate::error::Result;
 use crate::fsm::{DifferentialDiagnosisReport, Phase};
@@ -96,6 +97,8 @@ pub struct AuditReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inoculation_entry: Option<InoculationEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deliberation: Option<SparkDeliberationSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merkle_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation: Option<AttestationRecord>,
@@ -143,6 +146,9 @@ impl AuditReceipt {
         if let Some(ref inoc) = self.inoculation_entry {
             store.write_json_pretty("06_inoculation_entry.json", inoc)?;
         }
+        if let Some(ref delib) = self.deliberation {
+            store.write_json_pretty("07_deliberation_timeline.json", delib)?;
+        }
 
         // Ensure 04_audit_receipt.json is serialized as the pre-Merkle core receipt payload
         let mut core_receipt = self.clone();
@@ -185,6 +191,8 @@ impl AuditReceipt {
                             "regression_parity".to_string()
                         } else if filename.contains("audit_receipt") {
                             "audit_receipt".to_string()
+                        } else if filename.contains("deliberation") {
+                            "deliberation_timeline".to_string()
                         } else {
                             "evidence_fact".to_string()
                         };
@@ -946,6 +954,7 @@ mod tests {
             regression_parity: None,
             stress_quorum: None,
             inoculation_entry: None,
+            deliberation: None,
             merkle_root: None,
             attestation: None,
             created_at: timestamp_now(),

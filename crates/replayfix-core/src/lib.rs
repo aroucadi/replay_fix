@@ -14,6 +14,7 @@ pub mod artifacts;
 pub mod browser;
 pub mod checkpoint;
 pub mod crypto;
+pub mod deliberation;
 pub mod diffguard;
 pub mod digest;
 pub mod doctor;
@@ -53,6 +54,13 @@ pub use checkpoint::{
 pub use crypto::{
     build_signing_payload, verify_attestation, AttestationRecord, KeypairManager, TrustPolicy,
     VerificationOutcome,
+};
+pub use deliberation::{
+    DeliberationContext, DeliberationEngine, DeliberationOutcome, DeliberationStatus,
+    DeliberationToolCall, DeliberationToolObservation, SparkDeliberationSession,
+    SparkDeliberationTurn, FRONTIER_WONDER_SLUG, SOVEREIGN_SPARK_SLUG,
+    SPARK_AGENT_LOOP_PROMPT_CACHE_KEY, TOOL_INOCULATE, TOOL_INSPECT_TRACE, TOOL_REPRODUCE,
+    TOOL_VERIFY_PATCH,
 };
 pub use diffguard::DiffGuard;
 pub use digest::{canonical_json, sha256_hex};

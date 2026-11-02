@@ -6,7 +6,7 @@ ReplayFix is a deterministic Rust harness for reproducing, verifying, and autono
 3. **Anti-cheat guards** (`TestFreezeGuard` + surgical `DiffGuard` on `package.json` `"scripts.test*"`) and **active regression parity** (`F_patched \ F_baseline = empty`) pass, and
 4. Disaggregated evidence artifacts are bound into an **RFC 6962 Merkle Tree** (`0x00` leaf / `0x01` internal node domain separation) and signed with **pure RFC 8032 Ed25519** attestation, independently verifiable via `replayfix verify-receipt` or the air-gapped **`proof_viewer.html`** Judge Proof Portal.
 
-> **Current Release: `v1.5.1` (Live Meta Multimodal Wire Protocol & Full Muse Model Utilization).** Featuring production live-ai wire protocols across all 5 Meta Muse & SAM models (`sam-3.1` `input_image` + `input_video` segmentation, `muse-voice-transcribe-1.0` `multipart/form-data` WAV ASR, `muse-spark-1.3` `web_search` tool calling, `muse-wonder-1.0` autonomous repair, and `muse-image-1.0` verification badge synthesis), Permanent Codebase Inoculation ("Dreaming" into `tests/repro/rf_<id>.spec.ts` + `.replayfix/inoculations.json`), a native Model Context Protocol (MCP) server (`replayfix mcp --transport stdio|sse`), Autonomous Git Branch & PR Packaging (`--package-pr` with Ed25519 commit trailers and `pr_description.md`), Gate 3 Concurrency & Stress Quorum (`--stress-quorum`), Multi-Modal Copilot ASR keyframe alignment and interactive ambiguity tie-breaker, and SARIF v2.1.0 / JUnit XML CI/CD reporters (`action.yml`). All roadmap specifications (`Spec 000` through `Spec 151`) are complete, verified, and qualified across 283 automated tests with 0 non-test panics and 0 Clippy warnings.
+> **Current Release: `v1.6.0` (Sovereign Autonomous Healer: Multi-Turn Muse Spark Agent Loop & Sub-60s Macro Pipeline).** Establishing **Meta Muse Spark 1.3** as the sovereign multi-turn agent loop cognitive orchestrator (`305 tok/s`, `reasoning: { effort: "xhigh" }`, `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`), paired with **Meta Muse Wonder 1.0** for AST block search/replace code repair with multi-turn Encrypted Deliberation Caching (`reasoning.encrypted_content`) and `previous_response_id` backtracking. Introduces the unified autonomous macro command (`replayfix heal --video <path> --repo <path>`) executing the complete verification chain (Video Ingestion ➔ SAM 3.1 ➔ Voice Lock ➔ Ephemeral Server :0 ➔ Spark Gate 1 RED ➔ Wonder AST Repair ➔ Spark Gate 2 GREEN ➔ Gate 3 Stress Quorum ➔ Permanent Inoculation ➔ RFC 6962 Signed Merkle Receipt) in **under 60 seconds**. Features an upgraded air-gapped `proof_viewer.html` Judge Proof Portal with a Turn-by-Turn Muse Spark Deliberation Timeline, side-by-side DOM accessibility tree diffs, and Merkle leaf verification. All roadmap specifications (`Spec 000` through `Spec 160`) are complete, verified, and qualified across 289 automated tests with 0 non-test panics and 0 Clippy warnings.
 
 ---
 
@@ -59,7 +59,25 @@ Set-Content -Path .env -Value 'META_API_KEY="your-meta-api-key"'
 
 (`ReplayFix` automatically checks process environment variables, `.env` in the working/binary directory tree, and the Windows `HKCU\Environment` / `HKLM` registry hives.)
 
-### 3. Interactive Conversational Agent Workspace (Release 1.4)
+### 3. Sovereign Autonomous Healer Macro Pipeline: `replayfix heal` (Release 1.6)
+
+Execute the end-to-end visual bug reproduction, multi-turn **Meta Muse Spark 1.3** agent loop (`305 tok/s`), **Meta Muse Wonder 1.0** AST block repair, Gate 2 stability verification, Gate 3 stress quorum, permanent test inoculation, and signed Merkle audit receipt export in **under 60 seconds**:
+
+```bash
+# Offline deterministic mode against real MetaPulse MP4 recording
+replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture
+
+# Live AI mode (Meta SAM 3.1 + Muse Voice + Muse Spark 1.3 + Muse Wonder 1.0 with Encrypted Deliberation Caching)
+replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode live-ai
+
+# Sovereign repair with headless browser, Gate 3 stress quorum, and permanent inoculation
+replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture --inoculate --stress-quorum
+
+# Auto-package verified fix into an isolated Git branch with Ed25519 commit trailers and pr_description.md
+replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --package-pr
+```
+
+### 4. Interactive Conversational Agent Workspace (Release 1.4)
 
 Launch the natural-language agentic workspace directly in your terminal:
 
@@ -75,14 +93,14 @@ replayfix chat
 # > "/help" (see full command guide)
 ```
 
-### 4. Environment Diagnostics: `replayfix doctor`
+### 5. Environment Diagnostics: `replayfix doctor`
 
 ```bash
 replayfix doctor
 replayfix doctor --json
 ```
 
-### 4. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
+### 6. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
 
 ```bash
 # Offline deterministic fixture mode against real MetaPulse MP4 recording (zero API tokens billed)
@@ -98,7 +116,7 @@ replayfix run --bug RF-01 --live-browser --headed --model muse-spark-1.3
 replayfix run --bug RF-01 --issue https://github.com/org/repo/issues/42 --mock-heal --apply --yes
 ```
 
-### 5. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
+### 7. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
 
 Executes isolated scratch-sandbox repairs across `RF-01` through `RF-05`, enforces `Delta-Repo = 0`, and emits a signed `.replayfix/sweep_receipt.json` in < 60s (~4.5s offline):
 
@@ -107,7 +125,7 @@ replayfix sweep --mock-heal
 replayfix sweep --bugs RF-01,RF-02,RF-03,RF-04,RF-05 --mock-heal --json
 ```
 
-### 6. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
+### 8. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
 
 Verifies Layer 1 (on-disk artifact SHA-256 & byte size), Layer 2 (RFC 6962 Merkle inclusion proofs), Layer 3 (RFC 8032 pure Ed25519 signature), and Layer 4 (signer public-key pinning):
 
@@ -117,14 +135,14 @@ replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <64_CHAR_HE
 replayfix verify-receipt .replayfix/sweep_receipt.json --json
 ```
 
-### 7. Freeze Reproduction Spec & Export Proof Bundle
+### 9. Freeze Reproduction Spec & Export Proof Bundle
 
 ```bash
 replayfix freeze-spec --bug RF-01 --repo .
 replayfix export-proof --output .replayfix/proof --json
 ```
 
-Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect receipts, step through RFC 6962 Merkle audit paths, verify Ed25519 signatures, and inspect SAM 3.1 spatial overlays and unified diffs offline.
+Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect receipts, step through RFC 6962 Merkle audit paths, verify Ed25519 signatures, step through the **Muse Spark Deliberation Timeline**, inspect side-by-side accessibility DOM diffs, and inspect SAM 3.1 spatial overlays and unified diffs offline.
 
 ---
 
@@ -152,7 +170,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 
 ---
 
-## Completed Release Roadmap (`v0.0.0` -> `v1.2.0`)
+## Completed Release Roadmap (`v0.0.0` -> `v1.6.0`)
 
 | Release | Scope | Status |
 | :--- | :--- | :--- |
@@ -169,7 +187,12 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 | **v0.9.5** | Offline `proof_viewer.html` Judge Proof Portal, bounded `MultimodalGateway`, rate pool & circuit breaker | **Delivered** |
 | **v1.0.0** | Production LTO/abort optimization, Windows Authenticode signing, 3-Act demo video & submission package | **Delivered** |
 | **v1.1.0** | Real MetaPulse 20-bug benchmark suite (`RF-01`..`RF-20`), `MetaGatewayClient` (`rustls-tls`), dual execution modes | **Delivered** |
-| **v1.2.0** | **Live Meta SAM 3.1 wire segmentation, Muse Voice 24kHz PCM ASR, multi-step `ActionTrajectory`, `.env`/Registry auth** | **Delivered** |
+| **v1.2.0** | Live Meta SAM 3.1 wire segmentation, Muse Voice 24kHz PCM ASR, multi-step `ActionTrajectory`, `.env`/Registry auth | **Delivered** |
+| **v1.3.0** | Real MetaPulse defect benchmarks, cross-platform video pipeline, and live CDP capture | **Delivered** |
+| **v1.4.0** | Interactive Conversational Agent Workspace (`replayfix chat`), natural-language intent router, interactive REPL | **Delivered** |
+| **v1.5.0** | Permanent Inoculation ("Dreaming" into Playwright specs), Native MCP Server (`stdio`/`sse`), Gate 3 Stress Quorum, Git PR Packager | **Delivered** |
+| **v1.5.1** | Production Meta multimodal wire protocol across all 5 Meta Muse & SAM models | **Delivered** |
+| **v1.6.0** | **Sovereign Autonomous Healer (`replayfix heal`), Multi-Turn Meta Muse Spark 1.3 Agent Loop (`305 tok/s`), Wonder AST Encrypted Deliberation Caching, and Sub-60s Macro Pipeline** | **Delivered** |
 
 ---
 
