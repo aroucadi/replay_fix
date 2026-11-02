@@ -35,11 +35,22 @@ pub struct CommitTrailers {
     pub gate2_status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate3_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_url: Option<String>,
 }
 
 impl CommitTrailers {
     /// Construct and sign `CommitTrailers` from an `AuditReceipt` using the harness Ed25519 keypair.
     pub fn from_receipt(receipt: &AuditReceipt, keypair: &KeypairManager) -> Self {
+        Self::from_receipt_with_issue(receipt, keypair, None)
+    }
+
+    /// Construct and sign `CommitTrailers` with optional GitHub issue URL reference.
+    pub fn from_receipt_with_issue(
+        receipt: &AuditReceipt,
+        keypair: &KeypairManager,
+        issue_url: Option<String>,
+    ) -> Self {
         let merkle_root = receipt
             .merkle_root
             .clone()
@@ -71,6 +82,7 @@ impl CommitTrailers {
             gate1_status,
             gate2_status,
             gate3_status,
+            issue_url,
         }
     }
 
@@ -114,6 +126,9 @@ impl CommitTrailers {
     #[must_use]
     pub fn format_trailer_block(&self) -> String {
         let mut block = String::new();
+        if let Some(ref issue) = self.issue_url {
+            block.push_str(&format!("ReplayFix-Issue: {issue}\n"));
+        }
         block.push_str(&format!("ReplayFix-Verified: {}\n", self.verified));
         block.push_str(&format!("ReplayFix-Substrate: {}\n", self.substrate));
         block.push_str(&format!("ReplayFix-Merkle-Root: {}\n", self.merkle_root));
@@ -156,6 +171,40 @@ impl GitPrPackager {
     #[must_use]
     pub fn inoculate_branch_name(bug_id: &str) -> String {
         format!("replayfix/inoculate-{}", bug_id.trim().to_ascii_lowercase())
+    }
+
+    /// Create a git-safe branch slug from an issue title.
+    #[must_use]
+    pub fn sanitize_slug(title: &str) -> String {
+        let mut slug = String::new();
+        let mut last_dash = false;
+        for ch in title.trim().chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+                last_dash = false;
+            } else if !last_dash && !slug.is_empty() {
+                slug.push('-');
+                last_dash = true;
+            }
+        }
+        let trimmed = slug.trim_matches('-');
+        if trimmed.is_empty() {
+            "patch".to_string()
+        } else {
+            let end = trimmed
+                .char_indices()
+                .map(|(i, _)| i)
+                .nth(40)
+                .unwrap_or(trimmed.len());
+            trimmed[..end].trim_matches('-').to_string()
+        }
+    }
+
+    /// Canonical isolated branch name for a GitHub issue repair (`replayfix/issue-<id>-<slug>`).
+    #[must_use]
+    pub fn issue_branch_name(issue_number: u64, title_slug: &str) -> String {
+        let slug = Self::sanitize_slug(title_slug);
+        format!("replayfix/issue-{issue_number}-{slug}")
     }
 
     /// Generate the Evidence Matrix PR description markdown containing:
@@ -315,6 +364,74 @@ impl GitPrPackager {
 
         if commit_in_git && repo_path.join(".git").exists() {
             // Apply the verified patch and optional inoculation spec onto the isolated branch
+            if let Ok((created, sha)) = Self::create_branch_and_commit(
+                repo_path,
+                &branch_name,
+                fixture,
+                inoculation,
+                &commit_message,
+            ) {
+                commit_created = created;
+                commit_sha = sha;
+            }
+        }
+
+        let pkg = GitPrPackage {
+            bug_id: receipt.task_id.clone(),
+            branch_name,
+            commit_created,
+            commit_sha,
+            commit_message,
+            trailers,
+            pr_markdown_path: md_path.display().to_string(),
+            inoculation_spec_path: inoculation.map(|i| i.spec_rel_path.clone()),
+        };
+
+        let pkg_path = output_dir.join(PR_PACKAGE_FILE);
+        let pkg_json = serde_json::to_string_pretty(&pkg)?;
+        atomic_write_file(&pkg_path, pkg_json.as_bytes())?;
+
+        Ok(pkg)
+    }
+
+    /// Package a verified repair for a GitHub issue into an isolated branch (`replayfix/issue-<id>-<slug>`),
+    /// commit with `Fixes #<id>` and signed trailers, write PR description and package JSON.
+    #[allow(clippy::too_many_arguments)]
+    pub fn package_issue_repair(
+        issue_number: u64,
+        issue_title: &str,
+        issue_url: Option<&str>,
+        fixture: &Fixture,
+        receipt: &AuditReceipt,
+        repo_path: &Path,
+        output_dir: &Path,
+        inoculation: Option<&InoculationSpec>,
+        commit_in_git: bool,
+    ) -> Result<GitPrPackage> {
+        if !output_dir.exists() {
+            fs::create_dir_all(output_dir)?;
+        }
+        let keypair = KeypairManager::load_or_generate(Some(output_dir))?;
+        let mut trailers = CommitTrailers::from_receipt(receipt, &keypair);
+        trailers.issue_url = issue_url.map(|s| s.to_string());
+        trailers.verify_signature(&receipt.task_id)?;
+
+        let branch_name = Self::issue_branch_name(issue_number, issue_title);
+        let commit_message = format!(
+            "fix(issue-#{issue_number}): verified repair for contract {}\n\nFixes #{issue_number}\n\n{}\n",
+            receipt.contract_id,
+            trailers.format_trailer_block()
+        );
+
+        let markdown =
+            Self::generate_evidence_matrix_markdown(fixture, receipt, &trailers, inoculation);
+        let md_path = output_dir.join(PR_DESCRIPTION_FILE);
+        atomic_write_file(&md_path, markdown.as_bytes())?;
+
+        let mut commit_created = false;
+        let mut commit_sha = None;
+
+        if commit_in_git && repo_path.join(".git").exists() {
             if let Ok((created, sha)) = Self::create_branch_and_commit(
                 repo_path,
                 &branch_name,

@@ -25,6 +25,7 @@ pub mod error;
 pub mod fixtures;
 pub mod fsm;
 pub mod gateway;
+pub mod github;
 pub mod ingestion;
 pub mod inoculate;
 pub mod locator;
@@ -92,6 +93,13 @@ pub use gateway::{
     DEFAULT_MAX_RETRIES, LLAMA_32_11B_VISION_FALLBACK_SLUG, LLAMA_33_70B_FALLBACK_SLUG,
     MAX_AUDIO_DURATION_MS, META_CONNECT_TIMEOUT_SECS, META_READ_TIMEOUT_SECS,
     META_RESPONSES_ENDPOINT,
+};
+pub use github::{
+    compute_hmac_sha256, constant_time_eq, extract_video_urls_from_markdown, filter_webhook_event,
+    sanitize_untrusted_markdown, validate_video_container, verify_webhook_signature, GitHubClient,
+    GitHubPrOutcome, GitHubTransport, IssueCommenter, IssueTriageBundle, IssueVideoAsset,
+    MockGitHubTransport, ReqwestGitHubTransport, TriageLabel, WebhookFilterOutcome, WebhookPayload,
+    BOT_LOOP_MARKER,
 };
 pub use ingestion::{
     build_untrusted_context_block, extract_repro_steps, ingest_issue, ingestion_to_manifest,

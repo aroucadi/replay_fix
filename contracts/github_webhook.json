@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://replayfix.dev/schemas/v1.7/github_webhook.schema.json",
+  "title": "ReplayFix v1.7 GitHub Webhook & Autonomous Issue Triage Contract",
+  "description": "Schema defining incoming GitHub webhook payloads (issues.opened, issue_comment.created) and the resulting ReplayFix autonomous triage report.",
+  "type": "object",
+  "required": ["action", "issue", "repository", "sender"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["opened", "edited", "created", "reopened"]
+    },
+    "issue": {
+      "type": "object",
+      "required": ["number", "title", "html_url"],
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": ["string", "null"]
+        },
+        "html_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "state": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/github_user"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "comment": {
+      "type": ["object", "null"],
+      "properties": {
+        "id": { "type": "integer" },
+        "body": { "type": "string" },
+        "user": { "$ref": "#/definitions/github_user" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["name", "full_name", "owner"],
+      "properties": {
+        "name": { "type": "string" },
+        "full_name": { "type": "string" },
+        "html_url": { "type": "string" },
+        "clone_url": { "type": "string" },
+        "default_branch": { "type": "string" },
+        "owner": { "$ref": "#/definitions/github_user" }
+      }
+    },
+    "sender": {
+      "$ref": "#/definitions/github_user"
+    }
+  },
+  "definitions": {
+    "github_user": {
+      "type": "object",
+      "required": ["login"],
+      "properties": {
+        "login": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["User", "Bot", "Organization"]
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] - 2026-11-02
+
+**Spec 170 — Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine**: Evolves ReplayFix from a developer's local CLI tool into an autonomous continuous GitHub triage agent (`replayfix bot`). It connects directly to public and private GitHub issues and webhook event streams, extracts user-recorded bug videos (`.mp4`, `.webm`, `.mov`, and `user-attachments/assets`), executes the sub-60s Sovereign Healer (`v1.6` pipeline: SAM 3.1 + Muse Voice + Muse Spark Agent Loop + Muse Wonder AST Repair + Gate 2 GREEN + Gate 3 Stress Quorum + Inoculation) inside an ephemeral scratch sandbox ($\Delta\text{repo} = 0$), dispatches isolated branches (`replayfix/issue-<id>-<slug>`) with Ed25519-signed Merkle commit trailers, opens review-ready Pull Requests with comprehensive Evidence Matrix descriptions, posts verifiable visual comments and side-by-side DOM diffs to original issue threads, automates triage labels (`replayfix:verified-healed`, `replayfix:unreproduced`, `replayfix:ambiguous`), and provides a fail-closed HMAC-SHA256 authenticated webhook server (`replayfix bot --listen <addr>`). Full notes: [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md).
+
+### Added
+- **Multi-Modal GitHub Issue Ingestion & Video Extraction (`replayfix-core::github`, `replayfix bot --issue <url>`)**:
+  - `GitHubClient` and `GitHubTransport` trait supporting GitHub REST API v3 / `gh` CLI credentials (`GITHUB_TOKEN`, `GH_TOKEN`) and deterministic offline mock transport.
+  - Markdown media extractor (`extract_video_urls_from_markdown`) targeting `user-attachments/assets` and `.mp4`, `.webm`, `.mov` URLs.
+  - Media downloader and container validator (`validate_video_container`) enforcing MP4 (`ftyp`), WebM (EBML), and MOV magic byte checks before caching into `.replayfix/scratch/`.
+- **Autonomous Ephemeral Scratch Triage & Inoculation (`replayfix-cli::bot`)**:
+  - `IssueTriageRunner` executing autonomous reproduction and repair inside an ephemeral `ScratchSandbox`, enforcing strict host repository invariance ($\Delta\text{repo} = 0$).
+  - Issue-specific permanent Playwright regression spec synthesis (`tests/repro/rf_issue_<id>.spec.ts`) via `InoculationGenerator::synthesize_for_issue`.
+- **Autonomous Git PR Dispatch Engine (`replayfix-cli::git_packager`)**:
+  - Issue-aware branch isolation (`replayfix/issue-<id>-<slug>`) and commit authoring embedding `Fixes #<id>` and Ed25519-signed RFC 6962 commit trailers (`ReplayFix-Issue`, `ReplayFix-Merkle-Root`, `ReplayFix-Signature`, `ReplayFix-Gate1-Status`, `ReplayFix-Gate2-Status`, `ReplayFix-Gate3-Status`).
+- **Issue Evidence Commenter & Automated Triage Labels (`replayfix-core::github`)**:
+  - `IssueCommenter` producing structured GitHub comments with executive verification summaries, keyframe bounding box previews, side-by-side DOM `ariaSnapshot` diffs, PR links, and offline `replayfix verify-receipt` commands.
+  - Triage label automation (`TriageLabel::VerifiedHealed`, `TriageLabel::Unreproduced`, `TriageLabel::Ambiguous`).
+- **Authenticated Webhook Server & Composite CI Action (`replayfix bot --listen`, `action.yml`)**:
+  - Bounded HTTP daemon implementing RFC 2104 constant-time HMAC-SHA256 signature verification (`X-Hub-Signature-256`) returning HTTP 401 on authentication failures.
+  - Anti-loop bot filter (`filter_webhook_event`, `<!-- replayfix-bot-comment -->`) ignoring bot accounts and self-authored comments.
+  - Updated composite GitHub Action (`action.yml`) adding `issue-url`, `create-pr`, `comment-issue`, and `apply-labels` inputs.
+
+---
+
 ## [1.6.0] - 2026-11-02
 
 **Spec 160 — Sovereign Autonomous Healer: Multi-Turn Muse Spark Agent Loop & Sub-60s Macro Pipeline**: Fulfills Meta's core hackathon mandate ("Build Agent Loops with Muse Spark") by establishing **Meta Muse Spark 1.3** as the sovereign multi-turn agent loop cognitive orchestrator (`305 tok/s`, `reasoning: { effort: "xhigh" }`, `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`). Introduces the unified autonomous macro pipeline (`replayfix heal --video <path> --repo <path>`) executing the complete chain (Video Ingestion ➔ SAM 3.1 ➔ Voice Lock ➔ Ephemeral Server ➔ Spark Gate 1 RED ➔ Wonder AST Repair ➔ Spark Gate 2 GREEN ➔ Gate 3 Stress Quorum ➔ Permanent Inoculation ➔ RFC 6962 Signed Merkle Receipt) in **under 60 seconds**. Implements multi-turn encrypted deliberation caching (`reasoning.encrypted_content`) and `previous_response_id` backtracking for Meta Muse Wonder 1.0, preserving deep AST deliberation graphs across repair attempts upon compiler or assertion feedback. Upgrades `proof_viewer.html` with an interactive Turn-by-Turn Muse Spark Deliberation Timeline, side-by-side accessibility tree DOM diff inspector, and Merkle leaf verification. Full notes: [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md).

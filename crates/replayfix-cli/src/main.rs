@@ -12,6 +12,7 @@
 )]
 
 pub mod approval;
+pub mod bot;
 pub mod git_packager;
 pub mod heal;
 pub mod intent;
@@ -261,6 +262,8 @@ pub struct ReproArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (Release 1.7)
+    Bot(Box<bot::BotArgs>),
     /// Sovereign Autonomous Healer: multi-turn Muse Spark loop & sub-60s macro pipeline (Release 1.6)
     Heal(Box<heal::HealArgs>),
     /// Environment diagnostics check (Git, Node.js, Playwright, FFmpeg)
@@ -2116,6 +2119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stderr_theme = Theme::for_stderr(cli.color, mode);
 
     match cli.command {
+        Some(Commands::Bot(args)) => bot::run_bot(*args, &stdout_theme)?,
         Some(Commands::Heal(args)) => heal::run_heal(*args, &stdout_theme)?,
         Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
         Some(Commands::FreezeSpec { bug, repo, output }) => {
