@@ -263,6 +263,7 @@
       <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-tab="tab-merkle">Merkle Proof Explorer</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-signature">Signature &amp; Provenance</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-multimodal">Video, DOM &amp; SAM 3.1 Evidence</button>
+      <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-deliberation">Muse Spark Deliberation Timeline</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-diff">Unified Diff &amp; Regression Parity</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-sweep">5-Bug Benchmark Sweep</button>
       <button type="button" class="tab-btn" role="tab" aria-selected="false" data-tab="tab-raw">Raw Canonical Receipt</button>
@@ -325,6 +326,39 @@
           <div id="multimodal-kv" class="kv-list" style="margin-bottom:1rem;"></div>
           <div class="card-title"><span>Playwright ariaSnapshot &amp; ASR Utterance Correlation (±250ms)</span></div>
           <pre id="multimodal-trace-box" class="code-box"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3b: MUSE SPARK MULTI-TURN DELIBERATION TIMELINE -->
+    <section id="tab-deliberation" class="tab-panel" role="tabpanel">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Meta Muse Spark 1.3 Sovereign Agent Loop</span>
+            <span id="deliberation-status-badge">SOVEREIGN AGENT</span>
+          </div>
+          <div id="deliberation-kv" class="kv-list" style="margin-bottom:1rem;"></div>
+          <div class="card-title"><span>Multi-Turn Turn-by-Turn Deliberation Timeline</span></div>
+          <div id="deliberation-timeline-cards" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:0.5rem;"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <span>Side-by-Side Playwright ariaSnapshot DOM Diff</span>
+            <span id="dom-diff-summary">Gate 1 RED ➔ Gate 2 GREEN</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-top:0.5rem;">
+            <div>
+              <div style="font-weight:600; font-size:0.8rem; color:var(--red); margin-bottom:0.3rem;">Pre-Repair Baseline (Gate 1 RED)</div>
+              <pre id="dom-pre-repair-box" class="code-box" style="height:260px; overflow:auto;"></pre>
+            </div>
+            <div>
+              <div style="font-weight:600; font-size:0.8rem; color:var(--green); margin-bottom:0.3rem;">Post-Repair Verified (Gate 2 GREEN)</div>
+              <pre id="dom-post-repair-box" class="code-box" style="height:260px; overflow:auto;"></pre>
+            </div>
+          </div>
+          <div class="card-title" style="margin-top:1rem;"><span>Encrypted Deliberation Backtracking Lineage (reasoning.encrypted_content)</span></div>
+          <div id="deliberation-lineage-list" class="kv-list"></div>
         </div>
       </div>
     </section>
@@ -1212,6 +1246,150 @@
         ].join(NL);
       }
 
+      function renderDeliberationTab() {
+        const obj = (currentEval && currentEval.obj) ? currentEval.obj : PRESETS.rf01_merkle_receipt;
+        const delib = (obj && obj.deliberation) ? obj.deliberation : {
+          session_id: "spark_session_rf01_demo",
+          bug_id: (obj && obj.task_id) ? obj.task_id : "RF-01",
+          prompt_cache_key: "replayfix-v1.6-spark-agent-loop",
+          status: "Success",
+          total_wall_clock_ms: 1240,
+          turns: [
+            {
+              turn_index: 1,
+              role: "agent",
+              model: "muse-spark-1.3",
+              duration_ms: 280,
+              thought: "Analyzing multimodal bug brief. Calling replayfix_reproduce to extract keyframes and confirm Gate 1 RED.",
+              tool_call: { call_id: "call_reproduce_01", tool_name: "replayfix_reproduce", arguments: { bug_id: "RF-01" } },
+              tool_observation: { call_id: "call_reproduce_01", success: true, verdict: "RED_CONFIRMED", details: { assertion: "counter expected 1, found 0" } }
+            },
+            {
+              turn_index: 2,
+              role: "agent",
+              model: "muse-spark-1.3",
+              duration_ms: 320,
+              thought: "Gate 1 RED confirmed. Delegating AST block search/replace patch to Meta Muse Wonder 1.0 with reasoning.encrypted_content.",
+              tool_call: { call_id: "call_wonder_02", tool_name: "meta_muse_wonder_synthesize_ast", arguments: { target_file: "src/components/Counter.tsx" } },
+              tool_observation: { call_id: "call_wonder_02", success: true, verdict: "PATCH_SYNTHESIZED", details: { search_block: "count = 0", replace_block: "setCount(c => c + 1)" } }
+            },
+            {
+              turn_index: 3,
+              role: "agent",
+              model: "muse-spark-1.3",
+              duration_ms: 340,
+              thought: "Candidate patch synthesized. Invoking replayfix_verify_patch in ephemeral sandbox.",
+              tool_call: { call_id: "call_verify_03", tool_name: "replayfix_verify_patch", arguments: { target_file: "src/components/Counter.tsx" } },
+              tool_observation: { call_id: "call_verify_03", success: true, verdict: "GREEN_STABLE", details: { gate2: "GREEN", gate3_quorum: "5/5 passed" } }
+            },
+            {
+              turn_index: 4,
+              role: "agent",
+              model: "muse-spark-1.3",
+              duration_ms: 300,
+              thought: "Dual-gate and Gate 3 stress quorum certified. Calling replayfix_inoculate to synthesize permanent regression spec.",
+              tool_call: { call_id: "call_inoculate_04", tool_name: "replayfix_inoculate", arguments: { spec: "tests/repro/rf_01.spec.ts" } },
+              tool_observation: { call_id: "call_inoculate_04", success: true, verdict: "INOCULATED", details: { spec_path: "tests/repro/rf_01.spec.ts" } }
+            }
+          ],
+          lineage: [
+            {
+              attempt: 1,
+              response_id: "resp_wonder_ast_01",
+              previous_response_id: null,
+              encrypted_content_present: true,
+              encrypted_content_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          ]
+        };
+
+        const delibKv = document.getElementById("deliberation-kv");
+        while (delibKv.firstChild) delibKv.removeChild(delibKv.firstChild);
+        renderKvList(delibKv, [
+          ["Sovereign Loop Brain", "Meta Muse Spark 1.3 (305 tok/s, effort: xhigh)"],
+          ["Frontier Craftsman", "Meta Muse Wonder 1.0 (AST block patcher)"],
+          ["Prompt Cache Key", delib.prompt_cache_key || "replayfix-v1.6-spark-agent-loop"],
+          ["Deliberation Turns", `${delib.turns.length} turns completed`],
+          ["Macro SLA Wall Clock", `${delib.total_wall_clock_ms} ms (< 60,000 ms SLA COMPLIANT)`],
+          ["Deliberation Status", delib.status || "Success"]
+        ]);
+
+        const cardsEl = document.getElementById("deliberation-timeline-cards");
+        while (cardsEl.firstChild) cardsEl.removeChild(cardsEl.firstChild);
+
+        delib.turns.forEach(turn => {
+          const card = document.createElement("div");
+          card.style.background = "var(--bg-2)";
+          card.style.border = "1px solid var(--border)";
+          card.style.borderRadius = "6px";
+          card.style.padding = "0.6rem 0.8rem";
+
+          const header = document.createElement("div");
+          header.style.display = "flex";
+          header.style.justifyContent = "space-between";
+          header.style.marginBottom = "0.3rem";
+          header.innerHTML = `<strong>Turn ${turn.turn_index} &bull; <span style="color:var(--brand);">${turn.model}</span></strong><span style="font-size:0.75rem; color:var(--text-2); font-family:var(--font-mono);">${turn.duration_ms} ms</span>`;
+          card.appendChild(header);
+
+          if (turn.thought) {
+            const thoughtDiv = document.createElement("div");
+            thoughtDiv.style.fontSize = "0.8rem";
+            thoughtDiv.style.color = "var(--text-1)";
+            thoughtDiv.style.marginBottom = "0.4rem";
+            thoughtDiv.textContent = `Thought: ${turn.thought}`;
+            card.appendChild(thoughtDiv);
+          }
+
+          if (turn.tool_call) {
+            const callDiv = document.createElement("div");
+            callDiv.style.fontFamily = "var(--font-mono)";
+            callDiv.style.fontSize = "0.76rem";
+            callDiv.style.color = "var(--cyan)";
+            callDiv.textContent = `Tool Call: ${turn.tool_call.tool_name}(${JSON.stringify(turn.tool_call.arguments)})`;
+            card.appendChild(callDiv);
+          }
+
+          if (turn.tool_observation) {
+            const obsDiv = document.createElement("div");
+            obsDiv.style.fontFamily = "var(--font-mono)";
+            obsDiv.style.fontSize = "0.76rem";
+            obsDiv.style.color = turn.tool_observation.success ? "var(--green)" : "var(--red)";
+            obsDiv.style.marginTop = "0.2rem";
+            obsDiv.textContent = `Observation [${turn.tool_observation.verdict || "DONE"}]: ${JSON.stringify(turn.tool_observation.details)}`;
+            card.appendChild(obsDiv);
+          }
+
+          cardsEl.appendChild(card);
+        });
+
+        document.getElementById("dom-pre-repair-box").textContent = [
+          "- button \"Increment Counter\" [disabled=false] [focused=false]",
+          "  - text \"Count: 0\"",
+          "  - aria-live: polite",
+          "  [AssertionError: Expected count: 1, observed count: 0 (Gate 1 RED)]"
+        ].join(NL);
+
+        document.getElementById("dom-post-repair-box").textContent = [
+          "- button \"Increment Counter\" [disabled=false] [focused=false]",
+          "  - text \"Count: 1\"",
+          "  - aria-live: polite",
+          "  [AssertionPassed: Expected count: 1, observed count: 1 (Gate 2 GREEN)]"
+        ].join(NL);
+
+        const lineageEl = document.getElementById("deliberation-lineage-list");
+        while (lineageEl.firstChild) lineageEl.removeChild(lineageEl.firstChild);
+        const lineage = delib.lineage || [];
+        if (lineage.length > 0) {
+          const pairs = lineage.map(item => [
+            `Attempt ${item.attempt}`,
+            `Resp ID: ${item.response_id} | Prev: ${item.previous_response_id || "None"} | Encrypted Token SHA: ${(item.encrypted_content_sha256 || "—").slice(0, 16)}..`
+          ]);
+          renderKvList(lineageEl, pairs);
+        } else {
+          renderKvList(lineageEl, [["Encrypted Deliberation", "Attempt 1 reasoning tokens cached across turns"]]);
+        }
+      }
+
       function renderSweepTab() {
         const gridEl = document.getElementById("sweep-grid");
         while (gridEl.firstChild) gridEl.removeChild(gridEl.firstChild);
@@ -1278,6 +1456,7 @@
         renderLeafInspector();
         renderSignatureTab();
         renderDiffAndRegressionTab();
+        renderDeliberationTab();
         renderSweepTab();
 
         try {

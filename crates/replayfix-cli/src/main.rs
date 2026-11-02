@@ -12,6 +12,7 @@
 
 pub mod approval;
 pub mod git_packager;
+pub mod heal;
 pub mod intent;
 pub mod mcp;
 pub mod permissions;
@@ -259,6 +260,8 @@ pub struct ReproArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Sovereign Autonomous Healer: multi-turn Muse Spark loop & sub-60s macro pipeline (Release 1.6)
+    Heal(Box<heal::HealArgs>),
     /// Environment diagnostics check (Git, Node.js, Playwright, FFmpeg)
     Doctor {
         /// Emit machine-readable JSON output
@@ -1005,22 +1008,16 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         } else {
             None
         };
-        let resolved_video_path = {
-            let p = PathBuf::from(&m.video_path);
-            if !p.exists()
-                && m.video_path == "bug.mp4"
-                && extras.execution_mode == Some(ExecutionMode::LiveAi)
-            {
-                let fallback_demo = PathBuf::from("assets/fixtures/rf01_demo.mp4");
-                if fallback_demo.exists() {
-                    fallback_demo
-                } else {
-                    p
-                }
-            } else {
-                p
-            }
-        };
+        let resolved_video_path = PathBuf::from(&m.video_path);
+        if !resolved_video_path.exists() && extras.execution_mode == Some(ExecutionMode::LiveAi) {
+            usage_error(
+                &format!(
+                    "Video file '{}' does not exist or is not readable",
+                    m.video_path
+                ),
+                theme,
+            );
+        }
         let opts = LiveBrowserOptions {
             headed: m.headed,
             candidate_override,
@@ -2118,6 +2115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stderr_theme = Theme::for_stderr(cli.color, mode);
 
     match cli.command {
+        Some(Commands::Heal(args)) => heal::run_heal(*args, &stdout_theme)?,
         Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
         Some(Commands::FreezeSpec { bug, repo, output }) => {
             run_freeze_spec(&bug, &repo, output, &stdout_theme)?;

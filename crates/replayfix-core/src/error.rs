@@ -67,6 +67,12 @@ pub enum CoreError {
 
     #[error("Git PR packaging error: {0}")]
     GitPackaging(String),
+
+    #[error("Deliberation agent loop error: {0}")]
+    Deliberation(String),
+
+    #[error("Macro execution error: {0}")]
+    MacroExecution(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

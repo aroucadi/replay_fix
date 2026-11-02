@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MacroHealRequest",
+  "type": "object",
+  "required": ["video", "repo"],
+  "properties": {
+    "video": { "type": "string" },
+    "repo": { "type": "string" },
+    "bug": { "type": ["string", "null"] },
+    "mode": { "type": "string", "enum": ["mock", "live-ai", "live-browser"] },
+    "mock_heal": { "type": "boolean" },
+    "live_browser": { "type": "boolean" },
+    "output": { "type": "string" },
+    "timeout_secs": { "type": "integer", "default": 60 },
+    "package_pr": { "type": "boolean", "default": false },
+    "json": { "type": "boolean", "default": false }
+  }
+}

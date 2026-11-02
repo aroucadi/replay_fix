@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] - 2026-11-02
+
+**Spec 160 — Sovereign Autonomous Healer: Multi-Turn Muse Spark Agent Loop & Sub-60s Macro Pipeline**: Fulfills Meta's core hackathon mandate ("Build Agent Loops with Muse Spark") by establishing **Meta Muse Spark 1.3** as the sovereign multi-turn agent loop cognitive orchestrator (`305 tok/s`, `reasoning: { effort: "xhigh" }`, `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`). Introduces the unified autonomous macro pipeline (`replayfix heal --video <path> --repo <path>`) executing the complete chain (Video Ingestion ➔ SAM 3.1 ➔ Voice Lock ➔ Ephemeral Server ➔ Spark Gate 1 RED ➔ Wonder AST Repair ➔ Spark Gate 2 GREEN ➔ Gate 3 Stress Quorum ➔ Permanent Inoculation ➔ RFC 6962 Signed Merkle Receipt) in **under 60 seconds**. Implements multi-turn encrypted deliberation caching (`reasoning.encrypted_content`) and `previous_response_id` backtracking for Meta Muse Wonder 1.0, preserving deep AST deliberation graphs across repair attempts upon compiler or assertion feedback. Upgrades `proof_viewer.html` with an interactive Turn-by-Turn Muse Spark Deliberation Timeline, side-by-side accessibility tree DOM diff inspector, and Merkle leaf verification. Full notes: [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md).
+
+### Added
+- **Meta Muse Spark 1.3 Multi-Turn Agent Loop (`replayfix-core::deliberation`)**:
+  - `DeliberationEngine`, `SparkDeliberationSession`, `SparkDeliberationTurn`, `DeliberationToolCall`, and `DeliberationToolObservation` managing multi-turn agent execution with sub-second turn latency and `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`.
+  - Autonomous tool dispatch across 4 canonical tools: `replayfix_reproduce`, `replayfix_inspect_trace`, `replayfix_verify_patch`, and `replayfix_inoculate`.
+- **Meta Muse Wonder 1.0 Encrypted Deliberation Backtracking (`replayfix-core::repair`, `replayfix-core::gateway`)**:
+  - Threading of `previous_response_id` and cached `reasoning.encrypted_content` across iterative repair turns, preserving AST deliberation state across compiler diagnostics and flakiness feedback.
+- **Sub-60s Sovereign End-to-End Macro Pipeline (`replayfix-cli::heal`, `replayfix heal`)**:
+  - Single-command autonomous pipeline taking raw bug recording video through visual perception, dual-gate verification, stress quorum, permanent test inoculation, and signed Merkle receipt export in `< 60s`.
+- **Hardened Offline Proof Portal Updates (`proof_viewer.html`, `replayfix-core::portal`)**:
+  - Interactive Turn-by-Turn Deliberation Timeline tab rendering Muse Spark's thoughts, tool calls, and observations.
+  - Side-by-side DOM diff inspector comparing pre-repair (Gate 1 RED) and post-repair (Gate 2 GREEN) Playwright `ariaSnapshot` accessibility trees.
+
+---
+
 ## [1.5.1] - 2026-11-01
 
 **Spec 151 — Live Meta Multimodal Wire Protocol & Full Muse Model Utilization**: Aligns ReplayFix's `--mode live-ai` cloud gateway (`crates/replayfix-core/src/gateway.rs`) and perception engine (`crates/replayfix-core/src/perception.rs`) with the production wire schemas of `https://api.meta.ai/v1/` across all 5 Meta models (`sam-3.1` `input_image` + `input_video` segmentation, `muse-voice-transcribe-1.0` RFC 7578 `multipart/form-data` WAV transcription, `muse-spark-1.3` `web_search` tool calling, `muse-wonder-1.0` / `muse-spark-1.3` autonomous repair, and `muse-image-1.0` `/v1/images/generations` badge synthesis). Full notes: [docs/release-notes/v1.5.1.md](docs/release-notes/v1.5.1.md).

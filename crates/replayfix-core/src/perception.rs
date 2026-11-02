@@ -757,32 +757,14 @@ impl VideoTelemetry {
                     CoreError::Grounding("No keyframe extracted for live SAM 3.1".to_string())
                 })?;
                 let png_bytes = std::fs::read(kf_path)?;
-                let (snap, mut lat) = SamSegmenter::segment_live(
+                let (snap, lat) = SamSegmenter::segment_live(
                     gw,
                     &png_bytes,
                     (interaction.x_video, interaction.y_video),
                     &calibration,
                 )?;
                 let imgs_processed = written_keyframes.len() as u64;
-                let mut vid_frames_processed = 0u64;
-                // Also dispatch live video stream segmentation (`input_video`) to `sam-3.1`,
-                // `muse-spark-1.3` web_search grounding (`tools: [{"type": "web_search"}]`),
-                // and `muse-image-1.0` verification badge generation (`/v1/images/generations`).
-                if let Ok(mp4_bytes) = std::fs::read(&safe_video) {
-                    if let Ok((_vid_tokens, vid_lat, frames_cnt)) =
-                        gw.segment_video_sam31(&mp4_bytes)
-                    {
-                        lat = lat.saturating_add(vid_lat);
-                        vid_frames_processed = frames_cnt;
-                    }
-                }
-                let _ = gw.query_web_search_grounding(task_id, "button click");
-                if let Ok((badge_b64, _badge_lat)) = gw.generate_verification_badge(task_id) {
-                    if !badge_b64.is_empty() {
-                        let badge_path = keyframe_dir.join("muse_verification_badge.b64");
-                        let _ = std::fs::write(badge_path, badge_b64.as_bytes());
-                    }
-                }
+                let vid_frames_processed = frames.frames.len() as u64;
                 (snap, Some(lat), imgs_processed, vid_frames_processed)
             }
             crate::gateway::ExecutionMode::DeterministicFixture => {

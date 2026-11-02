@@ -1432,3 +1432,93 @@ fn test_attached_spa_mode_connects_to_external_url() {
         "--apply --yes must apply verified patch to --repo target-app/public/app.js"
     );
 }
+
+#[test]
+fn test_heal_macro_subcommand_deterministic_rf01() {
+    let dir = scratch("heal-macro-rf01");
+    let out = run_cmd(
+        &dir,
+        &[
+            "heal", "--bug", "RF-01", "--repo", ".", "--output", "out-heal", "--json",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json output");
+    assert_eq!(parsed["status"], "VERIFIED_REPAIRED");
+    assert_eq!(parsed["task_id"], "RF-01");
+    assert_eq!(parsed["sla_compliant_sub_60s"], true);
+    assert!(parsed["deliberation_turns"].as_u64().unwrap() >= 4);
+
+    let receipt_path = dir.join("out-heal/audit_receipt.json");
+    assert!(receipt_path.exists());
+    let receipt = json(&receipt_path);
+    assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
+    assert!(receipt["merkle_root"].is_string());
+    assert!(receipt["deliberation"].is_object());
+    assert_eq!(
+        receipt["deliberation"]["prompt_cache_key"],
+        "replayfix-v1.6-spark-agent-loop"
+    );
+}
+
+#[test]
+fn test_heal_macro_subcommand_syntax_retry_backtracking() {
+    let dir = scratch("heal-macro-retry");
+    let out = run_cmd(
+        &dir,
+        &[
+            "heal",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "syntax-retry",
+            "--repo",
+            ".",
+            "--output",
+            "out-heal-retry",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        code(&out),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json output");
+    assert_eq!(parsed["lineage_attempts"], 2);
+
+    let receipt = json(&dir.join("out-heal-retry/audit_receipt.json"));
+    let turns = receipt["deliberation"]["turns"].as_array().unwrap();
+    assert!(turns.len() >= 5);
+}
+
+#[test]
+fn test_heal_macro_subcommand_package_pr() {
+    let dir = scratch("heal-macro-pr");
+    let out = run_cmd(
+        &dir,
+        &[
+            "heal",
+            "--bug",
+            "RF-01",
+            "--repo",
+            ".",
+            "--output",
+            "out-heal-pr",
+            "--package-pr",
+        ],
+    );
+    assert_eq!(code(&out), 0);
+    assert!(dir.join("out-heal-pr/pr_description.md").exists());
+    assert!(dir.join("out-heal-pr/merkle_receipt.json").exists());
+}

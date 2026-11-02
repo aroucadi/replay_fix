@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SparkDeliberationSession",
+  "type": "object",
+  "required": [
+    "session_id",
+    "bug_id",
+    "prompt_cache_key",
+    "turns",
+    "total_wall_clock_ms",
+    "status"
+  ],
+  "properties": {
+    "session_id": { "type": "string" },
+    "bug_id": { "type": "string" },
+    "prompt_cache_key": { "type": "string" },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["turn_index", "role", "model", "duration_ms"],
+        "properties": {
+          "turn_index": { "type": "integer", "minimum": 1 },
+          "role": { "type": "string", "enum": ["agent", "tool_observation", "system"] },
+          "thought": { "type": ["string", "null"] },
+          "model": { "type": "string" },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "tool_call": {
+            "type": ["object", "null"],
+            "properties": {
+              "call_id": { "type": "string" },
+              "tool_name": { "type": "string" },
+              "arguments": { "type": "object" }
+            },
+            "required": ["call_id", "tool_name", "arguments"]
+          },
+          "tool_observation": {
+            "type": ["object", "null"],
+            "properties": {
+              "call_id": { "type": "string" },
+              "success": { "type": "boolean" },
+              "verdict": { "type": ["string", "null"] },
+              "details": { "type": "object" }
+            },
+            "required": ["call_id", "success", "details"]
+          }
+        }
+      }
+    },
+    "lineage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "attempt",
+          "response_id",
+          "encrypted_content_present",
+          "encrypted_content_sha256"
+        ],
+        "properties": {
+          "attempt": { "type": "integer" },
+          "response_id": { "type": "string" },
+          "previous_response_id": { "type": ["string", "null"] },
+          "encrypted_content_present": { "type": "boolean" },
+          "encrypted_content_sha256": { "type": "string" }
+        }
+      }
+    },
+    "total_wall_clock_ms": { "type": "integer", "minimum": 0 },
+    "status": {
+      "type": "string",
+      "enum": ["InProgress", "Success", "Quarantined"]
+    }
+  }
+}
