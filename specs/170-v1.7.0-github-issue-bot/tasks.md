@@ -27,3 +27,8 @@
 - [x] T008 Add comprehensive unit and integration tests in `crates/replayfix-core/src/github.rs` and `crates/replayfix-cli/tests/v17_github_bot.rs` covering markdown video extraction, HMAC-SHA256 webhook security (HTTP 401 vs 202), anti-loop bot filtering, end-to-end `replayfix bot --issue <url>` triage, PR packaging, issue commenting, and label assignment
 - [x] T009 Run full qualification battery (`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets -- --test-threads=2`, `check-panics.ps1`) and verify `/speckit-converge`
 - [x] T010 Bump workspace version to `1.7.0`, update `.gitignore`, `CHANGELOG.md`, `README.md`, `docs/release-notes/v1.7.0.md`, assemble `release/v1.7.0/` (`replayfix.exe`, `proof_viewer.html`, `SHA256SUMS.txt`), merge `release/v1.7.0` to `main`, tag `v1.7.0`, and push
+
+## Phase 6: Convergence
+
+- [x] T011 [FR-001/FR-004/FR-007/FR-008] Harden `GitHubClient`, `IssueCommenter`, and `BotArgs` with FFmpeg container geometry probing (`VideoPreprocessor::probe_video`), visual keyframe preview + `ariaSnapshot` diffs + `audit_receipt.json` links in issue comments, `validate_markdown_file_paths` via `TaskManifest::assert_safe_path`, and secret redaction (`redact_github_secrets`, custom `Debug` on `GitHubClient` and `BotArgs`)
+- [x] T012 [SC-001..SC-005] Add adversarial CSO & FFmpeg container geometry integration tests in `crates/replayfix-cli/tests/v17_github_bot.rs` and refresh `release/v1.7.0/` binary and `SHA256SUMS.txt`

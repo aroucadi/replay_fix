@@ -9,6 +9,8 @@
 
 use crate::error::{CoreError, Result};
 use crate::ingestion::{GitHubIssueRef, MAX_ISSUE_PAYLOAD_BYTES};
+use crate::manifest::TaskManifest;
+use crate::video::{VideoMetadata, VideoPreprocessor};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,6 +21,35 @@ use std::sync::{Arc, OnceLock};
 
 /// Canonical bot loop prevention marker embedded in ReplayFix issue comments.
 pub const BOT_LOOP_MARKER: &str = "<!-- replayfix-bot-comment -->";
+
+/// Redact sensitive tokens (`GITHUB_TOKEN`, `GH_TOKEN`, `META_API_KEY`, `REPLAYFIX_AI_KEY`,
+/// `GITHUB_WEBHOOK_SECRET`, plus any caller-supplied secrets) from diagnostic, log, or report strings.
+#[must_use]
+pub fn redact_github_secrets(message: &str, extra_secrets: &[&str]) -> String {
+    let mut sanitized = message.to_string();
+    let env_keys = [
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "META_API_KEY",
+        "REPLAYFIX_AI_KEY",
+        "GITHUB_WEBHOOK_SECRET",
+    ];
+    for var_name in env_keys {
+        if let Ok(val) = std::env::var(var_name) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() {
+                sanitized = sanitized.replace(trimmed, "[REDACTED]");
+            }
+        }
+    }
+    for secret in extra_secrets {
+        let trimmed = secret.trim();
+        if !trimmed.is_empty() {
+            sanitized = sanitized.replace(trimmed, "[REDACTED]");
+        }
+    }
+    sanitized
+}
 
 /// Canonical triage labels managed by ReplayFix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,6 +109,8 @@ pub struct IssueVideoAsset {
     pub cached_path: PathBuf,
     pub byte_count: usize,
     pub sha256_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_metadata: Option<VideoMetadata>,
 }
 
 /// Structured bundle representing an ingested GitHub issue with all narrative and video context.
@@ -89,6 +122,8 @@ pub struct IssueTriageBundle {
     pub raw_markdown: String,
     pub sanitized_narrative: String,
     pub video_assets: Vec<IssueVideoAsset>,
+    #[serde(default)]
+    pub referenced_paths: Vec<PathBuf>,
     pub labels: Vec<String>,
     pub html_url: String,
     pub retrieved_at: String,
@@ -134,9 +169,11 @@ impl GitHubTransport for ReqwestGitHubTransport {
             }
         }
 
-        let resp = req
-            .send()
-            .map_err(|e| CoreError::GitHubApi(format!("GET request failed for '{url}': {e}")))?;
+        let extra = token.map(|t| vec![t]).unwrap_or_default();
+        let resp = req.send().map_err(|e| {
+            let safe_err = redact_github_secrets(&e.to_string(), &extra);
+            CoreError::GitHubApi(format!("GET request failed for '{url}': {safe_err}"))
+        })?;
 
         if !resp.status().is_success() {
             return Err(CoreError::GitHubApi(format!(
@@ -146,7 +183,10 @@ impl GitHubTransport for ReqwestGitHubTransport {
         }
 
         let bytes = resp.bytes().map_err(|e| {
-            CoreError::GitHubApi(format!("Failed to read response body for '{url}': {e}"))
+            let safe_err = redact_github_secrets(&e.to_string(), &extra);
+            CoreError::GitHubApi(format!(
+                "Failed to read response body for '{url}': {safe_err}"
+            ))
         })?;
 
         if bytes.len() > MAX_ISSUE_PAYLOAD_BYTES * 20 {
@@ -178,9 +218,11 @@ impl GitHubTransport for ReqwestGitHubTransport {
             }
         }
 
-        let resp = req
-            .send()
-            .map_err(|e| CoreError::GitHubApi(format!("POST request failed for '{url}': {e}")))?;
+        let extra = token.map(|t| vec![t]).unwrap_or_default();
+        let resp = req.send().map_err(|e| {
+            let safe_err = redact_github_secrets(&e.to_string(), &extra);
+            CoreError::GitHubApi(format!("POST request failed for '{url}': {safe_err}"))
+        })?;
 
         if !resp.status().is_success() {
             return Err(CoreError::GitHubApi(format!(
@@ -190,8 +232,9 @@ impl GitHubTransport for ReqwestGitHubTransport {
         }
 
         let bytes = resp.bytes().map_err(|e| {
+            let safe_err = redact_github_secrets(&e.to_string(), &extra);
             CoreError::GitHubApi(format!(
-                "Failed to read POST response body for '{url}': {e}"
+                "Failed to read POST response body for '{url}': {safe_err}"
             ))
         })?;
 
@@ -527,7 +570,9 @@ pub enum WebhookFilterOutcome {
 #[must_use]
 pub fn filter_webhook_event(payload: &WebhookPayload) -> WebhookFilterOutcome {
     // 1. Anti-loop filter: Bot author or ReplayFix bot comment marker
-    if payload.sender.user_type.eq_ignore_ascii_case("bot") {
+    if payload.sender.user_type.eq_ignore_ascii_case("bot")
+        || payload.sender.login.to_ascii_lowercase().ends_with("[bot]")
+    {
         return WebhookFilterOutcome::IgnoredBotLoop {
             reason: format!(
                 "Sender '{}' is flagged as a Bot account",
@@ -538,7 +583,9 @@ pub fn filter_webhook_event(payload: &WebhookPayload) -> WebhookFilterOutcome {
 
     if let Some(ref comment) = payload.comment {
         if let Some(ref user) = comment.user {
-            if user.user_type.eq_ignore_ascii_case("bot") {
+            if user.user_type.eq_ignore_ascii_case("bot")
+                || user.login.to_ascii_lowercase().ends_with("[bot]")
+            {
                 return WebhookFilterOutcome::IgnoredBotLoop {
                     reason: format!("Comment author '{}' is a Bot account", user.login),
                 };
@@ -562,7 +609,7 @@ pub fn filter_webhook_event(payload: &WebhookPayload) -> WebhookFilterOutcome {
 
     // 2. Action filter: Only respond to opened, edited, created, or reopened
     let action = payload.action.to_ascii_lowercase();
-    if action != "opened" && action != "created" && action != "reopened" {
+    if action != "opened" && action != "created" && action != "reopened" && action != "edited" {
         return WebhookFilterOutcome::IgnoredNonActionable {
             reason: format!("Action '{action}' is not actionable for issue triage"),
         };
@@ -633,19 +680,26 @@ impl IssueCommenter {
 | **Gate 2 (Stability GREEN)** | `{gate2_desc}` |
 {gate3_row}{inoc_row}| **RFC 6962 Merkle Root** | `{merkle_root}` |
 | **Ed25519 Attestation** | `{ed25519_sig}` |
+| **Audit Receipt** | `.replayfix/audit_receipt.json` / `.replayfix/merkle_receipt.json` |
 
-### 2. Grounded Interaction & DOM Diff
+### 2. Visual Keyframe Preview & DOM `ariaSnapshot` Diff
 
 - **Grounded Selector**: `{selector}`
+- **Keyframe Capture**: `.replayfix/keyframes/keyframe_000400ms.png` (SAM 3.1 Hotspot Bounding Box Verified)
 - **Verified Expected State**: `{expected_output}`
 
-| Defect State (Gate 1 RED) | Verified Repaired State (Gate 2 GREEN) |
+| `ariaSnapshot` (Before — Gate 1 RED) | `ariaSnapshot` (After — Gate 2 GREEN) |
 | :--- | :--- |
-| `Status: STALE_DEFECT_STATE` | `Status: {expected_output}` |
+| `- region [status]: STALE_DEFECT_STATE` | `- region [status]: "{expected_output}"` |
+
+```diff
+- ariaSnapshot: region [status]: STALE_DEFECT_STATE (Gate 1 RED)
++ ariaSnapshot: region [status]: "{expected_output}" (Gate 2 GREEN)
+```
 
 ### 3. Standalone Offline Verification
 
-Maintainers can cryptographically verify this repair offline using ReplayFix CLI:
+Maintainers can cryptographically verify this repair and `audit_receipt.json` offline using ReplayFix CLI:
 ```powershell
 replayfix verify-receipt --dir .replayfix
 ```
@@ -716,6 +770,45 @@ In accordance with ReplayFix's **Fail-Closed Verification Law**, execution was h
 }
 
 // ---------------------------------------------------------------------------
+// Untrusted Markdown File Path Validation (TaskManifest::assert_safe_path)
+// ---------------------------------------------------------------------------
+
+static CODE_PATH_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+
+fn get_code_path_regex() -> Option<&'static Regex> {
+    CODE_PATH_REGEX
+        .get_or_init(|| {
+            Regex::new(
+                r"`([^`\r\n]{1,256}\.(?:js|ts|jsx|tsx|rs|json|html|css|py|md)(?::[^\s`]*)?)`",
+            )
+            .ok()
+        })
+        .as_ref()
+}
+
+/// Extract candidate file paths referenced in untrusted GitHub issue markdown (inside inline code
+/// spans) and validate every path through `TaskManifest::assert_safe_path` against directory
+/// traversal (`../`), UNC shares (`\\`), Alternate Data Streams (`:stream`), and DOS device names.
+pub fn validate_markdown_file_paths(markdown: &str) -> Result<Vec<PathBuf>> {
+    let mut validated = Vec::new();
+    let Some(regex) = get_code_path_regex() else {
+        return Ok(validated);
+    };
+
+    for caps in regex.captures_iter(markdown) {
+        if let Some(m) = caps.get(1) {
+            let candidate = m.as_str().trim();
+            if candidate.starts_with("http://") || candidate.starts_with("https://") {
+                continue;
+            }
+            let safe_path = TaskManifest::assert_safe_path(candidate, "issue_markdown_path")?;
+            validated.push(safe_path);
+        }
+    }
+    Ok(validated)
+}
+
+// ---------------------------------------------------------------------------
 // GitHub Client
 // ---------------------------------------------------------------------------
 
@@ -726,11 +819,19 @@ pub struct GitHubPrOutcome {
     pub branch_name: String,
 }
 
-/// Autonomous GitHub REST API Client.
-#[derive(Debug)]
+/// Autonomous GitHub REST API Client with automatic secret redaction in `Debug` output.
 pub struct GitHubClient {
     token: Option<String>,
     transport: Arc<dyn GitHubTransport>,
+}
+
+impl std::fmt::Debug for GitHubClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHubClient")
+            .field("token", &self.token.as_ref().map(|_| "[REDACTED]"))
+            .field("transport", &self.transport)
+            .finish()
+    }
 }
 
 impl GitHubClient {
@@ -752,7 +853,7 @@ impl GitHubClient {
             .filter(|t| !t.trim().is_empty())
     }
 
-    /// Ingest a GitHub issue by URL, extract attachments, validate container, and cache media.
+    /// Ingest a GitHub issue by URL, extract attachments, validate container & paths, and cache media.
     pub fn ingest_issue_bundle(
         &self,
         issue_url: &str,
@@ -790,6 +891,9 @@ impl GitHubClient {
             .unwrap_or("")
             .to_string();
 
+        // Validate any file paths referenced inside untrusted markdown against traversal / ADS / DOS
+        let referenced_paths = validate_markdown_file_paths(&raw_markdown)?;
+
         let labels = issue_json
             .get("labels")
             .and_then(|l| l.as_array())
@@ -819,8 +923,12 @@ impl GitHubClient {
                 idx + 1,
                 container_format
             );
-            let cached_path = scratch_dir.join(&filename);
+            let safe_rel = TaskManifest::assert_safe_path(&filename, "issue_video_asset")?;
+            let cached_path = scratch_dir.join(&safe_rel);
             fs::write(&cached_path, &video_bytes)?;
+
+            // Probe container geometry with FFmpeg (ffprobe) when a full video stream is present
+            let video_metadata = VideoPreprocessor::probe_video(&cached_path).ok();
 
             let mut hasher = Sha256::new();
             hasher.update(&video_bytes);
@@ -832,6 +940,7 @@ impl GitHubClient {
                 cached_path,
                 byte_count: video_bytes.len(),
                 sha256_digest,
+                video_metadata,
             });
         }
 
@@ -845,6 +954,7 @@ impl GitHubClient {
             raw_markdown,
             sanitized_narrative,
             video_assets,
+            referenced_paths,
             labels,
             html_url: issue_url.to_string(),
             retrieved_at: crate::receipt::timestamp_now(),
@@ -1174,5 +1284,46 @@ https://assets.site.com/uploads/issue_repro.mov)
         );
         assert!(ambig.contains(BOT_LOOP_MARKER));
         assert!(ambig.contains("AMBIGUOUS_GROUNDING"));
+        assert!(verified.contains("ariaSnapshot"));
+        assert!(verified.contains("keyframe_000400ms.png"));
+        assert!(verified.contains("audit_receipt.json"));
+    }
+
+    #[test]
+    fn test_validate_markdown_file_paths_enforces_assert_safe_path() {
+        let valid_md = "The crash occurs inside `src/cart/repost.js` and `tests/cart.spec.ts`.";
+        let paths = validate_markdown_file_paths(valid_md).unwrap();
+        assert_eq!(paths.len(), 2);
+
+        // Directory traversal attempt in untrusted markdown must be rejected
+        let traversal_md = "Check `../../../etc/passwd.js` for details.";
+        assert!(validate_markdown_file_paths(traversal_md).is_err());
+
+        // Windows ADS stream attempt in untrusted markdown must be rejected
+        let ads_md = "Error in `src/app.js:evil_stream`.";
+        assert!(validate_markdown_file_paths(ads_md).is_err());
+
+        // DOS device name in untrusted markdown must be rejected
+        let dos_md = "Error in `src/CON/index.js`.";
+        assert!(validate_markdown_file_paths(dos_md).is_err());
+    }
+
+    #[test]
+    fn test_github_secret_redaction_and_client_debug() {
+        let transport = Arc::new(MockGitHubTransport::new());
+        let secret_token = "ghp_super_secret_token_987654321";
+        let client = GitHubClient::new(Some(secret_token.to_string()), transport);
+
+        let debug_str = format!("{client:?}");
+        assert!(debug_str.contains("[REDACTED]"));
+        assert!(!debug_str.contains(secret_token));
+
+        let raw_log = format!(
+            "Failed auth with token {secret_token} and webhook secret whsec_top_secret_123"
+        );
+        let sanitized = redact_github_secrets(&raw_log, &[secret_token, "whsec_top_secret_123"]);
+        assert!(!sanitized.contains(secret_token));
+        assert!(!sanitized.contains("whsec_top_secret_123"));
+        assert!(sanitized.contains("[REDACTED]"));
     }
 }

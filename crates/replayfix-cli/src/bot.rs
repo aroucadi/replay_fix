@@ -41,8 +41,8 @@ use std::time::{Duration, Instant};
 use crate::git_packager::GitPrPackager;
 use crate::ui::{print_field, print_step, StepStatus, Symbols, Theme};
 
-/// CLI arguments for `replayfix bot`.
-#[derive(Args, Debug, Clone)]
+/// CLI arguments for `replayfix bot` with automatic secret redaction in `Debug` output.
+#[derive(Args, Clone)]
 pub struct BotArgs {
     /// GitHub issue URL to ingest (e.g. https://github.com/owner/repo/issues/123)
     #[arg(long)]
@@ -95,6 +95,29 @@ pub struct BotArgs {
     /// Emit machine-readable JSON output
     #[arg(long)]
     pub json: bool,
+}
+
+impl std::fmt::Debug for BotArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BotArgs")
+            .field("issue", &self.issue)
+            .field("listen", &self.listen)
+            .field("repo", &self.repo)
+            .field("output", &self.output)
+            .field(
+                "webhook_secret",
+                &self.webhook_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("max_requests", &self.max_requests)
+            .field("create_pr", &self.create_pr)
+            .field("comment_issue", &self.comment_issue)
+            .field("apply_labels", &self.apply_labels)
+            .field("mock_heal", &self.mock_heal)
+            .field("mock_bug", &self.mock_bug)
+            .field("timeout", &self.timeout)
+            .field("json", &self.json)
+            .finish()
+    }
 }
 
 /// Final outcome of an autonomous issue triage run.

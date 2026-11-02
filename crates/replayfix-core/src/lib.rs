@@ -96,10 +96,10 @@ pub use gateway::{
 };
 pub use github::{
     compute_hmac_sha256, constant_time_eq, extract_video_urls_from_markdown, filter_webhook_event,
-    sanitize_untrusted_markdown, validate_video_container, verify_webhook_signature, GitHubClient,
-    GitHubPrOutcome, GitHubTransport, IssueCommenter, IssueTriageBundle, IssueVideoAsset,
-    MockGitHubTransport, ReqwestGitHubTransport, TriageLabel, WebhookFilterOutcome, WebhookPayload,
-    BOT_LOOP_MARKER,
+    redact_github_secrets, sanitize_untrusted_markdown, validate_markdown_file_paths,
+    validate_video_container, verify_webhook_signature, GitHubClient, GitHubPrOutcome,
+    GitHubTransport, IssueCommenter, IssueTriageBundle, IssueVideoAsset, MockGitHubTransport,
+    ReqwestGitHubTransport, TriageLabel, WebhookFilterOutcome, WebhookPayload, BOT_LOOP_MARKER,
 };
 pub use ingestion::{
     build_untrusted_context_block, extract_repro_steps, ingest_issue, ingestion_to_manifest,
