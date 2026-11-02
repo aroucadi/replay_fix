@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.8/rrweb_ingest.schema.json",
+  "title": "RrwebIngest",
+  "description": "Schema for RRWeb session replay events and Sentry APM crash dumps ingested into ReplayFix.",
+  "type": "object",
+  "required": ["source_type", "events"],
+  "properties": {
+    "source_type": {
+      "type": "string",
+      "enum": ["rrweb", "sentry", "combined"]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "integer"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "timestamp"],
+        "properties": {
+          "type": {
+            "type": "integer",
+            "description": "RRWeb event type (0: DomContentLoaded, 1: Load, 2: FullSnapshot, 3: IncrementalSnapshot, 4: Meta, 5: Custom)"
+          },
+          "timestamp": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "sentry_crash": {
+      "type": "object",
+      "properties": {
+        "event_id": { "type": "string" },
+        "level": { "type": "string" },
+        "exception": { "type": "object" },
+        "breadcrumbs": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    }
+  }
+}

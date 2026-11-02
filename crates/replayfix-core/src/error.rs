@@ -82,6 +82,18 @@ pub enum CoreError {
 
     #[error("GitHub issue ingestion error: {0}")]
     IssueIngestion(String),
+
+    #[error("Swarm coordination error: {0}")]
+    Swarm(String),
+
+    #[error("Dashboard server error: {0}")]
+    Dashboard(String),
+
+    #[error("Session replay ingestion error: {0}")]
+    SessionReplay(String),
+
+    #[error("Transparency notary error: {0}")]
+    Notary(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

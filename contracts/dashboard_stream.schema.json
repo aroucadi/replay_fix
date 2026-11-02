@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.8/dashboard_stream.schema.json",
+  "title": "DashboardStream",
+  "description": "Schema for live dashboard streaming events: CDP screencast frames and reasoning SSE.",
+  "type": "object",
+  "required": ["event_type", "task_id", "timestamp"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "enum": ["screencast_frame", "reasoning_token", "tool_call", "gate_verdict", "swarm_progress"]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "frame_data": {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "enum": ["jpeg", "webp", "png"] },
+        "base64_data": { "type": "string" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    },
+    "reasoning_data": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "turn": { "type": "integer" },
+        "token": { "type": "string" },
+        "thought": { "type": "string" },
+        "tool": { "type": "string" }
+      }
+    }
+  }
+}

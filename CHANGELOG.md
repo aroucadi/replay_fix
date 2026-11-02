@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] - 2026-11-02
+
+**Spec 180 — Distributed Multi-Agent Swarm, Live Streaming Dashboard & Production APM Session Replay Ingestion**: Scales ReplayFix from an individual developer's CLI or bot into an enterprise distributed visual repair cluster and real-time observability center. Adds production APM telemetry ingestion (`replayfix ingest --sentry <url-or-file> --rrweb <file>`) transforming RRWeb DOM mutation recordings and Sentry/Datadog crash breadcrumbs into deterministic ReplayFix manifests (`TaskManifest`). Adds high-concurrency work-stealing swarm triage (`replayfix swarm --workers <N>`) with per-worker isolated scratch worktrees ($\Delta\text{repo}=0$), dynamic ephemeral ports, and rate-limited Meta Muse model pool concurrency. Adds an embedded async/threaded HTTP & WebSocket live streaming dashboard (`replayfix dashboard --port <port>`) broadcasting real-time CDP viewport screencasts, SSE reasoning token feeds, and side-by-side DOM diffs to maintainers. Extends permanent test inoculation (`replayfix inoculate --matrix`) to synthesize responsive Playwright test matrices across Desktop Chromium, Firefox, WebKit, and mobile viewports (Pixel 7, iPhone 14) with DPR coordinate calibration. Introduces the RFC 6962 Merkle Receipt Transparency Log and Notary (`replayfix notary`) chaining all triage receipts into an append-only verifiable cryptographic ledger (`transparency_log.json`). Full notes: [docs/release-notes/v1.8.0.md](docs/release-notes/v1.8.0.md).
+
+### Added
+- **Production APM & RRWeb Session Replay Ingestion (`replayfix-core::rrweb`, `replayfix ingest`)**:
+  - `RrwebParser` parsing full DOM snapshots, incremental mutations, mouse clicks, scrolls, and text inputs from RRWeb v2 recordings.
+  - `SentryIngestion` parsing unhandled exceptions, stack frames, candidate source files, and breadcrumbs, with remote crash fetching over HTTPS.
+  - Automated reproduction manifest synthesis (`synthesize_manifest_from_telemetry`) with path traversal guards (`TaskManifest::assert_safe_path`).
+- **Distributed Work-Stealing Triage Swarm (`replayfix-core::swarm`, `replayfix swarm`)**:
+  - Multi-worker concurrent execution cluster with work-stealing task queues, per-worker isolated `ScratchSandbox` ($\Delta\text{repo}=0$), dynamic ephemeral ports, and rate-limited model pool governance.
+  - Aggregated swarm execution summary serialization into `swarm_summary.json` matching `contracts/swarm_task.schema.json`.
+- **Live Streaming Observability Dashboard (`replayfix-core::dashboard`, `replayfix dashboard`, `dashboard.html`)**:
+  - Embedded zero-dependency HTTP & RFC 6455 WebSocket / SSE server broadcasting real-time screencast frames, turn-by-turn Muse Spark reasoning tokens, and REST status/receipt endpoints.
+  - Standalone single-page `dashboard.html` with real-time viewport canvas, deliberation timeline, and strict Content Security Policy.
+- **Cross-Browser & Multi-Device Inoculation Matrix (`replayfix-core::inoculate`, `replayfix inoculate --matrix`)**:
+  - Multi-engine (`chromium,firefox,webkit`) and responsive viewport preset generation (`desktop`, `tablet`, `mobile-portrait`) with DPR geometric coordinate calibration.
+- **RFC 6962 Merkle Receipt Transparency Log & Notary (`replayfix-core::notary`, `replayfix notary`)**:
+  - Append-only cryptographic ledger (`transparency_log.json`) chaining triage receipts with Merkle consistency proofs between snapshot sizes and Ed25519 digital signatures.
+
+---
+
 ## [1.7.0] - 2026-11-02
 
 **Spec 170 — Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine**: Evolves ReplayFix from a developer's local CLI tool into an autonomous continuous GitHub triage agent (`replayfix bot`). It connects directly to public and private GitHub issues and webhook event streams, extracts user-recorded bug videos (`.mp4`, `.webm`, `.mov`, and `user-attachments/assets`), executes the sub-60s Sovereign Healer (`v1.6` pipeline: SAM 3.1 + Muse Voice + Muse Spark Agent Loop + Muse Wonder AST Repair + Gate 2 GREEN + Gate 3 Stress Quorum + Inoculation) inside an ephemeral scratch sandbox ($\Delta\text{repo} = 0$), dispatches isolated branches (`replayfix/issue-<id>-<slug>`) with Ed25519-signed Merkle commit trailers, opens review-ready Pull Requests with comprehensive Evidence Matrix descriptions, posts verifiable visual comments and side-by-side DOM diffs to original issue threads, automates triage labels (`replayfix:verified-healed`, `replayfix:unreproduced`, `replayfix:ambiguous`), and provides a fail-closed HMAC-SHA256 authenticated webhook server (`replayfix bot --listen <addr>`). Full notes: [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md).

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.8/transparency_log.schema.json",
+  "title": "TransparencyLog",
+  "description": "Schema for RFC 6962 transparency log ledger and consistency proofs.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "tree_size",
+    "merkle_root",
+    "entries",
+    "attestation"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.8.0"
+    },
+    "tree_size": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "merkle_root": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["leaf_index", "receipt_sha256", "task_id", "timestamp", "leaf_hash"],
+        "properties": {
+          "leaf_index": { "type": "integer" },
+          "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "task_id": { "type": "string" },
+          "timestamp": { "type": "string" },
+          "leaf_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "required": ["public_key_hex", "signature_hex", "timestamp"],
+      "properties": {
+        "public_key_hex": { "type": "string" },
+        "signature_hex": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
+    }
+  }
+}

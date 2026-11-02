@@ -1,9 +1,10 @@
-//! Permanent Codebase Inoculation ("Dreaming") Engine & Registry (Release 1.5).
+//! Permanent Codebase Inoculation ("Dreaming") Engine & Registry (Release 1.5, extended v1.8).
 //!
 //! Translates verified bug reproductions and grounded DOM accessibility locators into
 //! permanent, human-readable `@playwright/test` TypeScript regression suites
 //! (`tests/repro/rf_<id>.spec.ts`) and maintains the tamper-evident registry at
-//! `.replayfix/inoculations.json`.
+//! `.replayfix/inoculations.json`. Extended in v1.8 with multi-browser and multi-viewport
+//! responsive Playwright matrices (`--matrix chromium,firefox,webkit,mobile`).
 
 use crate::artifacts::atomic_write_file;
 use crate::digest::{canonical_json, sha256_hex};
@@ -434,6 +435,182 @@ impl InoculationGenerator {
 
         Ok((spec, entry, full_spec_path))
     }
+
+    /// Synthesize a multi-browser and multi-viewport responsive Playwright matrix test spec.
+    pub fn synthesize_matrix_spec(
+        fixture: &Fixture,
+        engines: &[String],
+        presets: &[ViewportPreset],
+    ) -> Result<InoculationSpec> {
+        let (default_cand, output_selector) = Self::default_candidate_for_fixture(fixture);
+        let grounded_selector = LocatorResolver::synthesize_selector(&default_cand)?;
+        LocatorResolver::validate_selector(&grounded_selector)?;
+
+        let spec_rel_path = format!(
+            "tests/repro/rf_{}_matrix.spec.ts",
+            fixture
+                .task_id
+                .to_ascii_lowercase()
+                .replace(['-', ' '], "_")
+        );
+        let contract_sha = fixture.contract.digest()?;
+        let patch_sha = sha256_hex(fixture.builtin_diff.as_bytes());
+
+        let mut ts = String::new();
+        ts.push_str("// REPLAYFIX-INOCULATION-MATRIX: v1.8\n");
+        ts.push_str(&format!("// BUG-ID: {}\n", fixture.task_id));
+        ts.push_str(&format!("// CONTRACT-SHA256: {contract_sha}\n"));
+        ts.push_str(&format!("// PATCH-SHA256: {patch_sha}\n"));
+        ts.push_str(&format!("// ENGINES: {}\n", engines.join(",")));
+        ts.push_str("import { test, expect } from '@playwright/test';\n\n");
+
+        ts.push_str("const VIEWPORT_PRESETS = [\n");
+        for p in presets {
+            ts.push_str(&format!(
+                "  {{ name: '{}', width: {}, height: {}, dpr: {}, hasTouch: {} }},\n",
+                p.name, p.width, p.height, p.dpr, p.has_touch
+            ));
+        }
+        ts.push_str("];\n\n");
+
+        ts.push_str(&format!(
+            "test.describe('ReplayFix Multi-Device Inoculation Matrix // {}', () => {{\n",
+            fixture.task_id
+        ));
+        ts.push_str("  for (const vp of VIEWPORT_PRESETS) {\n");
+        ts.push_str("    test.describe(`Viewport: ${vp.name}`, () => {\n");
+        ts.push_str("      test.use({\n");
+        ts.push_str("        viewport: { width: vp.width, height: vp.height },\n");
+        ts.push_str("        deviceScaleFactor: vp.dpr,\n");
+        ts.push_str("        hasTouch: vp.hasTouch,\n");
+        ts.push_str("      });\n\n");
+        ts.push_str(&format!(
+            "      test(`satisfies {} on ${{vp.name}}`, async ({{ page }}) => {{\n",
+            fixture.contract.postcondition_id
+        ));
+        ts.push_str("        await page.goto('/');\n");
+        ts.push_str(&format!("        const target = {grounded_selector};\n"));
+        ts.push_str("        await expect(target).toBeVisible();\n");
+        ts.push_str("        await target.click();\n");
+        ts.push_str(&format!(
+            "        const output = page.locator('{output_selector}');\n"
+        ));
+        ts.push_str("        await expect(output).toBeVisible();\n");
+        ts.push_str("      });\n");
+        ts.push_str("    });\n");
+        ts.push_str("  }\n");
+        ts.push_str("});\n");
+
+        let spec_sha256 = sha256_hex(ts.as_bytes());
+
+        Ok(InoculationSpec {
+            bug_id: fixture.task_id.to_string(),
+            spec_rel_path,
+            target_path: fixture.target_path.to_string(),
+            grounded_selector,
+            output_selector,
+            expected_output_text: fixture.expected_output_text.to_string(),
+            typescript_content: ts,
+            spec_sha256,
+        })
+    }
+}
+
+/// Supported responsive viewport preset for multi-device inoculation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ViewportPreset {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub dpr: f64,
+    pub is_mobile: bool,
+    pub has_touch: bool,
+}
+
+impl ViewportPreset {
+    #[must_use]
+    pub fn mobile_portrait() -> Self {
+        Self {
+            name: "Mobile Portrait (iPhone 14)".to_string(),
+            width: 390,
+            height: 844,
+            dpr: 3.0,
+            is_mobile: true,
+            has_touch: true,
+        }
+    }
+
+    #[must_use]
+    pub fn tablet() -> Self {
+        Self {
+            name: "Tablet (iPad Air)".to_string(),
+            width: 820,
+            height: 1180,
+            dpr: 2.0,
+            is_mobile: true,
+            has_touch: true,
+        }
+    }
+
+    #[must_use]
+    pub fn desktop() -> Self {
+        Self {
+            name: "Desktop Wide".to_string(),
+            width: 1920,
+            height: 1080,
+            dpr: 1.0,
+            is_mobile: false,
+            has_touch: false,
+        }
+    }
+}
+
+/// Parse comma-separated `--matrix` argument into engines and viewport presets.
+#[must_use]
+pub fn parse_matrix_arg(raw: &str) -> (Vec<String>, Vec<ViewportPreset>) {
+    let mut engines = Vec::new();
+    let mut presets = Vec::new();
+
+    for token in raw.split(',').map(|s| s.trim().to_ascii_lowercase()) {
+        match token.as_str() {
+            "chromium" | "chrome" => engines.push("chromium".to_string()),
+            "firefox" => engines.push("firefox".to_string()),
+            "webkit" | "safari" => engines.push("webkit".to_string()),
+            "mobile" | "mobile-portrait" | "phone" => {
+                presets.push(ViewportPreset::mobile_portrait());
+            }
+            "tablet" | "ipad" => presets.push(ViewportPreset::tablet()),
+            "desktop" | "desktop-wide" => presets.push(ViewportPreset::desktop()),
+            _ => {}
+        }
+    }
+
+    if engines.is_empty() {
+        engines.push("chromium".to_string());
+    }
+    if presets.is_empty() {
+        presets.push(ViewportPreset::desktop());
+    }
+
+    (engines, presets)
+}
+
+/// Calibrate pixel coordinates between different viewports and device pixel ratios.
+#[must_use]
+pub fn calibrate_viewport_coords(
+    x: f64,
+    y: f64,
+    from_w: f64,
+    from_h: f64,
+    to_w: f64,
+    to_h: f64,
+    dpr: f64,
+) -> (f64, f64) {
+    let scale_x = to_w / from_w.max(1.0);
+    let scale_y = to_h / from_h.max(1.0);
+    let scaled_x = (x * scale_x * dpr).round() / dpr;
+    let scaled_y = (y * scale_y * dpr).round() / dpr;
+    (scaled_x, scaled_y)
 }
 
 #[cfg(test)]
@@ -477,5 +654,31 @@ mod tests {
         assert_eq!(reg.entries[0].bug_id, "RF-01");
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_matrix_parsing_and_synthesis() {
+        let (engines, presets) = parse_matrix_arg("chromium,firefox,webkit,mobile,tablet");
+        assert_eq!(engines, vec!["chromium", "firefox", "webkit"]);
+        assert_eq!(presets.len(), 2);
+        assert_eq!(presets[0].name, "Mobile Portrait (iPhone 14)");
+
+        let fixture = Fixture::for_task("RF-01").unwrap();
+        let spec =
+            InoculationGenerator::synthesize_matrix_spec(&fixture, &engines, &presets).unwrap();
+        assert!(spec
+            .typescript_content
+            .contains("REPLAYFIX-INOCULATION-MATRIX"));
+        assert!(spec
+            .typescript_content
+            .contains("Mobile Portrait (iPhone 14)"));
+        assert!(spec.typescript_content.contains("dpr: 3"));
+    }
+
+    #[test]
+    fn test_calibrate_viewport_coords() {
+        let (x, y) = calibrate_viewport_coords(100.0, 200.0, 1000.0, 2000.0, 500.0, 1000.0, 2.0);
+        assert_eq!(x, 50.0);
+        assert_eq!(y, 100.0);
     }
 }
