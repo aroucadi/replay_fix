@@ -206,7 +206,20 @@ function sendLine(obj, requestId) {
           browserConnected = false;
           page = null;
         }
-        browser = await pw.chromium.launch({ headless: !cmd.headed, timeout: 15000 });
+        try {
+          browser = await pw.chromium.launch({ headless: !cmd.headed, timeout: 15000 });
+        } catch (launchErr) {
+          const msg = String(launchErr && launchErr.message ? launchErr.message : launchErr);
+          if (msg.includes("Executable doesn't exist")) {
+            try {
+              browser = await pw.chromium.launch({ channel: 'chrome', headless: !cmd.headed, timeout: 15000 });
+            } catch (_) {
+              browser = await pw.chromium.launch({ channel: 'msedge', headless: !cmd.headed, timeout: 15000 });
+            }
+          } else {
+            throw launchErr;
+          }
+        }
         browserConnected = true;
         pageCrashed = false;
         browser.on('disconnected', () => {

@@ -668,6 +668,13 @@ impl StructuredRepairPatch {
     /// Rejects markdown code fences (` ```json ... ``` `), extra fields, and empty strings.
     pub fn decode_strict(raw_json: &str) -> Result<Self> {
         let trimmed = raw_json.trim();
+        if trimmed.is_empty() {
+            return Err(CoreError::PatchApplicationError(
+                "SCHEMA_VIOLATION: candidate repair patch from model is completely empty (0 characters). \
+                 The model generated no content. Bounded repair will backtrack/retry."
+                    .to_string(),
+            ));
+        }
         if trimmed.starts_with("```") || trimmed.ends_with("```") {
             return Err(CoreError::PatchApplicationError(
                 "SCHEMA_VIOLATION: markdown code fences are prohibited in strict JSON repair output"
@@ -1456,6 +1463,14 @@ impl BoundedRepairClient {
             } else {
                 trimmed
             };
+
+            if clean_json.is_empty() {
+                return Err(CoreError::ModelApiError(format!(
+                    "EMPTY_MODEL_OUTPUT: Upstream model '{}' generated an empty response (0 characters). \
+                     Verify that META_API_KEY has active quota and model permissions.",
+                    config.serving_model.as_str()
+                )));
+            }
 
             return Ok(RepairModelResponse {
                 response_id: format!("live_resp_{attempt}"),

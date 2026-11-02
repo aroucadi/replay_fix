@@ -1189,9 +1189,16 @@ impl MetaGatewayClient {
                             fingerprint,
                         );
                     } else if status == 401 || status == 403 {
+                        let err_detail = resp.text().unwrap_or_default();
+                        let hint = if err_detail.contains("invalid_api_key") || status == 401 {
+                            "Authentication failed (invalid or expired META_API_KEY). Ensure your key is valid and has active model quota on https://api.meta.ai/v1."
+                        } else {
+                            "Access forbidden (HTTP 403). Ensure your Meta account has permission for this model endpoint."
+                        };
                         return Err(CoreError::ModelApiError(format!(
-                            "GATEWAY_AUTH_FAILED: HTTP {status} from {}",
-                            self.base_url
+                            "GATEWAY_AUTH_FAILED: HTTP {status} from {}: {hint} [Wire: {}]",
+                            self.base_url,
+                            self.config.redact_secrets(&err_detail)
                         )));
                     } else if status == 429 || status == 503 || status >= 500 {
                         let retry_after = resp
@@ -1258,6 +1265,25 @@ impl MetaGatewayClient {
         latency_ms: u64,
         fingerprint: String,
     ) -> Result<GatewayResponse> {
+        if let Some(err_val) = body_val.get("error") {
+            let msg = err_val
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown upstream error");
+            let code = err_val
+                .get("code")
+                .and_then(|c| c.as_str())
+                .unwrap_or("error");
+            let err_type = err_val
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("upstream_error");
+            return Err(CoreError::ModelApiError(format!(
+                "UPSTREAM_API_ERROR ({code} / {err_type}): {msg}. \
+                 Check your META_API_KEY credentials and model permissions on https://api.meta.ai/v1."
+            )));
+        }
+
         let output_text = body_val
             .get("output")
             .and_then(|v| v.as_array())
@@ -1317,6 +1343,14 @@ impl MetaGatewayClient {
                 ))
             })?
             .to_string();
+
+        if output_text.trim().is_empty() {
+            return Err(CoreError::ModelApiError(format!(
+                "UPSTREAM_EMPTY_RESPONSE: The Meta AI endpoint ({provider:?}) returned HTTP 200 with 0 output characters \
+                 for model '{}'. The model generated no content. Verify that META_API_KEY has quota/access for this model.",
+                request.requested_model
+            )));
+        }
 
         let serving_model = body_val
             .get("model")

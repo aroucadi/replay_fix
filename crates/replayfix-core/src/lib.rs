@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 #![cfg_attr(
     not(test),
     deny(
@@ -60,7 +61,7 @@ pub use deliberation::{
     DeliberationToolCall, DeliberationToolObservation, SparkDeliberationSession,
     SparkDeliberationTurn, FRONTIER_WONDER_SLUG, SOVEREIGN_SPARK_SLUG,
     SPARK_AGENT_LOOP_PROMPT_CACHE_KEY, TOOL_INOCULATE, TOOL_INSPECT_TRACE, TOOL_REPRODUCE,
-    TOOL_VERIFY_PATCH,
+    TOOL_VERIFY_PATCH, TOOL_WEB_SEARCH,
 };
 pub use diffguard::DiffGuard;
 pub use digest::{canonical_json, sha256_hex};

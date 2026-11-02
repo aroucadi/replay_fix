@@ -1,11 +1,15 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.5.1` (`151-v1.5.1-live-meta-multimodal-wire-protocol` — Live Meta Multimodal Wire Protocol & Full Muse Model Utilization)
-- **Status**: Production Release Qualification Complete; 283/283 Tests Passing, Zero Panics, 0 Clippy Warnings. Aligned `--mode live-ai` with production `https://api.meta.ai/v1/` wire protocols across all 5 Meta models (`sam-3.1` `input_image` + `input_video` segmentation, `muse-voice-transcribe-1.0` `multipart/form-data` WAV ASR, `muse-spark-1.3` `web_search` tool calling, `muse-wonder-1.0` repair, and `muse-image-1.0` verification badge generation).
+- **Active Milestone**: `v1.6.0` (`160-v1.6.0-sovereign-healer-macro` — Sovereign Autonomous Healer & Sub-60s Spark Agent Loop)
+- **Status**: Production Release Qualification Complete; 291/291 Tests Passing, Zero Panics, 0 Clippy Warnings. Established `muse-spark-1.3` as the sovereign multi-turn agent loop brain (`prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`), paired with `muse-wonder-1.0` AST patch synthesis and `reasoning.encrypted_content` deliberation backtracking, orchestrated via the sub-60s `replayfix heal` CLI macro.
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.6.0 Sovereign Autonomous Healer & Sub-60s Multi-Turn Spark Loop (Spec 160)**:
+  - Implemented `crates/replayfix-core/src/deliberation.rs` (`DeliberationEngine`, `SparkDeliberationSession`, `SparkDeliberationTurn`, `DeliberationToolCall`, `DeliberationToolObservation`), orchestrating multi-turn tool dispatch (`replayfix_reproduce`, `replayfix_inspect_trace`, `replayfix_verify_patch`, `replayfix_inoculate`) with `muse-spark-1.3` (`effort: "xhigh"`, `prompt_cache_key: "replayfix-v1.6-spark-agent-loop"`).
+  - Connected `DeliberationEngine` to `BoundedRepairClient` (`muse-wonder-1.0`), threading `previous_response_id` and cached `reasoning.encrypted_content` across compiler (`TS1005`) and Gate 3 flakiness (`FLAKY_NON_DETERMINISTIC`) backtracking attempts, failing closed with `QUARANTINE_REPAIR_FAILED` (`Exit 21`) when attempts are exhausted.
+  - Implemented `crates/replayfix-cli/src/heal.rs` (`replayfix heal`), executing the full sub-60s macro pipeline inside an ephemeral `ScratchSandbox` ($\Delta\text{repo}=0$ verified via `WorktreeManifest`), synthesizing permanent Playwright inoculations (`tests/repro/rf_<id>.spec.ts`), and exporting RFC 6962 + Ed25519 attested receipts and `proof_viewer.html` with the interactive Muse Spark Deliberation Timeline and DOM Diff Inspector.
 - [x] **v1.5.1 Live Meta Multimodal Wire Protocol & Full Muse Model Utilization (Spec 151)**:
   - Updated `MetaGatewayClient` and `SamSegmenter` for `input_image` + `input_video` segmentation on `sam-3.1` (`POST /v1/responses`) and 6-attribute `<|box;x1=...;y1=...;x2=...;y2=...;w=...;h=...|>` wire tokens.
   - Updated `MetaGatewayClient::transcribe_audio_wav` to send RFC 7578 `multipart/form-data` (`request` + `audio` WAV) to `POST /v1/asr/transcribe` (`muse-voice-transcribe-1.0`) and parse `audioDurationMs`.

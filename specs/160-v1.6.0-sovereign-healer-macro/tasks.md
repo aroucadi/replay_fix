@@ -26,4 +26,4 @@
 
 - [x] T008 Add comprehensive unit and integration tests for `DeliberationEngine`, `heal` CLI subcommand, encrypted backtracking, and timeline portal rendering
 - [x] T009 Run full qualification battery: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets -- --test-threads=2`, and `check-panics.ps1`
-- [ ] T010 Bump workspace version to `1.6.0`, update `CHANGELOG.md`, `README.md`, `docs/release-notes/v1.6.0.md`, build release binaries, assemble `release/v1.6.0/` bundle (`replayfix.exe`, `proof_viewer.html`, `SHA256SUMS.txt`), merge `release/v1.6.0` to `main`, tag `v1.6.0`, and push
+- [x] T010 Bump workspace version to `1.6.0`, update `CHANGELOG.md`, `README.md`, `docs/release-notes/v1.6.0.md`, build release binaries, assemble `release/v1.6.0/` bundle (`replayfix.exe`, `proof_viewer.html`, `SHA256SUMS.txt`), merge `release/v1.6.0` to `main`, tag `v1.6.0`, and push

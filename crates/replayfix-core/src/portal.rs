@@ -743,12 +743,18 @@ pub fn validate_portal_html_contract(html_path: &Path) -> Result<()> {
         }
     }
 
-    // 4. Required cryptographic & multimodal inspector sections
+    // 4. Required cryptographic & multimodal inspector sections (including Spec 160 Deliberation Timeline & DOM Diff)
     for marker in [
         "REPLAYFIX-ATTESTATION:v0.9:",
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "SWEEP_PARTIAL_FAILURE",
         "F_patched \\ F_baseline",
+        "tab-deliberation",
+        "Muse Spark Deliberation Timeline",
+        "replayfix-v1.6-spark-agent-loop",
+        "reasoning.encrypted_content",
+        "dom-pre-repair-box",
+        "dom-post-repair-box",
     ] {
         if !html.contains(marker) {
             return Err(CoreError::Verification(format!(

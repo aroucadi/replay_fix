@@ -1461,11 +1461,16 @@ fn test_heal_macro_subcommand_deterministic_rf01() {
     let receipt = json(&receipt_path);
     assert_eq!(receipt["status"], "VERIFIED_REPAIRED");
     assert!(receipt["merkle_root"].is_string());
+    assert_eq!(receipt["base_repo_unmodified_verified"], true);
+    assert_eq!(receipt["base_tree_sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(receipt["sandbox_tree_sha256"].as_str().unwrap().len(), 64);
+    assert_ne!(receipt["base_tree_sha256"], receipt["sandbox_tree_sha256"]);
     assert!(receipt["deliberation"].is_object());
     assert_eq!(
         receipt["deliberation"]["prompt_cache_key"],
         "replayfix-v1.6-spark-agent-loop"
     );
+    assert!(dir.join("tests/repro/rf_01.spec.ts").exists());
 }
 
 #[test]
@@ -1500,6 +1505,52 @@ fn test_heal_macro_subcommand_syntax_retry_backtracking() {
     let receipt = json(&dir.join("out-heal-retry/audit_receipt.json"));
     let turns = receipt["deliberation"]["turns"].as_array().unwrap();
     assert!(turns.len() >= 5);
+}
+
+#[test]
+fn test_heal_macro_subcommand_flaky_retry_and_quarantine() {
+    let dir_flaky_retry = scratch("heal-macro-flaky-retry");
+    let out_retry = run_cmd(
+        &dir_flaky_retry,
+        &[
+            "heal",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "flaky-retry",
+            "--repo",
+            ".",
+            "--output",
+            "out-flaky-retry",
+            "--json",
+        ],
+    );
+    assert_eq!(code(&out_retry), 0);
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&out_retry.stdout).expect("valid json output");
+    assert_eq!(parsed["lineage_attempts"], 2);
+
+    // Exhausted attempts must fail closed with Exit Code 21 and triage_report.json
+    let dir_exhausted = scratch("heal-macro-exhausted");
+    let out_exhausted = run_cmd(
+        &dir_exhausted,
+        &[
+            "heal",
+            "--bug",
+            "RF-01",
+            "--mode",
+            "exhausted",
+            "--repo",
+            ".",
+            "--output",
+            "out-exhausted",
+        ],
+    );
+    assert_eq!(code(&out_exhausted), 21);
+    let triage_path = dir_exhausted.join("out-exhausted/triage_report.json");
+    assert!(triage_path.exists());
+    let triage = json(&triage_path);
+    assert_eq!(triage["status"], "QUARANTINE_REPAIR_FAILED");
 }
 
 #[test]

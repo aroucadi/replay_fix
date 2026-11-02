@@ -2,7 +2,7 @@
 
 **Feature Branch**: `release/v1.6.0`  
 **Created**: 2026-11-02  
-**Status**: Ready for Planning & Implementation  
+**Status**: Implemented & Verified (Release 1.6.0)  
 **Input**: Establish Meta Muse Spark 1.3 as the sovereign multi-turn agent loop brain driving autonomous reproduction, causal diagnosis, code repair delegation (to Meta Muse Wonder 1.0 with encrypted deliberation backtracking), sandbox verification, and permanent inoculation within a sub-60-second end-to-end CLI macro (`replayfix heal`).
 
 ---
@@ -99,6 +99,8 @@ As a hackathon judge or staff engineer reviewing an autonomous repair, I want to
 - **FR-004 (Sub-60s Sovereign Macro Command `heal`)**: `replayfix-cli` MUST provide a top-level subcommand `heal` taking `--video <path>`, `--repo <path>`, optional `--bug <id>`, `--mode <mode>` (or `--mock-heal` / `--live-browser`), `--output <dir>`, and `--json`. The command MUST execute the integrated chain and enforce an internal 60-second optimization budget.
 - **FR-005 (Autonomous Error Correction & Backtracking)**: The harness MUST capture TypeScript syntax errors, Playwright assertion diffs, and Gate 3 stress quorum failures, injecting them into the next turn context for up to 3 repair attempts. If exhausted, it MUST emit `triage_report.json` and exit with code 21.
 - **FR-006 (Offline Proof Portal Deliberation Timeline)**: `proof_viewer.html` and `portal.rs` MUST format multi-turn deliberation events (turns, tool calls, observations, execution times) into `audit_receipt.json` and render an interactive timeline, side-by-side DOM diff, and cryptographic Merkle proof tree.
+- **FR-007 (Inviolable Ephemeral Scratch Sandbox & $\Delta\text{repo}=0$ Guarantee)**: `replayfix heal` MUST execute candidate patches inside an isolated `ScratchSandbox` on an OS-assigned ephemeral port (`:0`) and verify via `WorktreeManifest` SHA-256 trees that the base repository remains untouched (`base_repo_unmodified_verified: true`) before certifying Gate 2.
+- **FR-008 (Permanent Codebase Inoculation & Git PR Packaging)**: Upon passing Gate 2 and Gate 3 Stress Quorum, `replayfix heal` MUST synthesize a permanent `@playwright/test` TypeScript regression test (`tests/repro/rf_<id>.spec.ts`), update `.replayfix/inoculations.json`, and support `--package-pr` to emit `pr_description.md` and RFC 6962 signed commit trailers.
 
 ---
 

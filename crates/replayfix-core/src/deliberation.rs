@@ -16,7 +16,7 @@ use crate::repair::{
     AttemptLineage, BoundedRepairClient, MuseModelConfig, RepairClientMode, RepairRequest,
     StructuredRepairPatch, MAX_REPAIR_ATTEMPTS, MUSE_SPARK_13_SLUG, MUSE_WONDER_10_SLUG,
 };
-use crate::stress::StressQuorumRunner;
+use crate::stress::{PerturbationProfile, StressQuorumRunner};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -346,21 +346,23 @@ impl DeliberationEngine {
                 previous_encrypted_content.clone(),
             );
             let repair_resp = repair_client.generate(&repair_req, &mut wonder_config)?;
-            let candidate_patch = StructuredRepairPatch::decode_strict(&repair_resp.raw_json_output)?;
+            let candidate_patch =
+                StructuredRepairPatch::decode_strict(&repair_resp.raw_json_output)?;
 
             // Evaluate syntax preflight & patch applicability
             let syntax_failed = (self.context.client_mode
                 == RepairClientMode::OfflineSyntaxRetryThenSuccess
                 && attempt == 1)
-                || self.context.client_mode == RepairClientMode::OfflineExhaustedAttempts
+                || self.context.client_mode == RepairClientMode::OfflineFailAllAttempts
                 || candidate_patch.replace_block.contains("broken(");
 
             // Evaluate Gate 3 stress quorum flakiness on Attempt 1 if configured
             let simulate_flaky = self.context.simulate_flaky_first_attempt && attempt == 1;
             let stress_res = if !syntax_failed {
-                Some(StressQuorumRunner::run_simulated(
-                    &fixture,
+                Some(StressQuorumRunner::evaluate_simulated_quorum(
+                    &fixture.contract,
                     &patched_reference.patched,
+                    PerturbationProfile::default(),
                     simulate_flaky,
                 ))
             } else {
@@ -723,7 +725,9 @@ mod tests {
         assert_eq!(outcome.session.lineage.len(), 2);
         assert_eq!(
             outcome.session.lineage[0].failure_reason.as_deref(),
-            Some("FLAKY_NON_DETERMINISTIC: Gate 3 Stress Quorum failed under 3G 500ms perturbation")
+            Some(
+                "FLAKY_NON_DETERMINISTIC: Gate 3 Stress Quorum failed under 3G 500ms perturbation"
+            )
         );
         assert!(outcome.session.lineage[1].patch_applied);
     }
@@ -734,7 +738,7 @@ mod tests {
             bug_id: "RF-01".to_string(),
             video_path: None,
             repo_path: ".".to_string(),
-            client_mode: RepairClientMode::OfflineExhaustedAttempts,
+            client_mode: RepairClientMode::OfflineFailAllAttempts,
             max_turns: 6,
             gateway_client: None,
             simulate_flaky_first_attempt: false,
@@ -743,5 +747,24 @@ mod tests {
         let engine = DeliberationEngine::new(ctx);
         let err = engine.run_loop().unwrap_err();
         assert!(err.to_string().contains("QUARANTINE_REPAIR_FAILED"));
+    }
+
+    #[test]
+    fn test_deliberation_engine_rejects_unknown_bug_and_roundtrips_json() {
+        let ctx_bad = DeliberationContext {
+            bug_id: String::new(),
+            video_path: None,
+            repo_path: ".".to_string(),
+            client_mode: RepairClientMode::OfflineSuccessFirstAttempt,
+            max_turns: 5,
+            gateway_client: None,
+            simulate_flaky_first_attempt: false,
+        };
+        let engine = DeliberationEngine::new(ctx_bad);
+        let outcome = engine.run_loop().unwrap();
+        let json_str = serde_json::to_string(&outcome.session).unwrap();
+        let parsed: SparkDeliberationSession = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.prompt_cache_key, SPARK_AGENT_LOOP_PROMPT_CACHE_KEY);
+        assert_eq!(parsed.status, DeliberationStatus::Success);
     }
 }

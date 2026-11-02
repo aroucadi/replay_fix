@@ -25,9 +25,8 @@ use replayfix_core::receipt::{
     TriageStatus, SCHEMA_VERSION, SUBSTRATE,
 };
 use replayfix_core::repair::{MuseModelSlug, RepairClientMode, TokenAccounting};
-use replayfix_core::sandbox::ScratchSandbox;
-use replayfix_core::stress::StressQuorumRunner;
-use replayfix_core::worktree::WorktreeManifest;
+use replayfix_core::stress::{PerturbationProfile, StressQuorumRunner};
+use replayfix_core::worktree::{ScratchSandbox, WorktreeManifest};
 use replayfix_core::MetaGatewayClient;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -199,9 +198,7 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     }
 
     // Phase 2: Ephemeral Scratch Sandbox & Port 0 Allocation (Laws III & IV)
-    let ephemeral_port_guard = EphemeralPort::allocate()?;
-    let ephemeral_port = ephemeral_port_guard.port();
-    drop(ephemeral_port_guard);
+    let ephemeral_port = EphemeralPort::allocate()?.get();
 
     let mut sandbox = ScratchSandbox::create_with_excludes(&repo_dir, &bug_id, &extra_excludes)?;
     sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
@@ -210,7 +207,7 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let client_mode = match args.mode.as_str() {
         "live-ai" => RepairClientMode::LiveEndpoint,
         "syntax-retry" => RepairClientMode::OfflineSyntaxRetryThenSuccess,
-        "exhausted" => RepairClientMode::OfflineExhaustedAttempts,
+        "exhausted" => RepairClientMode::OfflineFailAllAttempts,
         _ => RepairClientMode::OfflineSuccessFirstAttempt,
     };
 
@@ -257,9 +254,10 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
 
     // Gate 3 Stress Quorum Verification
-    let stress_report = match StressQuorumRunner::run_simulated(
-        &fixture,
+    let stress_report = match StressQuorumRunner::evaluate_simulated_quorum(
+        &fixture.contract,
         &patched_outcome.patched,
+        PerturbationProfile::default(),
         args.mock_flaky,
     ) {
         Ok(report) => Some(report),
@@ -271,7 +269,10 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
                 TriageStatus::FlakyNonDeterministic,
                 &e.to_string(),
             )?;
-            eprintln!("  {} Gate 3 Stress Quorum failed: {e}", theme.error(Symbols::CROSS));
+            eprintln!(
+                "  {} Gate 3 Stress Quorum failed: {e}",
+                theme.error(Symbols::CROSS)
+            );
             exit(21);
         }
     };
