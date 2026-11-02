@@ -155,6 +155,7 @@ impl AgentShell {
                         self.output_dir.clone(),
                         false,
                         false,
+                        None,
                         &self.theme,
                     );
                 }

@@ -15,6 +15,7 @@ pub mod artifacts;
 pub mod browser;
 pub mod checkpoint;
 pub mod crypto;
+pub mod dashboard;
 pub mod deliberation;
 pub mod diffguard;
 pub mod digest;
@@ -31,6 +32,7 @@ pub mod inoculate;
 pub mod locator;
 pub mod manifest;
 pub mod merkle;
+pub mod notary;
 pub mod observer;
 pub mod patch;
 pub mod perception;
@@ -41,7 +43,9 @@ pub mod receipt;
 pub mod regression;
 pub mod repair;
 pub mod reporters;
+pub mod rrweb;
 pub mod stress;
+pub mod swarm;
 pub mod sweep;
 pub mod trace;
 pub mod video;
@@ -56,6 +60,10 @@ pub use checkpoint::{
 pub use crypto::{
     build_signing_payload, verify_attestation, AttestationRecord, KeypairManager, TrustPolicy,
     VerificationOutcome,
+};
+pub use dashboard::{
+    base64_encode, compute_ws_accept, encode_ws_text_frame, sha1_digest, DashboardBroadcaster,
+    DashboardServerHandle, DASHBOARD_HTML_EMBEDDED,
 };
 pub use deliberation::{
     DeliberationContext, DeliberationEngine, DeliberationOutcome, DeliberationStatus,
@@ -107,8 +115,9 @@ pub use ingestion::{
     MockIssueFetcher, SystemIssueFetcher, MAX_ISSUE_PAYLOAD_BYTES,
 };
 pub use inoculate::{
-    InoculationEntry, InoculationGenerator, InoculationRegistry, InoculationSpec,
-    INOCULATION_REGISTRY_FILE, INOCULATION_SCHEMA_VERSION,
+    calibrate_viewport_coords, parse_matrix_arg, InoculationEntry, InoculationGenerator,
+    InoculationRegistry, InoculationSpec, ViewportPreset, INOCULATION_REGISTRY_FILE,
+    INOCULATION_SCHEMA_VERSION,
 };
 pub use locator::{
     AmbiguousTieCandidate, BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry,
@@ -116,6 +125,9 @@ pub use locator::{
 };
 pub use manifest::{EnvironmentAdapter, TaskManifest};
 pub use merkle::{EvidenceLeaf, MerkleInclusionProof, MerkleReceipt, MerkleTree};
+pub use notary::{
+    TransparencyLog, TransparencyLogEntry, TRANSPARENCY_LOG_FILE, TRANSPARENCY_SCHEMA_VERSION,
+};
 pub use observer::{
     BroadcastObserver, ChannelObserver, NullObserver, SubstrateEvent, SubstrateObserver,
 };
@@ -131,6 +143,7 @@ pub use portal::{
     ValidatedSpatialOverlay, DEMO_PRESET_PUBLIC_SEED_HEX, MAX_PORTAL_JSON_DEPTH,
     MAX_PORTAL_RECEIPT_BYTES,
 };
+pub use process::BoundedOutput;
 pub use receipt::{
     AuditReceipt, ModelProvenanceRecord, TriageReport, TriageStatus, AUDIT_RECEIPT_FILE,
     TRIAGE_REPORT_FILE,
@@ -150,10 +163,16 @@ pub use reporters::{
     SarifPhysicalLocation, SarifReporter, SarifResult, SarifRule, SarifRun, SarifTool,
     SARIF_SCHEMA_URI, SARIF_VERSION,
 };
+pub use rrweb::{
+    synthesize_manifest_from_telemetry, DomMutationSummary, RrwebInteraction, RrwebParser,
+    RrwebRawEvent, RrwebSession, SentryBreadcrumb, SentryCrashDump, SentryIngestion,
+    SentryStackFrame,
+};
 pub use stress::{
     PerturbationProfile, StressPassResult, StressQuorumReport, StressQuorumRunner,
     DEFAULT_PERTURBATION_JITTER_MS, DEFAULT_PERTURBATION_LATENCY_MS, GATE3_QUORUM_PASS_COUNT,
 };
+pub use swarm::{SwarmConfig, SwarmCoordinator, SwarmSummary, SwarmTask, SwarmTaskResult};
 pub use sweep::{run_sweep, SweepBugResult, SweepOptions, SweepReceipt};
 pub use trace::{is_ci_environment, launch_trace_viewer, TraceConfig, TraceLaunchOutcome};
 pub use video::{

@@ -13,13 +13,17 @@
 
 pub mod approval;
 pub mod bot;
+pub mod dashboard_cmd;
 pub mod git_packager;
 pub mod heal;
+pub mod ingest_cmd;
 pub mod intent;
 pub mod mcp;
+pub mod notary_cmd;
 pub mod permissions;
 pub mod session;
 pub mod shell;
+pub mod swarm_cmd;
 pub mod tui;
 pub mod ui;
 
@@ -258,10 +262,30 @@ pub struct ReproArgs {
     /// Live GitHub issue URL to ingest (e.g. https://github.com/owner/repo/issues/123)
     #[arg(long)]
     pub issue: Option<String>,
+
+    /// Synthesize responsive Playwright test matrix: e.g. chromium,firefox,webkit,mobile,tablet (Release 1.8)
+    #[arg(long)]
+    pub matrix: Option<String>,
+
+    /// Path to RRWeb JSON session recording (Release 1.8)
+    #[arg(long)]
+    pub rrweb: Option<PathBuf>,
+
+    /// File path or HTTPS URL to Sentry crash event JSON (Release 1.8)
+    #[arg(long)]
+    pub sentry: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Ingest production APM telemetry (RRWeb session recordings, Sentry crash dumps) into reproduction manifests (Release 1.8)
+    Ingest(Box<ingest_cmd::IngestArgs>),
+    /// Distributed Work-Stealing Triage Swarm (Release 1.8)
+    Swarm(Box<swarm_cmd::SwarmArgs>),
+    /// Live Streaming Real-Time Observability Dashboard (Release 1.8)
+    Dashboard(Box<dashboard_cmd::DashboardArgs>),
+    /// RFC 6962 Merkle Receipt Transparency Log & Key Notary (Release 1.8)
+    Notary(Box<notary_cmd::NotaryArgs>),
     /// Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (Release 1.7)
     Bot(Box<bot::BotArgs>),
     /// Sovereign Autonomous Healer: multi-turn Muse Spark loop & sub-60s macro pipeline (Release 1.6)
@@ -342,6 +366,9 @@ enum Commands {
         /// Emit machine-readable JSON output
         #[arg(long)]
         json: bool,
+        /// Synthesize responsive Playwright test matrix: e.g. chromium,firefox,webkit,mobile,tablet (Release 1.8)
+        #[arg(long)]
+        matrix: Option<String>,
     },
     /// Launch Model Context Protocol (MCP) JSON-RPC 2.0 server over stdio or Streamable HTTP/SSE (Release 1.5)
     Mcp {
@@ -539,6 +566,12 @@ struct ReproExtras {
     yes: bool,
     issue: Option<String>,
     url: Option<String>,
+    #[allow(dead_code)]
+    matrix: Option<String>,
+    #[allow(dead_code)]
+    rrweb: Option<PathBuf>,
+    #[allow(dead_code)]
+    sentry: Option<String>,
 }
 
 fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras) {
@@ -584,6 +617,10 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         apply,
         yes,
         issue,
+        matrix,
+        rrweb,
+        sentry,
+        ..
     } = args;
 
     if let Some(ref raw_url) = url {
@@ -721,6 +758,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         yes,
         issue: issue.clone(),
         url,
+        matrix,
+        rrweb,
+        sentry,
     };
 
     if let Some(manifest_path) = manifest {
@@ -1869,6 +1909,7 @@ pub fn handle_inoculate(
     output: PathBuf,
     package_pr: bool,
     json_output: bool,
+    matrix: Option<String>,
     theme: &Theme,
 ) {
     let repo_dir = TaskManifest::assert_safe_path(&repo, "repo")
@@ -1897,13 +1938,44 @@ pub fn handle_inoculate(
         &repo_dir
     };
 
-    let (spec, entry, written_path) = replayfix_core::InoculationGenerator::inoculate_workspace(
-        &fixture,
-        target_root,
-        &out_dir,
-        None,
-    )
-    .unwrap_or_else(|e| fail(e, "Failed to generate inoculation spec", theme));
+    let (spec, entry, written_path) = if let Some(ref matrix_str) = matrix {
+        let (engines, presets) = replayfix_core::inoculate::parse_matrix_arg(matrix_str);
+        let spec = replayfix_core::InoculationGenerator::synthesize_matrix_spec(
+            &fixture, &engines, &presets,
+        )
+        .unwrap_or_else(|e| fail(e, "Failed to generate matrix inoculation spec", theme));
+        let full_spec_path = target_root.join(&spec.spec_rel_path);
+        if let Some(parent) = full_spec_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        replayfix_core::artifacts::atomic_write_file(
+            &full_spec_path,
+            spec.typescript_content.as_bytes(),
+        )
+        .unwrap_or_else(|e| fail(e, "Failed to write matrix spec", theme));
+        let patch_sha = replayfix_core::digest::sha256_hex(fixture.builtin_diff.as_bytes());
+        let entry = replayfix_core::inoculate::InoculationEntry {
+            bug_id: fixture.task_id.to_string(),
+            spec_path: spec.spec_rel_path.clone(),
+            spec_sha256: spec.spec_sha256.clone(),
+            patch_sha256: patch_sha,
+            contract_sha256: fixture.contract.digest().unwrap_or_default(),
+            grounded_selector: spec.grounded_selector.clone(),
+            execution_time_ms: 0,
+            created_at: replayfix_core::receipt::timestamp_now(),
+        };
+        let mut registry = replayfix_core::inoculate::InoculationRegistry::load_or_new(&out_dir);
+        let _ = registry.upsert_and_save(&out_dir, entry.clone());
+        (spec, entry, full_spec_path)
+    } else {
+        replayfix_core::InoculationGenerator::inoculate_workspace(
+            &fixture,
+            target_root,
+            &out_dir,
+            None,
+        )
+        .unwrap_or_else(|e| fail(e, "Failed to generate inoculation spec", theme))
+    };
 
     let mut pr_result = None;
     if package_pr {
@@ -2119,6 +2191,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stderr_theme = Theme::for_stderr(cli.color, mode);
 
     match cli.command {
+        Some(Commands::Ingest(args)) => {
+            let code = ingest_cmd::run_ingest(*args)?;
+            exit(code);
+        }
+        Some(Commands::Swarm(args)) => {
+            let code = swarm_cmd::run_swarm_cmd(*args)?;
+            exit(code);
+        }
+        Some(Commands::Dashboard(args)) => {
+            let code = dashboard_cmd::run_dashboard_cmd(*args)?;
+            exit(code);
+        }
+        Some(Commands::Notary(args)) => {
+            let code = notary_cmd::run_notary_cmd(*args)?;
+            exit(code);
+        }
         Some(Commands::Bot(args)) => bot::run_bot(*args, &stdout_theme)?,
         Some(Commands::Heal(args)) => heal::run_heal(*args, &stdout_theme)?,
         Some(Commands::Doctor { json }) => run_doctor(json, &stdout_theme)?,
@@ -2160,8 +2248,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output,
             package_pr,
             json,
+            matrix,
         }) => {
-            handle_inoculate(bug, repo, output, package_pr, json, &stdout_theme);
+            handle_inoculate(bug, repo, output, package_pr, json, matrix, &stdout_theme);
         }
         Some(Commands::Mcp {
             transport,

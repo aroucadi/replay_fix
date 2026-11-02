@@ -147,9 +147,13 @@ impl TaskManifest {
         }
 
         let content = std::fs::read_to_string(path)?;
-        let manifest: TaskManifest = serde_json::from_str(&content)
-            .map_err(|e| CoreError::Manifest(format!("Invalid manifest JSON schema: {}", e)))?;
+        Self::parse_str(&content)
+    }
 
+    /// Parse and validate a task manifest from a JSON string
+    pub fn parse_str(content: &str) -> Result<Self> {
+        let manifest: TaskManifest = serde_json::from_str(content)
+            .map_err(|e| CoreError::Manifest(format!("Invalid manifest JSON schema: {}", e)))?;
         manifest.validate()?;
         Ok(manifest)
     }

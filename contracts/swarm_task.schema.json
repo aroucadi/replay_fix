@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://replayfix.dev/schemas/v1.8/swarm_task.schema.json",
+  "title": "SwarmSummary",
+  "description": "Schema for distributed swarm triage job summaries and per-worker outcomes.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "timestamp",
+    "workers",
+    "total_tasks",
+    "completed_tasks",
+    "failed_tasks",
+    "tasks"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.8.0"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "workers": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "total_tasks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completed_tasks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed_tasks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "status", "worker_id", "duration_ms"],
+        "properties": {
+          "task_id": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["VERIFIED_HEALED", "FAILED", "QUARANTINED", "AMBIGUOUS"]
+          },
+          "worker_id": { "type": "integer" },
+          "port": { "type": "integer" },
+          "receipt_path": { "type": "string" },
+          "duration_ms": { "type": "integer" },
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}
