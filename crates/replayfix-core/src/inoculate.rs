@@ -466,9 +466,18 @@ impl InoculationGenerator {
 
         ts.push_str("const VIEWPORT_PRESETS = [\n");
         for p in presets {
+            let (cal_x, cal_y) = calibrate_viewport_coords(
+                f64::from(fixture.click_x),
+                f64::from(fixture.click_y),
+                1280.0,
+                720.0,
+                f64::from(p.width),
+                f64::from(p.height),
+                p.dpr,
+            );
             ts.push_str(&format!(
-                "  {{ name: '{}', width: {}, height: {}, dpr: {}, hasTouch: {} }},\n",
-                p.name, p.width, p.height, p.dpr, p.has_touch
+                "  {{ name: '{}', width: {}, height: {}, dpr: {}, hasTouch: {}, calibratedX: {:.2}, calibratedY: {:.2} }},\n",
+                p.name, p.width, p.height, p.dpr, p.has_touch, cal_x, cal_y
             ));
         }
         ts.push_str("];\n\n");
@@ -541,6 +550,18 @@ impl ViewportPreset {
     }
 
     #[must_use]
+    pub fn mobile_pixel7() -> Self {
+        Self {
+            name: "Mobile Portrait (Pixel 7)".to_string(),
+            width: 412,
+            height: 915,
+            dpr: 2.625,
+            is_mobile: true,
+            has_touch: true,
+        }
+    }
+
+    #[must_use]
     pub fn tablet() -> Self {
         Self {
             name: "Tablet (iPad Air)".to_string(),
@@ -576,8 +597,11 @@ pub fn parse_matrix_arg(raw: &str) -> (Vec<String>, Vec<ViewportPreset>) {
             "chromium" | "chrome" => engines.push("chromium".to_string()),
             "firefox" => engines.push("firefox".to_string()),
             "webkit" | "safari" => engines.push("webkit".to_string()),
-            "mobile" | "mobile-portrait" | "phone" => {
+            "mobile" | "mobile-portrait" | "phone" | "iphone" | "iphone14" => {
                 presets.push(ViewportPreset::mobile_portrait());
+            }
+            "pixel7" | "pixel-7" | "android" => {
+                presets.push(ViewportPreset::mobile_pixel7());
             }
             "tablet" | "ipad" => presets.push(ViewportPreset::tablet()),
             "desktop" | "desktop-wide" => presets.push(ViewportPreset::desktop()),

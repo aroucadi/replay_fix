@@ -7,228 +7,624 @@
   <title>ReplayFix Live Streaming Dashboard — v1.8.0</title>
   <style>
     :root {
-      --bg-0: #060911;
-      --bg-1: #0c1322;
-      --bg-2: #141f36;
-      --bg-3: #1c2c4c;
-      --border: #24385d;
-      --text-0: #f1f5f9;
-      --text-1: #cbd5e1;
-      --text-2: #64748b;
+      --bg-base: #060913;
+      --bg-surface-0: #0a0f1d;
+      --bg-surface-1: #0f172a;
+      --bg-surface-2: #162238;
+      --bg-surface-3: #1e304f;
+      --border-subtle: rgba(148, 163, 184, 0.12);
+      --border-medium: rgba(148, 163, 184, 0.22);
+      --border-focus: #38bdf8;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-tertiary: #64748b;
       --brand: #38bdf8;
-      --brand-glow: rgba(56, 189, 248, 0.25);
-      --green: #22c55e;
-      --green-bg: rgba(34, 197, 94, 0.16);
+      --brand-glow: rgba(56, 189, 248, 0.18);
+      --emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.18);
       --amber: #f59e0b;
-      --amber-bg: rgba(245, 158, 11, 0.16);
-      --red: #ef4444;
-      --red-bg: rgba(239, 68, 68, 0.16);
-      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --amber-glow: rgba(245, 158, 11, 0.18);
+      --rose: #f43f5e;
+      --rose-glow: rgba(244, 63, 94, 0.18);
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.18);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Fira Code", Menlo, monospace;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+      --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-subtle);
+      --shadow-glow: 0 0 25px -5px var(--brand-glow);
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
-      background: var(--bg-0);
-      color: var(--text-0);
+      background: var(--bg-base);
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08) 0%, transparent 60%),
+        radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.04) 0%, transparent 50%);
+      color: var(--text-primary);
       font-family: var(--font-sans);
+      font-size: 14px;
       line-height: 1.5;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
+    /* Top Navigation Header */
     header {
-      background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 1rem 2rem;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0.85rem 2rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
       gap: 1rem;
     }
-    .brand { display: flex; align-items: center; gap: 0.8rem; }
-    .brand-logo {
-      width: 38px; height: 38px; border-radius: 8px;
-      background: var(--brand-glow); border: 1px solid var(--brand);
-      display: flex; align-items: center; justify-content: center;
-      color: var(--brand); font-family: var(--font-mono); font-weight: 800; font-size: 1.1rem;
+    .brand-icon-wrap {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.25) 0%, rgba(168, 85, 247, 0.25) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px -2px var(--brand-glow);
     }
-    .brand h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
-    .brand p { font-size: 0.8rem; color: var(--text-2); }
-    .live-badge {
-      display: flex; align-items: center; gap: 0.5rem;
-      background: var(--green-bg); color: var(--green); border: 1px solid var(--green);
-      padding: 0.35rem 0.8rem; border-radius: 999px; font-family: var(--font-mono); font-size: 0.8rem; font-weight: 600;
+    .brand-icon-wrap svg {
+      width: 22px;
+      height: 22px;
+      fill: none;
+      stroke: var(--brand);
+      stroke-width: 2.2;
     }
-    .pulse-dot {
-      width: 8px; height: 8px; border-radius: 50%; background: var(--green);
-      box-shadow: 0 0 10px var(--green);
-      animation: pulse 1.5s infinite;
+    .brand-titles h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
     }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(1.3); }
+    .brand-titles h1 span.version-tag {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.15rem 0.45rem;
+      border-radius: var(--radius-sm);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--brand);
+      border: 1px solid rgba(56, 189, 248, 0.25);
     }
+    .brand-titles p {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      margin-top: 0.1rem;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .system-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: var(--radius-full);
+      background: var(--bg-surface-0);
+      border: 1px solid var(--border-subtle);
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+    .status-live-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: var(--radius-full);
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--emerald);
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .radar-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--emerald);
+      position: relative;
+    }
+    .radar-dot::after {
+      content: "";
+      position: absolute;
+      top: -4px;
+      left: -4px;
+      right: -4px;
+      bottom: -4px;
+      border-radius: 50%;
+      border: 1.5px solid var(--emerald);
+      animation: ripple 1.8s infinite cubic-bezier(0, 0.2, 0.8, 1);
+    }
+    @keyframes ripple {
+      0% { transform: scale(0.6); opacity: 1; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    /* Main Layout */
     main {
       flex: 1;
-      padding: 1.5rem 2rem;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto 1fr;
+      padding: 1.75rem 2rem 2.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
       gap: 1.5rem;
     }
+    /* Metric Strip */
+    .metrics-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+    }
+    @media (max-width: 1024px) {
+      .metrics-bar { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 640px) {
+      .metrics-bar { grid-template-columns: 1fr; }
+    }
+    .metric-card {
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 1.1rem 1.25rem;
+      box-shadow: var(--shadow-card);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .metric-card:hover {
+      border-color: var(--border-medium);
+      transform: translateY(-2px);
+    }
+    .metric-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.4), transparent);
+    }
+    .metric-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .metric-lbl {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+    }
+    .metric-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brand);
+    }
+    .metric-val {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+    .metric-sub {
+      font-size: 0.74rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    /* Workspace 2-Column Split View */
+    .stream-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 1100px) {
+      .stream-grid { grid-template-columns: 1fr; }
+    }
     .card {
-      background: var(--bg-1);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.25rem;
+      background: var(--bg-surface-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem 1.4rem;
+      box-shadow: var(--shadow-card);
       display: flex;
       flex-direction: column;
       gap: 1rem;
     }
     .card-header {
-      display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+    .card-title-icon {
+      width: 26px;
+      height: 26px;
+      border-radius: var(--radius-sm);
+      background: var(--brand-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brand);
     }
     .card-title {
-      font-size: 0.95rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.05em; color: var(--brand); display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
     }
+    .badge-soft {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: var(--radius-full);
+      background: var(--bg-surface-2);
+      color: var(--brand);
+      border: 1px solid var(--border-subtle);
+    }
+    /* Screencast Container */
     .screencast-container {
-      background: #000;
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background: #020409;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
       aspect-ratio: 16 / 9;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
       overflow: hidden;
+      box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
     }
     .screencast-img {
-      max-width: 100%; max-height: 100%; object-fit: contain;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      image-rendering: auto;
     }
-    .stream-meta {
-      position: absolute; bottom: 8px; left: 8px;
-      background: rgba(0, 0, 0, 0.75); padding: 4px 8px; border-radius: 4px;
-      font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-1);
+    .stream-meta-overlay {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: rgba(8, 12, 22, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 0.35rem 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      font-family: var(--font-mono);
+      font-size: 0.73rem;
+      color: var(--text-secondary);
     }
+    .stream-meta-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald);
+    }
+    /* Reasoning Feed */
     .reasoning-feed {
-      flex: 1; overflow-y: auto; max-height: 380px;
-      display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.85rem;
+      flex: 1;
+      overflow-y: auto;
+      max-height: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      padding-right: 0.5rem;
+    }
+    .reasoning-feed::-webkit-scrollbar {
+      width: 6px;
+    }
+    .reasoning-feed::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .reasoning-feed::-webkit-scrollbar-thumb {
+      background: var(--bg-surface-3);
+      border-radius: var(--radius-full);
     }
     .feed-item {
-      background: var(--bg-2); border-left: 3px solid var(--brand);
-      padding: 0.75rem; border-radius: 0 8px 8px 0;
+      background: var(--bg-surface-0);
+      border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--brand);
+      padding: 0.85rem 1rem;
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      transition: background 0.15s, border-color 0.15s;
     }
-    .feed-meta { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-2); margin-bottom: 0.25rem; }
-    .feed-body { color: var(--text-1); word-break: break-word; }
+    .feed-item:hover {
+      background: rgba(22, 34, 56, 0.4);
+      border-color: var(--border-medium);
+    }
+    .feed-item-tool {
+      border-left-color: var(--amber);
+    }
+    .feed-item-patch {
+      border-left-color: var(--emerald);
+    }
+    .feed-meta {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.35rem;
+    }
+    .feed-meta span.model-slug {
+      color: var(--brand);
+    }
+    .feed-body {
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    /* Side-by-Side Visual Proof Diff */
+    .diff-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
     .diff-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+    @media (max-width: 900px) {
+      .diff-grid { grid-template-columns: 1fr; }
     }
     .diff-pane {
-      background: var(--bg-2); border: 1px solid var(--border);
-      border-radius: 8px; padding: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem;
-      max-height: 240px; overflow-y: auto;
+      background: var(--bg-surface-0);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
-    .diff-pane-title { font-size: 0.75rem; color: var(--text-2); margin-bottom: 0.5rem; }
-    .tag-red { color: var(--red); font-weight: 600; }
-    .tag-green { color: var(--green); font-weight: 600; }
-    .metrics-bar {
-      grid-column: 1 / -1;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1rem;
+    .diff-pane-header {
+      padding: 0.65rem 1rem;
+      background: rgba(15, 23, 42, 0.6);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
-    .metric-pill {
-      background: var(--bg-2); border: 1px solid var(--border);
-      border-radius: 8px; padding: 1rem; text-align: center;
+    .diff-pane-header.red-header {
+      color: var(--rose);
+      background: rgba(244, 63, 94, 0.06);
     }
-    .metric-val { font-size: 1.5rem; font-weight: 700; color: var(--text-0); font-family: var(--font-mono); }
-    .metric-lbl { font-size: 0.75rem; color: var(--text-2); text-transform: uppercase; margin-top: 0.25rem; }
+    .diff-pane-header.green-header {
+      color: var(--emerald);
+      background: rgba(16, 185, 129, 0.06);
+    }
+    .diff-pane pre {
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      line-height: 1.5;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--text-secondary);
+    }
+    .tag-red { color: var(--rose); font-weight: 600; }
+    .tag-green { color: var(--emerald); font-weight: 600; }
+    /* Accessibility focus */
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
   </style>
 </head>
 <body>
+  <!-- Header Bar -->
   <header>
-    <div class="brand">
-      <div class="brand-logo">RF</div>
-      <div>
-        <h1>ReplayFix Live Streaming Dashboard</h1>
+    <div class="brand-group">
+      <div class="brand-icon-wrap" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+      </div>
+      <div class="brand-titles">
+        <h1>ReplayFix Live Streaming Dashboard <span class="version-tag">v1.8.0</span></h1>
         <p>Real-Time CDP Screencast, Distributed Swarm Telemetry &amp; Muse Deliberation Engine</p>
       </div>
     </div>
-    <div class="live-badge">
-      <div class="pulse-dot"></div>
-      <span id="conn-status">WS CONNECTED</span>
+    <div class="header-actions">
+      <div class="system-pill" title="Target Repository Worktree Integrity">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--brand);"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        <span>&Delta;repo = 0</span>
+      </div>
+      <div class="status-live-pill" id="live-badge">
+        <div class="radar-dot"></div>
+        <span id="conn-status">WS CONNECTED</span>
+      </div>
     </div>
   </header>
 
+  <!-- Main Observability Workspace -->
   <main>
-    <div class="metrics-bar">
-      <div class="metric-pill">
+    <!-- Top Fleet Metrics -->
+    <section class="metrics-bar" aria-label="Fleet Performance Metrics">
+      <div class="metric-card">
+        <div class="metric-card-top">
+          <span class="metric-lbl">Active Swarm Workers</span>
+          <div class="metric-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          </div>
+        </div>
         <div class="metric-val" id="metric-workers">4</div>
-        <div class="metric-lbl">Active Swarm Workers</div>
+        <div class="metric-sub">Work-stealing isolation (:0 ports)</div>
       </div>
-      <div class="metric-pill">
+
+      <div class="metric-card">
+        <div class="metric-card-top">
+          <span class="metric-lbl">Screencast Frame Rate</span>
+          <div class="metric-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+          </div>
+        </div>
         <div class="metric-val" id="metric-fps">30.0</div>
-        <div class="metric-lbl">Screencast FPS</div>
+        <div class="metric-sub">CDP Page.startScreencast stream</div>
       </div>
-      <div class="metric-pill">
+
+      <div class="metric-card">
+        <div class="metric-card-top">
+          <span class="metric-lbl">Muse Deliberation Speed</span>
+          <div class="metric-icon" aria-hidden="true" style="color:var(--purple); background:var(--purple-glow);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          </div>
+        </div>
         <div class="metric-val" id="metric-speed">305 tok/s</div>
-        <div class="metric-lbl">Muse Spark 1.3 Deliberation</div>
+        <div class="metric-sub">Meta Muse Spark 1.3 Agent Loop</div>
       </div>
-      <div class="metric-pill">
+
+      <div class="metric-card">
+        <div class="metric-card-top">
+          <span class="metric-lbl">Quarantined Flaky Tests</span>
+          <div class="metric-icon" aria-hidden="true" style="color:var(--emerald); background:var(--emerald-glow);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          </div>
+        </div>
         <div class="metric-val" id="metric-quarantine">0</div>
-        <div class="metric-lbl">Quarantined Tests</div>
+        <div class="metric-sub">Gate 3 quorum (100% pass parity)</div>
       </div>
-    </div>
+    </section>
 
-    <!-- CDP Screencast Stream -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Live Chromium CDP Viewport Screencast</div>
-        <span class="live-badge" style="background: var(--brand-glow); color: var(--brand); border-color: var(--brand)">
-          1280x720 @ 1.0 DPR
-        </span>
-      </div>
-      <div class="screencast-container">
-        <img id="screencast-view" class="screencast-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'%3E%3Crect width='1280' height='720' fill='%23080d1a'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2338bdf8' font-family='monospace' font-size='24'%3EStreaming CDP Viewport...%3C/text%3E%3C/svg%3E" alt="CDP Screencast Frame">
-        <div class="stream-meta" id="stream-meta">Stream: Connected | Latency: 18ms</div>
-      </div>
-    </div>
+    <!-- 2-Column Split: Viewport & Deliberation -->
+    <div class="stream-grid">
+      <!-- Live CDP Screencast Stream -->
+      <section class="card" aria-label="Chromium Viewport Stream">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-title-icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+            </div>
+            <h2 class="card-title">Live Chromium CDP Viewport Screencast</h2>
+          </div>
+          <span class="badge-soft">1280 &times; 720 @ 1.0 DPR</span>
+        </div>
+        <div class="screencast-container">
+          <img id="screencast-view" class="screencast-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'%3E%3Crect width='1280' height='720' fill='%23060913'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2338bdf8' font-family='monospace' font-size='20'%3EWaiting for CDP viewport frames...%3C/text%3E%3C/svg%3E" alt="Live CDP Screencast Frame">
+          <div class="stream-meta-overlay" id="stream-meta">
+            <div class="stream-meta-dot"></div>
+            <span>Stream: Connected &bull; Latency: 18ms</span>
+          </div>
+        </div>
+      </section>
 
-    <!-- Turn-by-Turn Deliberation Feed (SSE) -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Meta Muse Spark Deliberation Stream (SSE)</div>
-        <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-2)">Turn 1 / 3</span>
-      </div>
-      <div class="reasoning-feed" id="reasoning-feed">
-        <div class="feed-item">
-          <div class="feed-meta">MUSE-SPARK-1.3 • Turn 1 • Intent Grounding</div>
-          <div class="feed-body">Grounded user click at coordinates (345.5, 678.0) matching button#add-to-cart. DOM mutation failed to update cart count badge.</div>
+      <!-- Turn-by-Turn Muse Spark Deliberation Stream -->
+      <section class="card" aria-label="Deliberation Stream">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div class="card-title-icon" aria-hidden="true" style="color:var(--purple); background:var(--purple-glow);">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+            <h2 class="card-title">Meta Muse Spark Deliberation Stream (SSE)</h2>
+          </div>
+          <span class="badge-soft" style="color:var(--purple);">Turn 1 / 3 Active</span>
         </div>
-        <div class="feed-item" style="border-left-color: var(--amber);">
-          <div class="feed-meta">TOOL EXECUTION • inspect_trace</div>
-          <div class="feed-body">Inspected Playwright trace rf_trace.zip: TypeError: Cannot read property of undefined (reading 'price') in src/components/CartSummary.tsx:45.</div>
+        <div class="reasoning-feed" id="reasoning-feed" role="log" aria-live="polite">
+          <div class="feed-item">
+            <div class="feed-meta">
+              <span class="model-slug">MUSE-SPARK-1.3</span>
+              <span>Turn 1 &bull; Intent Grounding</span>
+            </div>
+            <div class="feed-body">Grounded user click at coordinates (345.5, 678.0) matching button#add-to-cart. DOM mutation failed to update cart count badge.</div>
+          </div>
+          <div class="feed-item feed-item-tool">
+            <div class="feed-meta">
+              <span style="color:var(--amber);">TOOL EXECUTION</span>
+              <span>inspect_trace</span>
+            </div>
+            <div class="feed-body">Inspected Playwright trace rf_trace.zip: TypeError: Cannot read property of undefined (reading 'price') in src/components/CartSummary.tsx:45.</div>
+          </div>
+          <div class="feed-item feed-item-patch">
+            <div class="feed-meta">
+              <span style="color:var(--emerald);">MUSE-WONDER-1.0</span>
+              <span>Block Patch Synthesis</span>
+            </div>
+            <div class="feed-body">Synthesized surgical AST replacement block for CartSummary.tsx enforcing optional chaining and fallback quantity calculation.</div>
+          </div>
         </div>
-        <div class="feed-item" style="border-left-color: var(--green);">
-          <div class="feed-meta">MUSE-WONDER-1.0 • Block Patch Synthesis</div>
-          <div class="feed-body">Synthesized surgical AST replacement block for CartSummary.tsx enforcing optional chaining and fallback quantity calculation.</div>
-        </div>
-      </div>
+      </section>
     </div>
 
     <!-- Side-by-Side Visual Proof Diff -->
-    <div class="card" style="grid-column: 1 / -1;">
+    <section class="card" aria-label="Visual Proof Diff">
       <div class="card-header">
-        <div class="card-title">Side-by-Side Visual Proof &amp; ariaSnapshot Grounding Diff</div>
-        <span class="live-badge" style="background: var(--green-bg); color: var(--green); border-color: var(--green)">
-          Gate 1 RED ➔ Gate 2 GREEN ➔ Gate 3 PASSED
+        <div class="card-title-group">
+          <div class="card-title-icon" aria-hidden="true" style="color:var(--emerald); background:var(--emerald-glow);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+          <h2 class="card-title">Side-by-Side Visual Proof &amp; ariaSnapshot Grounding Diff</h2>
+        </div>
+        <span class="status-live-pill" style="font-size:0.75rem;">
+          Gate 1 RED &rarr; Gate 2 GREEN &rarr; Gate 3 PASSED
         </span>
       </div>
       <div class="diff-grid">
         <div class="diff-pane">
-          <div class="diff-pane-title tag-red">Gate 1 RED Baseline (Unrepaired)</div>
+          <div class="diff-pane-header red-header">
+            <span>Gate 1 RED Baseline (Unrepaired)</span>
+            <span class="tag-red">FAILING ORACLE</span>
+          </div>
           <pre>- - banner:
 -   - heading "MetaPulse Store" [level=1]
 -   - button "Cart (0)"
@@ -237,7 +633,10 @@
 -   - button "Add to Cart" [focused]</pre>
         </div>
         <div class="diff-pane">
-          <div class="diff-pane-title tag-green">Gate 2 GREEN Verified (Repaired)</div>
+          <div class="diff-pane-header green-header">
+            <span>Gate 2 GREEN Verified (Repaired)</span>
+            <span class="tag-green">STABILITY 2/2 PASS</span>
+          </div>
           <pre>+ - banner:
 +   - heading "MetaPulse Store" [level=1]
 +   - button "Cart (1)"
@@ -246,7 +645,7 @@
 +   - button "Add to Cart"</pre>
         </div>
       </div>
-    </div>
+    </section>
   </main>
 
   <script>
@@ -274,7 +673,9 @@
             const data = JSON.parse(evt.data);
             if (data.frame_data && data.frame_data.base64_data) {
               imgEl.src = `data:image/${data.frame_data.format || 'png'};base64,${data.frame_data.base64_data}`;
-              if (metaEl) metaEl.textContent = `Stream: Live | Frame: ${data.timestamp || 'now'}`;
+              if (metaEl) {
+                metaEl.innerHTML = `<div class="stream-meta-dot"></div><span>Stream: Live &bull; Frame: ${data.timestamp || 'now'}</span>`;
+              }
             }
           } catch (e) {}
         };
@@ -287,18 +688,35 @@
       if (typeof EventSource !== 'undefined') {
         try {
           const es = new EventSource(sseUrl);
-          es.onmessage = (evt) => {
+          const handleSseEvent = (evt) => {
             try {
               const data = JSON.parse(evt.data);
-              if (data.reasoning_data) {
+              if (data.reasoning_data && feedEl) {
                 const item = document.createElement('div');
                 item.className = 'feed-item';
-                item.innerHTML = `<div class="feed-meta">${data.reasoning_data.model || 'AGENT'} • Turn ${data.reasoning_data.turn || 1}</div><div class="feed-body">${data.reasoning_data.token || ''}</div>`;
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'feed-meta';
+                const slugSpan = document.createElement('span');
+                slugSpan.className = 'model-slug';
+                slugSpan.textContent = data.reasoning_data.model || 'AGENT';
+                const turnSpan = document.createElement('span');
+                turnSpan.textContent = `Turn ${data.reasoning_data.turn || 1}`;
+                metaDiv.appendChild(slugSpan);
+                metaDiv.appendChild(turnSpan);
+
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'feed-body';
+                bodyDiv.textContent = data.reasoning_data.token || '';
+
+                item.appendChild(metaDiv);
+                item.appendChild(bodyDiv);
                 feedEl.appendChild(item);
                 feedEl.scrollTop = feedEl.scrollHeight;
               }
             } catch (e) {}
           };
+          es.onmessage = handleSseEvent;
+          es.addEventListener('reasoning', handleSseEvent);
         } catch (e) {}
       }
 

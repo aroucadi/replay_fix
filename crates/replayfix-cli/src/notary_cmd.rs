@@ -72,7 +72,11 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
         NotaryActions::Append { receipt, log, json } => {
             let log_path =
                 log.unwrap_or_else(|| PathBuf::from(".replayfix").join(TRANSPARENCY_LOG_FILE));
-            let keypair = KeypairManager::generate();
+            let key_dir = log_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".replayfix"));
+            let keypair = KeypairManager::load_or_generate(Some(key_dir))
+                .unwrap_or_else(|_| KeypairManager::generate());
 
             let mut trans_log = TransparencyLog::load_or_new(&log_path, &keypair)?;
             let receipt_raw = fs::read_to_string(&receipt).map_err(|e| {
@@ -93,7 +97,6 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
                     "leaf_index": entry.leaf_index,
                     "task_id": entry.task_id,
                     "leaf_hash": entry.leaf_hash,
-                    "new_tree_size": trans_log.tree_size,
                     "tree_size": trans_log.tree_size,
                     "merkle_root": trans_log.merkle_root,
                     "log_path": log_path.to_string_lossy(),
@@ -117,6 +120,12 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
         } => {
             let log_path =
                 log.unwrap_or_else(|| PathBuf::from(".replayfix").join(TRANSPARENCY_LOG_FILE));
+            if !log_path.exists() {
+                return Err(CoreError::Notary(format!(
+                    "Transparency log does not exist at {}",
+                    log_path.display()
+                )));
+            }
             let keypair = KeypairManager::generate();
             let trans_log = TransparencyLog::load_or_new(&log_path, &keypair)?;
 
@@ -140,9 +149,8 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
                 println!("    Signer Public:  {}", trans_log.attestation.public_key);
             } else {
                 eprintln!("==> ReplayFix Notary: Transparency Log Verification FAILED [CORRUPTED]");
-                return Ok(40); // RECEIPT_VERIFICATION_FAILED
             }
-            Ok(0)
+            Ok(if valid { 0 } else { 40 })
         }
         NotaryActions::ConsistencyProof {
             first,
@@ -152,17 +160,31 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
         } => {
             let log_path =
                 log.unwrap_or_else(|| PathBuf::from(".replayfix").join(TRANSPARENCY_LOG_FILE));
+            if !log_path.exists() {
+                return Err(CoreError::Notary(format!(
+                    "Transparency log does not exist at {}",
+                    log_path.display()
+                )));
+            }
             let keypair = KeypairManager::generate();
             let trans_log = TransparencyLog::load_or_new(&log_path, &keypair)?;
 
             let proof = trans_log.generate_consistency_proof(first, second)?;
+            let root_m = trans_log.root_at_size(first)?;
+            let root_n = trans_log.root_at_size(second)?;
+            let first_root_hex = trans_log.root_hex_at_size(first)?;
+            let second_root_hex = trans_log.root_hex_at_size(second)?;
+            let verified =
+                TransparencyLog::verify_consistency_proof(first, second, &root_m, &root_n, &proof)?;
 
             if json {
                 let out = serde_json::json!({
-                    "status": "PROOF_GENERATED",
-                    "verified": true,
+                    "status": if verified { "PROOF_VERIFIED" } else { "PROOF_INVALID" },
+                    "verified": verified,
                     "first": first,
                     "second": second,
+                    "first_root": first_root_hex,
+                    "second_root": second_root_hex,
                     "proof_nodes_count": proof.len(),
                     "proof": proof,
                 });
@@ -170,12 +192,15 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
             } else {
                 println!("==> ReplayFix Notary: RFC 6962 Consistency Proof Generated");
                 println!("    Snapshot Range:  Size {first} ➔ Size {second}");
+                println!("    First Root:      {first_root_hex}");
+                println!("    Second Root:     {second_root_hex}");
+                println!("    Verified:        {verified}");
                 println!("    Proof Nodes:     {}", proof.len());
                 for (idx, node) in proof.iter().enumerate() {
                     println!("    [{idx}] {node}");
                 }
             }
-            Ok(0)
+            Ok(if verified { 0 } else { 40 })
         }
     }
 }

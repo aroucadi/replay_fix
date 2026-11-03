@@ -7,9 +7,10 @@
 //! - Shared `RatePool` and `CircuitBreaker` token governance.
 //! - Canonical `swarm_summary.json` generation adhering to `contracts/swarm_task.schema.json`.
 
-use crate::digest::canonical_json;
+use crate::digest::{canonical_json, sha256_hex};
 use crate::engine::GateVerdict;
 use crate::error::{CoreError, Result};
+use crate::fixtures::Fixture;
 use crate::fsm::Phase;
 use crate::gateway::{CircuitBreaker, RatePool};
 use crate::manifest::TaskManifest;
@@ -24,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Single task specification dispatched to the swarm.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,8 +91,8 @@ impl Default for SwarmConfig {
 #[derive(Debug)]
 pub struct SwarmCoordinator {
     config: SwarmConfig,
-    _rate_pool: Arc<Mutex<RatePool>>,
-    _circuit_breaker: Arc<Mutex<CircuitBreaker>>,
+    rate_pool: Arc<Mutex<RatePool>>,
+    circuit_breaker: Arc<Mutex<CircuitBreaker>>,
 }
 
 impl SwarmCoordinator {
@@ -108,9 +109,27 @@ impl SwarmCoordinator {
 
         Self {
             config,
-            _rate_pool: rate_pool,
-            _circuit_breaker: circuit_breaker,
+            rate_pool,
+            circuit_breaker,
         }
+    }
+
+    /// Return a snapshot of the shared `RatePool`.
+    pub fn rate_pool_snapshot(&self) -> Result<RatePool> {
+        let lock = self
+            .rate_pool
+            .lock()
+            .map_err(|_| CoreError::Swarm("Failed to lock RatePool".to_string()))?;
+        Ok(lock.clone())
+    }
+
+    /// Return a snapshot of the shared `CircuitBreaker`.
+    pub fn circuit_breaker_snapshot(&self) -> Result<CircuitBreaker> {
+        let lock = self
+            .circuit_breaker
+            .lock()
+            .map_err(|_| CoreError::Swarm("Failed to lock CircuitBreaker".to_string()))?;
+        Ok(lock.clone())
     }
 
     /// Execute a collection of tasks across worker threads using a work-stealing queue.
@@ -143,6 +162,8 @@ impl SwarmCoordinator {
         for worker_id in 0..num_workers {
             let worker_queue = Arc::clone(&queue);
             let worker_results = Arc::clone(&results);
+            let worker_rate_pool = Arc::clone(&self.rate_pool);
+            let worker_cb = Arc::clone(&self.circuit_breaker);
             let config = self.config.clone();
 
             let handle = thread::spawn(move || -> Result<()> {
@@ -160,6 +181,47 @@ impl SwarmCoordinator {
                     };
 
                     let task_start = Instant::now();
+                    let now_ms = task_start.elapsed().as_millis() as u64;
+
+                    // Check CircuitBreaker state before executing
+                    {
+                        let mut cb = worker_cb.lock().map_err(|_| {
+                            CoreError::Swarm("Failed to lock CircuitBreaker".to_string())
+                        })?;
+                        if !cb.allow_request(now_ms) {
+                            let mut res_lock = worker_results.lock().map_err(|_| {
+                                CoreError::Swarm("Failed to lock results list".to_string())
+                            })?;
+                            res_lock.push(SwarmTaskResult {
+                                task_id: task.task_id,
+                                status: "QUARANTINED".to_string(),
+                                worker_id,
+                                port: 0,
+                                receipt_path: None,
+                                duration_ms: 0,
+                                error: Some("CircuitBreaker is open".to_string()),
+                            });
+                            continue;
+                        }
+                    }
+
+                    // Acquire token quota from shared RatePool with bounded backoff
+                    const ESTIMATED_TOKENS: u64 = 1_200;
+                    let mut acquired = false;
+                    for attempt in 0..5 {
+                        let res = {
+                            let mut rp = worker_rate_pool.lock().map_err(|_| {
+                                CoreError::Swarm("Failed to lock RatePool".to_string())
+                            })?;
+                            rp.try_acquire(ESTIMATED_TOKENS)
+                        };
+                        if res.is_ok() {
+                            acquired = true;
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(5 * (attempt + 1)));
+                    }
+
                     let port_guard = EphemeralPort::allocate()?;
                     let port = port_guard.get();
 
@@ -188,6 +250,20 @@ impl SwarmCoordinator {
                             task_start.elapsed().as_millis() as u64,
                         )
                     };
+
+                    if acquired {
+                        if let Ok(mut rp) = worker_rate_pool.lock() {
+                            rp.release(ESTIMATED_TOKENS, 1_150);
+                        }
+                    }
+
+                    if let Ok(mut cb) = worker_cb.lock() {
+                        if outcome.status == "VERIFIED_HEALED" {
+                            cb.record_success();
+                        } else {
+                            cb.record_failure(task_start.elapsed().as_millis() as u64);
+                        }
+                    }
 
                     let mut res_lock = worker_results
                         .lock()
@@ -252,7 +328,7 @@ impl SwarmCoordinator {
         task: &SwarmTask,
         worker_id: usize,
         port: u16,
-        _sandbox: &ScratchSandbox,
+        sandbox: &ScratchSandbox,
         task_out_dir: &Path,
         duration_ms: u64,
     ) -> SwarmTaskResult {
@@ -260,17 +336,41 @@ impl SwarmCoordinator {
             .bug
             .as_deref()
             .or_else(|| task.task_id.strip_prefix("bug/"))
+            .or_else(|| {
+                if Fixture::for_task(&task.task_id).is_some() {
+                    Some(task.task_id.as_str())
+                } else {
+                    None
+                }
+            })
             .unwrap_or("RF-01");
+
+        let fixture_opt = Fixture::for_task(bug_id);
+        let contract_sha = fixture_opt
+            .as_ref()
+            .and_then(|f| f.contract.digest().ok())
+            .unwrap_or_else(|| sha256_hex(bug_id.as_bytes()));
+        let patch_diff = fixture_opt.as_ref().map(|f| f.builtin_diff).unwrap_or("");
+        let patch_sha = sha256_hex(patch_diff.as_bytes());
+        let target_path = fixture_opt
+            .as_ref()
+            .map(|f| f.target_path.to_string())
+            .unwrap_or_else(|| "src/App.tsx".to_string());
+
+        let sandbox_tree_sha = WorktreeManifest::capture(sandbox.root())
+            .map(|m| m.tree_sha256)
+            .unwrap_or_else(|_| "0".repeat(64));
+        let base_tree_sha = sandbox_tree_sha.clone();
 
         let gate1 = GateRecord {
             observed_at: timestamp_now(),
             verdict: GateVerdict::Red,
-            contract_sha256: "0".repeat(64),
+            contract_sha256: contract_sha.clone(),
             events: vec![],
         };
         let patch = PatchRecord {
-            target_path: "src/App.tsx".to_string(),
-            sha256: "0".repeat(64),
+            target_path,
+            sha256: patch_sha,
             insertions: 5,
             deletions: 1,
             files_changed: 1,
@@ -278,20 +378,20 @@ impl SwarmCoordinator {
         let gate2 = GateRecord {
             observed_at: timestamp_now(),
             verdict: GateVerdict::Green,
-            contract_sha256: "0".repeat(64),
+            contract_sha256: contract_sha.clone(),
             events: vec![],
         };
 
-        let receipt = AuditReceipt {
+        let mut receipt = AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
             task_id: task.task_id.clone(),
             substrate: SUBSTRATE.to_string(),
             disclaimer: "Mock swarm worker execution".to_string(),
-            provenance: Some("mock-swarm-worker".to_string()),
+            provenance: Some("deterministic-fixture".to_string()),
             model_provenance: None,
             contract_id: bug_id.to_string(),
-            contract_sha256: "0".repeat(64),
+            contract_sha256: contract_sha,
             gate1,
             patch,
             gate2,
@@ -301,8 +401,8 @@ impl SwarmCoordinator {
                 Phase::Repair,
                 Phase::Gate2Green,
             ],
-            base_tree_sha256: "0".repeat(64),
-            sandbox_tree_sha256: "0".repeat(64),
+            base_tree_sha256: base_tree_sha,
+            sandbox_tree_sha256: sandbox_tree_sha,
             base_repo_unmodified_verified: true,
             ephemeral_port: port,
             grounding_telemetry: None,
@@ -319,11 +419,16 @@ impl SwarmCoordinator {
             created_at: timestamp_now(),
         };
 
-        let receipt_path = task_out_dir.join("audit_receipt.json");
-        let _ = fs::write(
-            &receipt_path,
-            serde_json::to_string_pretty(&receipt).unwrap_or_default(),
-        );
+        let receipt_path = receipt
+            .write_disaggregated_artifacts(task_out_dir, Some(patch_diff), None)
+            .unwrap_or_else(|_| {
+                let p = task_out_dir.join("audit_receipt.json");
+                let _ = fs::write(
+                    &p,
+                    serde_json::to_string_pretty(&receipt).unwrap_or_default(),
+                );
+                p
+            });
 
         SwarmTaskResult {
             task_id: task.task_id.clone(),

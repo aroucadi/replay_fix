@@ -12,7 +12,7 @@ ReplayFix is a deterministic Rust harness for reproducing, verifying, and autono
 > - **Live Streaming Dashboard**: `replayfix dashboard --port 3000` starts an embedded async HTTP/WebSocket/SSE server streaming live browser screencasts, Muse Spark deliberation feeds, and side-by-side DOM diffs via the embedded single-page `dashboard.html`.
 > - **Responsive Inoculation Matrix**: `replayfix inoculate --matrix chromium,firefox,webkit,mobile,desktop` synthesizes multi-browser, multi-device Playwright test suites with device pixel ratio (DPR) coordinate calibration.
 > - **RFC 6962 Transparency Ledger**: `replayfix notary` (`append`, `verify-log`, `consistency-proof`) maintains an append-only, tamper-evident cryptographic transparency log (`transparency_log.json`) with Ed25519 attestations.
-> All roadmap specifications (`Spec 000` through `Spec 180`) are complete, verified, and qualified across 327 automated tests with 0 non-test panics and 0 Clippy warnings.
+> All roadmap specifications (`Spec 000` through `Spec 180`) are complete, verified, and qualified across 326 automated tests with 0 non-test panics and 0 Clippy warnings.
 
 ---
 
@@ -166,7 +166,28 @@ replayfix freeze-spec --bug RF-01 --repo .
 replayfix export-proof --output .replayfix/proof --json
 ```
 
-Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect receipts, step through RFC 6962 Merkle audit paths, verify Ed25519 signatures, step through the **Muse Spark Deliberation Timeline**, inspect side-by-side accessibility DOM diffs, and inspect SAM 3.1 spatial overlays and unified diffs offline.
+### 11. Distributed Multi-Agent Swarm, Live Dashboard, APM Ingestion & Key Notary (Release 1.8)
+
+```bash
+# Ingest production RRWeb session recordings & Sentry crash dumps into TaskManifests:
+replayfix ingest --rrweb session.json --sentry crash.json --output .replayfix/manifest.json
+
+# Launch concurrent work-stealing triage swarm across isolated ScratchSandboxes:
+replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04 --mock-heal --output .replayfix
+
+# Serve live streaming WebSocket & SSE observability portal (dashboard.html):
+replayfix dashboard --port 3848 --artifacts .replayfix
+
+# Synthesize cross-browser & multi-device Playwright regression matrix (DPR-calibrated):
+replayfix inoculate --bug RF-01 --matrix chromium,firefox,webkit,mobile,pixel7,tablet
+
+# Append receipts & verify RFC 6962 append-only transparency log consistency proofs:
+replayfix notary append --receipt .replayfix/audit_receipt.json
+replayfix notary verify-log --log .replayfix/transparency_log.json
+replayfix notary consistency-proof --first 1 --second 2 --log .replayfix/transparency_log.json
+```
+
+Open **`proof_viewer.html`** or **`dashboard.html`** directly in any browser (`file://` or `http://127.0.0.1:3848`) to inspect receipts, step through RFC 6962 Merkle audit paths, verify Ed25519 signatures, step through the **Muse Spark Deliberation Timeline**, inspect side-by-side accessibility DOM diffs, and inspect SAM 3.1 spatial overlays and unified diffs offline.
 
 ---
 
@@ -194,7 +215,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 
 ---
 
-## Completed Release Roadmap (`v0.0.0` -> `v1.7.0`)
+## Completed Release Roadmap (`v0.0.0` -> `v1.8.0`)
 
 | Release | Scope | Status |
 | :--- | :--- | :--- |
@@ -218,6 +239,7 @@ Open **`proof_viewer.html`** directly in any browser (`file://`) to inspect rece
 | **v1.5.1** | Production Meta multimodal wire protocol across all 5 Meta Muse & SAM models | **Delivered** |
 | **v1.6.0** | **Sovereign Autonomous Healer (`replayfix heal`), Multi-Turn Meta Muse Spark 1.3 Agent Loop (`305 tok/s`), Wonder AST Encrypted Deliberation Caching, and Sub-60s Macro Pipeline** | **Delivered** |
 | **v1.7.0** | **Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (`replayfix bot`)** | **Delivered** |
+| **v1.8.0** | **Distributed Multi-Agent Swarm (`replayfix swarm`), Live Streaming Dashboard (`replayfix dashboard`), Production APM Session Replay Ingestion (`replayfix ingest`), Cross-Browser Matrix Inoculation (`--matrix`), and RFC 6962 Key Notary (`replayfix notary`)** | **Delivered** |
 
 ---
 

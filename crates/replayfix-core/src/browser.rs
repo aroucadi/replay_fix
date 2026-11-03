@@ -233,8 +233,8 @@ function sendLine(obj, requestId) {
             height: cmd.viewport_height || 720,
           },
         });
-        context.setDefaultTimeout(5000);
-        context.setDefaultNavigationTimeout(10000);
+        context.setDefaultTimeout(15000);
+        context.setDefaultNavigationTimeout(15000);
         await context.route('**/*', async (route) => {
           try {
             if (networkLatencyMs > 0 || networkJitterMs > 0) {
@@ -363,27 +363,27 @@ function sendLine(obj, requestId) {
         }
 
         // Explicit TOCTOU verification: ensure the resolved node still exists, is unique, and has non-zero geometry.
-        const matchCount = await withTimeout(locator.count(), 2000, 'Locator count check');
+        const matchCount = await withTimeout(locator.count(), 8000, 'Locator count check');
         if (matchCount === 0) {
           throw new Error('DOM_NODE_DETACHED: Target DOM node detached or disappeared before click (count=0)');
         }
         if (matchCount > 1) {
           throw new Error('AMBIGUOUS_GROUNDING: Target locator matched ' + matchCount + ' DOM nodes at click time (strict uniqueness violated)');
         }
-        const box = await withTimeout(locator.boundingBox({ timeout: 2000 }), 2500, 'Locator boundingBox check');
+        const box = await withTimeout(locator.boundingBox({ timeout: 8000 }), 9000, 'Locator boundingBox check');
         if (!box || box.width <= 0 || box.height <= 0) {
           throw new Error('DOM_NODE_DETACHED: Target DOM node became hidden or zero-sized before click');
         }
 
-        await locator.click({ timeout: 5000 });
+        await locator.click({ timeout: 12000 });
         await page.waitForTimeout(50);
         ensureActivePage('CLICK_AND_OBSERVE(post-click)');
         let resultText = '';
         if (cmd.output_selector) {
           const outEl = page.locator(cmd.output_selector);
-          const outCount = await withTimeout(outEl.count(), 2000, 'Output selector count');
+          const outCount = await withTimeout(outEl.count(), 8000, 'Output selector count');
           if (outCount > 0) {
-            resultText = ((await withTimeout(outEl.textContent({ timeout: 2000 }), 2500, 'Output textContent')) || '').trim();
+            resultText = ((await withTimeout(outEl.textContent({ timeout: 8000 }), 9000, 'Output textContent')) || '').trim();
           }
         }
         sendLine({

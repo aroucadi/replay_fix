@@ -104,17 +104,34 @@ impl TransparencyLog {
 
     /// Compute current Merkle root from all log entries.
     pub fn compute_root(&self) -> Result<[u8; 32]> {
-        if self.entries.is_empty() {
+        self.root_at_size(self.entries.len())
+    }
+
+    /// Compute the RFC 6962 Merkle Tree Hash for the prefix of size `size` ($0 \le \text{size} \le \text{entries.len()}$).
+    pub fn root_at_size(&self, size: usize) -> Result<[u8; 32]> {
+        if size > self.entries.len() {
+            return Err(CoreError::Notary(format!(
+                "Requested tree size {size} exceeds ledger length {}",
+                self.entries.len()
+            )));
+        }
+        if size == 0 {
             return Ok(Sha256::digest([]).into());
         }
 
-        let mut hashes = Vec::with_capacity(self.entries.len());
-        for entry in &self.entries {
+        let mut hashes = Vec::with_capacity(size);
+        for entry in &self.entries[..size] {
             let hash_bytes = hex_to_32bytes(&entry.leaf_hash)?;
             hashes.push(hash_bytes);
         }
 
         Ok(Self::compute_sub_tree_hash(&hashes))
+    }
+
+    /// Compute the hex-encoded RFC 6962 Merkle root for the prefix of size `size`.
+    pub fn root_hex_at_size(&self, size: usize) -> Result<String> {
+        let root = self.root_at_size(size)?;
+        Ok(bytes32_to_hex(&root))
     }
 
     /// Append an `AuditReceipt` to the ledger, recomputing the Merkle root and Ed25519 signature.
@@ -167,7 +184,7 @@ impl TransparencyLog {
             fs::create_dir_all(parent)?;
         }
         let pretty = serde_json::to_string_pretty(self)?;
-        fs::write(path, pretty)?;
+        crate::artifacts::atomic_write_file(path, pretty.as_bytes())?;
         Ok(())
     }
 
@@ -263,6 +280,10 @@ impl TransparencyLog {
 
     /// Verify full ledger integrity and Ed25519 signature.
     pub fn verify_ledger_integrity(&self, trusted_key_hex: Option<&str>) -> Result<bool> {
+        if self.tree_size != self.entries.len() {
+            return Ok(false);
+        }
+
         // 1. Verify computed Merkle root
         let computed = self.compute_root()?;
         let computed_hex = bytes32_to_hex(&computed);
@@ -270,8 +291,11 @@ impl TransparencyLog {
             return Ok(false);
         }
 
-        // 2. Verify leaf hashes
-        for entry in &self.entries {
+        // 2. Verify sequential leaf indices and leaf hashes
+        for (expected_idx, entry) in self.entries.iter().enumerate() {
+            if entry.leaf_index != expected_idx {
+                return Ok(false);
+            }
             let leaf_hash_bytes = TransparencyLogEntry::compute_leaf_hash(
                 entry.leaf_index,
                 &entry.receipt_sha256,
@@ -284,7 +308,19 @@ impl TransparencyLog {
             }
         }
 
-        // 3. Verify Ed25519 attestation
+        // 3. Verify RFC 6962 prefix consistency across historical tree sizes
+        let n = self.entries.len();
+        if n >= 2 {
+            for m in 1..n {
+                let root_m = self.root_at_size(m)?;
+                let proof = self.generate_consistency_proof(m, n)?;
+                if !Self::verify_consistency_proof(m, n, &root_m, &computed, &proof)? {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // 4. Verify Ed25519 attestation
         let policy = if let Some(key) = trusted_key_hex {
             let mut set = HashSet::new();
             set.insert(key.to_string());

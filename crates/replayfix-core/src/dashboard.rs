@@ -157,6 +157,8 @@ pub fn encode_ws_text_frame(text: &str) -> Vec<u8> {
 #[derive(Debug, Default, Clone)]
 pub struct DashboardBroadcaster {
     active_tasks: Arc<Mutex<HashMap<String, Value>>>,
+    screencast_frames: Arc<Mutex<Vec<Value>>>,
+    reasoning_events: Arc<Mutex<Vec<Value>>>,
 }
 
 impl DashboardBroadcaster {
@@ -171,10 +173,80 @@ impl DashboardBroadcaster {
         }
     }
 
+    /// Broadcast a CDP viewport screencast frame conforming to `contracts/dashboard_stream.schema.json`.
+    pub fn broadcast_screencast_frame(
+        &self,
+        task_id: &str,
+        format: &str,
+        base64_data: &str,
+        width: u32,
+        height: u32,
+    ) {
+        let ev = serde_json::json!({
+            "event_type": "screencast_frame",
+            "task_id": task_id,
+            "timestamp": crate::receipt::timestamp_now(),
+            "frame_data": {
+                "format": format,
+                "base64_data": base64_data,
+                "width": width,
+                "height": height
+            }
+        });
+        if let Ok(mut lock) = self.screencast_frames.lock() {
+            lock.push(ev);
+        }
+    }
+
+    /// Broadcast a Muse Spark reasoning token event conforming to `contracts/dashboard_stream.schema.json`.
+    pub fn broadcast_reasoning_token(
+        &self,
+        task_id: &str,
+        model: &str,
+        turn: u32,
+        token: &str,
+        thought: Option<&str>,
+        tool: Option<&str>,
+    ) {
+        let ev = serde_json::json!({
+            "event_type": "reasoning_token",
+            "task_id": task_id,
+            "timestamp": crate::receipt::timestamp_now(),
+            "reasoning_data": {
+                "model": model,
+                "turn": turn,
+                "token": token,
+                "thought": thought.unwrap_or(""),
+                "tool": tool.unwrap_or("")
+            }
+        });
+        if let Ok(mut lock) = self.reasoning_events.lock() {
+            lock.push(ev);
+        }
+    }
+
     #[must_use]
     pub fn get_tasks_snapshot(&self) -> Vec<Value> {
         if let Ok(lock) = self.active_tasks.lock() {
             lock.values().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    #[must_use]
+    pub fn get_screencast_frames(&self) -> Vec<Value> {
+        if let Ok(lock) = self.screencast_frames.lock() {
+            lock.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    #[must_use]
+    pub fn get_reasoning_events(&self) -> Vec<Value> {
+        if let Ok(lock) = self.reasoning_events.lock() {
+            lock.clone()
         } else {
             Vec::new()
         }
@@ -286,9 +358,10 @@ fn handle_dashboard_connection(
     let method = parts[0];
     let uri = parts[1];
 
-    // Check for WebSocket upgrade
+    // Check for WebSocket upgrade and CORS Origin validation (Law VIII)
     let mut is_ws_upgrade = false;
     let mut ws_key = String::new();
+    let mut origin_header: Option<String> = None;
 
     for line in lines {
         let lower = line.to_ascii_lowercase();
@@ -298,6 +371,24 @@ fn handle_dashboard_connection(
             if let Some((_, k)) = line.split_once(':') {
                 ws_key = k.trim().to_string();
             }
+        } else if lower.starts_with("origin:") {
+            if let Some((_, o)) = line.split_once(':') {
+                origin_header = Some(o.trim().to_string());
+            }
+        }
+    }
+
+    if let Some(ref origin) = origin_header {
+        let allowed = origin == "null"
+            || origin.starts_with("http://127.0.0.1")
+            || origin.starts_with("http://localhost")
+            || origin.starts_with("http://[::1]");
+        if !allowed {
+            let forbidden =
+                "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = stream.write_all(forbidden.as_bytes());
+            let _ = stream.flush();
+            return Ok(());
         }
     }
 
@@ -326,6 +417,11 @@ fn handle_dashboard_connection(
         });
         let frame = encode_ws_text_frame(&init_event.to_string());
         let _ = stream.write_all(&frame);
+
+        for bcast_frame in broadcaster.get_screencast_frames() {
+            let encoded = encode_ws_text_frame(&bcast_frame.to_string());
+            let _ = stream.write_all(&encoded);
+        }
         let _ = stream.flush();
         return Ok(());
     }
@@ -336,7 +432,7 @@ fn handle_dashboard_connection(
                           Content-Type: text/event-stream; charset=utf-8\r\n\
                           Cache-Control: no-cache\r\n\
                           Connection: keep-alive\r\n\
-                          Access-Control-Allow-Origin: *\r\n\r\n";
+                          Access-Control-Allow-Origin: http://127.0.0.1\r\n\r\n";
         stream.write_all(sse_header.as_bytes())?;
 
         let sample_event = serde_json::json!({
@@ -354,6 +450,11 @@ fn handle_dashboard_connection(
 
         let msg = format!("event: reasoning\ndata: {}\n\n", sample_event);
         let _ = stream.write_all(msg.as_bytes());
+
+        for bcast_ev in broadcaster.get_reasoning_events() {
+            let line_msg = format!("event: reasoning\ndata: {}\n\n", bcast_ev);
+            let _ = stream.write_all(line_msg.as_bytes());
+        }
         let _ = stream.flush();
         return Ok(());
     }
@@ -391,6 +492,15 @@ fn handle_dashboard_connection(
                             receipts.push(json_val);
                         }
                     }
+                } else if p.is_dir() {
+                    let sub_receipt = p.join("audit_receipt.json");
+                    if sub_receipt.is_file() {
+                        if let Ok(text) = fs::read_to_string(&sub_receipt) {
+                            if let Ok(json_val) = serde_json::from_str::<Value>(&text) {
+                                receipts.push(json_val);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -403,6 +513,7 @@ fn handle_dashboard_connection(
         let res = format!(
             "HTTP/1.1 200 OK\r\n\
              Content-Type: text/html; charset=utf-8\r\n\
+             Content-Security-Policy: default-src 'self' 'unsafe-inline' data: ws: wss: http://127.0.0.1:* http://localhost:*;\r\n\
              Content-Length: {}\r\n\
              Connection: close\r\n\r\n{}",
             DASHBOARD_HTML_EMBEDDED.len(),

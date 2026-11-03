@@ -99,15 +99,42 @@ impl RrwebSession {
 pub struct RrwebParser;
 
 impl RrwebParser {
-    /// Parse RRWeb events from a JSON array string.
+    /// Parse RRWeb events from a JSON array string or an `rrweb_ingest.schema.json` envelope object.
     pub fn parse_json(json_str: &str, session_id: &str) -> Result<RrwebSession> {
-        let events: Vec<RrwebRawEvent> = serde_json::from_str(json_str).map_err(|e| {
+        let val: Value = serde_json::from_str(json_str).map_err(|e| {
             CoreError::SessionReplay(format!("Failed to parse RRWeb JSON events: {e}"))
         })?;
-        Self::parse_events(&events, session_id)
+
+        let (events, resolved_session_id): (Vec<RrwebRawEvent>, String) = if val.is_array() {
+            let parsed: Vec<RrwebRawEvent> = serde_json::from_value(val).map_err(|e| {
+                CoreError::SessionReplay(format!("Failed to parse RRWeb event array: {e}"))
+            })?;
+            (parsed, session_id.to_string())
+        } else if let Some(events_val) = val.get("events") {
+            let parsed: Vec<RrwebRawEvent> =
+                serde_json::from_value(events_val.clone()).map_err(|e| {
+                    CoreError::SessionReplay(format!(
+                        "Failed to parse 'events' field in RRWeb envelope: {e}"
+                    ))
+                })?;
+            let env_sid = val
+                .get("session_id")
+                .and_then(|s| s.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(session_id)
+                .to_string();
+            (parsed, env_sid)
+        } else {
+            return Err(CoreError::SessionReplay(
+                "Expected RRWeb JSON array or rrweb_ingest.schema.json envelope with 'events'"
+                    .to_string(),
+            ));
+        };
+
+        Self::parse_events(&events, &resolved_session_id)
     }
 
-    /// Parse RRWeb raw events into a structured session.
+    /// Parse RRWeb raw events into a structured session with monotonic timestamp ordering (Law VI).
     pub fn parse_events(events: &[RrwebRawEvent], session_id: &str) -> Result<RrwebSession> {
         if events.is_empty() {
             return Err(CoreError::SessionReplay(
@@ -115,16 +142,19 @@ impl RrwebParser {
             ));
         }
 
+        let mut sorted_events = events.to_vec();
+        sorted_events.sort_by_key(|e| e.timestamp);
+
         let mut viewport_width = 1280u32;
         let mut viewport_height = 720u32;
         let mut base_url = None;
         let mut interactions = Vec::new();
         let mut mutations = Vec::new();
 
-        let start_time = events.first().map(|e| e.timestamp).unwrap_or(0);
-        let end_time = events.last().map(|e| e.timestamp).unwrap_or(0);
+        let start_time = sorted_events.first().map(|e| e.timestamp).unwrap_or(0);
+        let end_time = sorted_events.last().map(|e| e.timestamp).unwrap_or(0);
 
-        for event in events {
+        for event in &sorted_events {
             match event.event_type {
                 RRWEB_EVENT_META => {
                     if let Some(href) = event.data.get("href").and_then(|h| h.as_str()) {
@@ -136,6 +166,22 @@ impl RrwebParser {
                     if let Some(h) = event.data.get("height").and_then(|h| h.as_u64()) {
                         viewport_height = h as u32;
                     }
+                }
+                RRWEB_EVENT_FULL_SNAPSHOT => {
+                    let initial_nodes = event
+                        .data
+                        .get("node")
+                        .and_then(|n| n.get("childNodes"))
+                        .and_then(|c| c.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(1);
+                    mutations.push(DomMutationSummary {
+                        timestamp: event.timestamp,
+                        added_nodes: initial_nodes,
+                        removed_nodes: 0,
+                        text_mutations: 0,
+                        attribute_mutations: 0,
+                    });
                 }
                 RRWEB_EVENT_INCREMENTAL_SNAPSHOT => {
                     let source = event
@@ -445,12 +491,38 @@ impl SentryIngestion {
     }
 }
 
+/// Ingest a raw RRWeb JSON payload (array or `rrweb_ingest.schema.json` envelope) into an `RrwebSession`.
+pub fn ingest_session_replay(json_str: &str, session_id: &str) -> Result<RrwebSession> {
+    RrwebParser::parse_json(json_str, session_id)
+}
+
+/// Translate Sentry crash breadcrumbs and stack frames into validated candidate source files and action summaries.
+pub fn translate_sentry_breadcrumbs(crash: &SentryCrashDump) -> Result<(Vec<String>, Vec<String>)> {
+    let candidate_files = SentryIngestion::extract_candidate_source_files(crash)?;
+    let actions = crash
+        .breadcrumbs
+        .iter()
+        .map(|b| {
+            let cat = b.category.as_deref().unwrap_or("event");
+            let msg = b.message.as_deref().unwrap_or("unknown");
+            format!("{cat}: {msg}")
+        })
+        .collect();
+    Ok((candidate_files, actions))
+}
+
 /// Synthesize a validated `TaskManifest` from RRWeb session and Sentry crash dump.
 pub fn synthesize_manifest_from_telemetry(
     session: &RrwebSession,
     crash: Option<&SentryCrashDump>,
     repo_path: &Path,
 ) -> Result<TaskManifest> {
+    let candidate_files = if let Some(c) = crash {
+        SentryIngestion::extract_candidate_source_files(c)?
+    } else {
+        Vec::new()
+    };
+
     let task_id = crash
         .map(|c| format!("APM-{}", &c.event_id[..c.event_id.len().min(8)]))
         .unwrap_or_else(|| {
@@ -469,6 +541,15 @@ pub fn synthesize_manifest_from_telemetry(
         .map(|i| (i.x, i.y))
         .unwrap_or((100.0, 100.0));
 
+    let expected_behavior = if candidate_files.is_empty() {
+        format!("User interaction at ({interaction_x}, {interaction_y}) should succeed")
+    } else {
+        format!(
+            "User interaction at ({interaction_x}, {interaction_y}) should succeed (candidates: {})",
+            candidate_files.join(", ")
+        )
+    };
+
     let manifest_json = serde_json::json!({
         "task_id": task_id,
         "title": title,
@@ -476,7 +557,7 @@ pub fn synthesize_manifest_from_telemetry(
         "bug_ref": "HEAD",
         "clean_ref": "main",
         "video_path": "session_replay.mp4",
-        "expected_behavior": format!("User interaction at ({interaction_x}, {interaction_y}) should succeed"),
+        "expected_behavior": expected_behavior,
     });
 
     let manifest_str = serde_json::to_string(&manifest_json)?;
@@ -486,6 +567,28 @@ pub fn synthesize_manifest_from_telemetry(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_rrweb_parse_envelope_and_out_of_order_events() {
+        let envelope = r#"{
+            "source_type": "rrweb",
+            "session_id": "env_sess_99",
+            "timestamp": 1000,
+            "events": [
+                {"type": 3, "timestamp": 2000, "data": {"source": 2, "type": 2, "x": 120.0, "y": 240.0}},
+                {"type": 4, "timestamp": 1000, "data": {"href": "http://localhost:3000", "width": 1440, "height": 900}},
+                {"type": 2, "timestamp": 1500, "data": {"node": {"childNodes": [{}, {}]}}}
+            ]
+        }"#;
+        let session = ingest_session_replay(envelope, "fallback_id").unwrap();
+        assert_eq!(session.session_id, "env_sess_99");
+        assert_eq!(session.viewport_width, 1440);
+        assert_eq!(session.viewport_height, 900);
+        assert_eq!(session.start_time, 1000);
+        assert_eq!(session.end_time, 2000);
+        assert_eq!(session.mutations.len(), 1);
+        assert_eq!(session.mutations[0].added_nodes, 2);
+    }
 
     #[test]
     fn test_rrweb_parse_events_extracts_viewport_and_click() {
