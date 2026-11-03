@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.9.5] - 2026-11-03
+
+**Spec 195 — Living Cybernetic Command Deck (24-Bit Truecolor, 60 FPS Motion Engine & Double-Buffered Bento TUI)**: Upgrades the ReplayFix Terminal UI (`crates/replayfix-cli/src/ui.rs` and `crates/replayfix-cli/src/tui/*`) into a 2026-era Living Cybernetic Command Deck inspired by Claude Code, Charm Lipgloss/Bubbles, and Lazygit while maintaining 100% BeautifulRust Law X zero-panic compliance and automatic non-TTY fallback. Full notes: [docs/release-notes/v1.9.5.md](docs/release-notes/v1.9.5.md).
+
+### Added
+- **ReplayFix Signature Brand Identity (`crates/replayfix-cli/src/tui/brand.rs`)**:
+  - **Hero Splash Banner (`render_hero_splash`)**: Geometric Unicode block logotype combining playback triangle `▶` and causal bug target `󰒓 / ⬢`, rendered across an algorithmic 4-stop 24-bit Truecolor horizontal gradient: Electric Cyan (`#00d2ff`) -> Cyber Violet (`#7928ca`) -> Phosphor Amber (`#f59e0b`) -> Substrate Emerald (`#10b981`), paired with the `[ v1.9.0 ] [ Rust Substrate: 60 FPS ] [ Meta AI: Spark 1.3 + Wonder 1.0 ]` metadata ribbon.
+  - **Compact HUD Emblem (`render_compact_hud_emblem`)**: Dual-segment micro-pill badge (`\x1b[48;2;18;24;38m\x1b[38;2;56;189;248m ▶⚡ REPLAYFIX \x1b[48;2;30;41;59m\x1b[38;2;148;163;184m v1.9.0 \x1b[0m`) with automatic `< 80` column collapse and `NO_COLOR`/non-TTY plain degradation.
+- **Living Motion Engine (`crates/replayfix-cli/src/tui/motion.rs`)**:
+  - 60 FPS sub-character tick engine (`MotionEngine`, `FRAME_DURATION = 16ms`).
+  - 8-level Unicode fractional progress bars (`▏▎▍▌▋▊▉█` via `render_fractional_bar`).
+  - Traveling 24-bit RGB sine-wave shimmer (`render_wave_shimmer`) during agent deliberation (`UNDERSTANDING` / `PLANNING`) and tool execution.
+  - 1.5-second (90-frame) sinusoidal breathing prompt on `❯` (`render_breathing_prompt`).
+  - Animated Gate 1 RED confirmation and Gate 2 GREEN verification flash transitions (`GateFlashAnimation`, `GateFlashKind`).
+- **Asymmetric Bento Terminal Layout & Double-Buffered Differential Renderer (`crates/replayfix-cli/src/tui/layout.rs`)**:
+  - `Cell`, `CellStyle`, `FrameBuffer`, and `DifferentialRenderer` emitting minimal cursor moves (`\x1b[{row};{col}H`) and Truecolor sequences only for mutated cells/rows, eliminating `Clear(ClearType::All)` redraw blink.
+  - `BentoCommandDeck` (`80x24+` responsive 40%/60% asymmetric layout) with **Top Deck** (Branded HUD pill, active repo, `󰊢` branch badge, `:0` ephemeral port, and `tok/s` token rate laser meter), **Main Left Pane (40%)** (multi-agent thought stream with `effort: xhigh`, `[TOOL: ffmpeg]` invocation badges, and gate transition cards), **Main Right Pane (60%)** (Virtualized AST diff viewer with line-number gutters, hunk folding via `toggle_hunk_folding`, and 24-bit syntax coloring), and **Bottom Command Ribbon** (`Enter: Run`, `Tab: Switch`, `Space: Page`, `q: Quit`).
+
+### Changed
+- **Sovereign Web Portals (`proof_viewer.html` & `dashboard.html`)**:
+  - **`proof_viewer.html` (Sovereign Cryptographic Notary Vault)**: Re-architected with `Instrument Serif` / `Fraunces` display typography, `Plus Jakarta Sans` structural copy, `JetBrains Mono` digest formatting, frosted obsidian glass (`backdrop-filter: blur(24px)`), `1px` structural hairline borders (`rgba(255,255,255,0.07)`), organic tactile SVG `feTurbulence` bond grain overlay, glowing Merkle inclusion audit paths, side-by-side surgical AST diff reviewer, and pulsing cryptographic seal badge while preserving 100% of the RFC 8785, RFC 6962, and RFC 8032 Ed25519 client-side verification engine and air-gapped CSP.
+  - **`dashboard.html` (Autonomous Agent Swarm Observatory)**: Re-architected on a deep void canvas (`#08090c`) with `Syne` / `Cabinet Grotesk`, `Bricolage Grotesque`, and `Space Mono` typography, surgical contrast accents (`#f59e0b` phosphor amber, `#10b981` acid emerald, `#2563eb` international Klein blue), asymmetric Bento matrix, rate-pool token laser meters, parallel worker health tiles, subtle scanline overlay, and staggered `cubic-bezier(0.16, 1, 0.3, 1)` reveals while preserving all WebSocket (`/ws/screencast/:id`), SSE (`/events/reasoning/:id`), and REST telemetry hooks.
+- **24-Bit Truecolor & Rounded Box Geometry (`ui.rs`, `tui/dialog.rs`, `tui/diff_view.rs`, `tui/spinner.rs`, `shell.rs`, `intent.rs`)**:
+  - Replaced legacy 16-color ANSI escapes, ASCII square borders, and bracketed status strings with `CyberPalette` 24-bit Truecolor RGB escapes (`\x1b[38;2;...m`, `\x1b[48;2;...m`), rounded Unicode box geometry (`╭───╮`, `╰───╯`), and background-filled pill badges (`Theme::pill`, `Theme::status_pill`, `Theme::command_pill`).
+  - Preserved strict RAII terminal restoration (`ScreenGuard` + panic hook) and automatic non-TTY plain-stream fallback when `!stdout().is_terminal()`.
+
+---
+
 ## [1.9.1] - 2026-11-03
 
 **Spec 190 Convergence & Hardening Patch — Benchmark Manifest Harmonization, Fast Playwright Resolution & Attached SPA Hydration Readiness**: Hardens the v1.9.0 Swarm Benchmark Engine and live Playwright CDP bridge across concurrent Windows test and sweep workloads, achieving a 100% pass rate across all 306 workspace tests with zero Clippy warnings and zero non-test panics. Full notes: [docs/release-notes/v1.9.1.md](docs/release-notes/v1.9.1.md).
