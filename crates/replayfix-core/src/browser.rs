@@ -77,6 +77,12 @@ function loadPlaywright() {
     candidates.push(process.env.REPLAYFIX_PLAYWRIGHT_PATH);
   }
   candidates.push('playwright');
+  try {
+    const parentNodeModules = path.resolve(__dirname, '..', 'node_modules', 'playwright');
+    candidates.push(parentNodeModules);
+    const cwdNodeModules = path.resolve(process.cwd(), 'node_modules', 'playwright');
+    candidates.push(cwdNodeModules);
+  } catch (_) {}
 
   try {
     const cacheOut = execSync(
@@ -91,6 +97,11 @@ function loadPlaywright() {
     const localCache = findPlaywrightInNpxCache(path.join(process.env.LOCALAPPDATA, 'npm-cache'));
     if (localCache) candidates.push(localCache);
   }
+  candidates.push('C:/nvm4w/nodejs/node_modules/playwright');
+  try {
+    const globalRoot = execSync(process.platform === 'win32' ? 'npm.cmd root -g' : 'npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
+    if (globalRoot) candidates.push(path.join(globalRoot, 'playwright'));
+  } catch (_) {}
 
   for (const target of candidates) {
     try {
@@ -379,12 +390,16 @@ function sendLine(obj, requestId) {
         await page.waitForTimeout(50);
         ensureActivePage('CLICK_AND_OBSERVE(post-click)');
         let resultText = '';
-        if (cmd.output_selector) {
+        if (cmd.output_selector && String(cmd.output_selector).trim().length > 0) {
           const outEl = page.locator(cmd.output_selector);
           const outCount = await withTimeout(outEl.count(), 8000, 'Output selector count');
           if (outCount > 0) {
             resultText = ((await withTimeout(outEl.textContent({ timeout: 8000 }), 9000, 'Output textContent')) || '').trim();
           }
+        } else {
+          // Generic observation fallback: capture body text snippet or active heading/status
+          const bodyText = (await withTimeout(page.evaluate(() => document.body ? document.body.innerText.slice(0, 500) : ''), 5000, 'body snippet')) || '';
+          resultText = bodyText.trim();
         }
         sendLine({
           kind: 'CLICK_RESULT',
@@ -795,6 +810,15 @@ impl PlaywrightBridge {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        if let Ok(cwd) = std::env::current_dir() {
+            let node_modules = cwd.join("node_modules");
+            if node_modules.exists() {
+                if let Some(nm_str) = node_modules.to_str() {
+                    cmd.env("NODE_PATH", nm_str);
+                }
+            }
+        }
 
         let mut child = cmd
             .spawn()

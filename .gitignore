@@ -67,3 +67,14 @@ desktop.ini
 
 scratch*
 scratch/
+
+
+# Generated Verification Specifications, Audits & Reports
+200-v2.0.0-ultimate-final-mmp.md
+SPECIFICATION_AUDIT.md
+ARCHITECTURE_AUDIT.md
+TEST_QUALITY_AUDIT.md
+COVERAGE_REPORT.md
+FINAL_ASSESSMENT.md
+audit/
+specs/200-v2.0.0-sovereign-enterprise-submission/

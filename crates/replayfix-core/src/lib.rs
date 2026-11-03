@@ -47,6 +47,7 @@ pub mod rrweb;
 pub mod stress;
 pub mod swarm;
 pub mod sweep;
+pub mod sweep_ui;
 pub mod trace;
 pub mod video;
 pub mod worktree;
@@ -123,7 +124,7 @@ pub use locator::{
     AmbiguousTieCandidate, BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry,
     LocatorResolver, AMBIGUITY_TIE_THRESHOLD_BPS,
 };
-pub use manifest::{EnvironmentAdapter, TaskManifest};
+pub use manifest::{DynamicReproTask, EnvironmentAdapter, TaskManifest};
 pub use merkle::{EvidenceLeaf, MerkleInclusionProof, MerkleReceipt, MerkleTree};
 pub use notary::{
     TransparencyLog, TransparencyLogEntry, TRANSPARENCY_LOG_FILE, TRANSPARENCY_SCHEMA_VERSION,

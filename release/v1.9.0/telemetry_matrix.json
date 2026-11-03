@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.9.0",
+  "timestamp_iso": "2026-11-03T16:18:48.245Z",
+  "parallel_workers": 4,
+  "mode": "deterministic-fixture",
+  "total_tasks": 20,
+  "completed_tasks": 20,
+  "worker_metrics": [
+    {
+      "worker_id": "worker-1",
+      "tasks_completed": 5,
+      "active_duration_ms": 12720.6419,
+      "idle_duration_ms": 5203.141999999998
+    },
+    {
+      "worker_id": "worker-0",
+      "tasks_completed": 5,
+      "active_duration_ms": 12948.416000000001,
+      "idle_duration_ms": 6353.119399999996
+    },
+    {
+      "worker_id": "worker-2",
+      "tasks_completed": 5,
+      "active_duration_ms": 17067.1276,
+      "idle_duration_ms": 3344.8171
+    },
+    {
+      "worker_id": "worker-3",
+      "tasks_completed": 5,
+      "active_duration_ms": 17094.6962,
+      "idle_duration_ms": 3325.341400000001
+    }
+  ],
+  "latency_histogram": {
+    "buckets": [
+      50.0,
+      100.0,
+      250.0,
+      500.0,
+      1000.0,
+      2500.0,
+      5000.0
+    ],
+    "counts": [
+      20,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

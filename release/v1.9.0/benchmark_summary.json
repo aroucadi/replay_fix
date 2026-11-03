@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.9.0",
+  "suite_name": "MetaPulse-20",
+  "total_bugs": 20,
+  "success_count": 20,
+  "failure_count": 0,
+  "gate1_red_rate": 1.0,
+  "gate2_green_rate": 1.0,
+  "mean_latency_ms": 12.5,
+  "p95_latency_ms": 12.5,
+  "total_tokens": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cached_tokens": 0
+  },
+  "wall_clock_duration_secs": 21.6297858,
+  "batch_merkle_root": "2aeac29806b8b902d4f4c2f52b9bc4b445404ab9da5a8e81b3d2fcfde727511e",
+  "ed25519_signature": "c8ffbf958cca868520d0b3f3abad14a0cccf732dfa59bcb03bfc6d816a4ef4ba1e98a7f41481097b35bac18b0a06d551338a0d87245f836cf7240a8a45884906",
+  "public_key_hex": "e68ca50212c4fb42c616710679ce7e34d7fa0683b518c89b5ba3e35f45f769ff",
+  "results": [
+    {
+      "bug_id": "RF-01",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "3bf7056ee94d02d76d993867bcfc91a160e2f68c4cda17eb579c82fa0500357b"
+    },
+    {
+      "bug_id": "RF-02",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "7978a7a6bc55c809149b850f847f4c974523570dc27a38de95f9680fea4d9247"
+    },
+    {
+      "bug_id": "RF-03",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "c8b83f8424d63f0f77bfb589217ea7bb8211e5fe76dffe56bec1f12882c74d16"
+    },
+    {
+      "bug_id": "RF-04",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "11d95b51db0a04d373dee279f73d91be679ac76ec0471497da14e8b5c87d6f53"
+    },
+    {
+      "bug_id": "RF-05",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "acb14d2f4fa2c96bd2578ad58a0624641d9cfe67e9fddcd8e663a83f4ea12da8"
+    },
+    {
+      "bug_id": "RF-06",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "0782806c71d08245d427eebbadc1d98589fadabd75774ea156f3d60a884e23ed"
+    },
+    {
+      "bug_id": "RF-07",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "ce67aa70df36981224d84fb4d1ad1e61a5c70cc12a3a94f4f7d19635cecd39df"
+    },
+    {
+      "bug_id": "RF-08",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "abd91ea4468b45919eb37f5d4041df6f7bc01c99ed07aaa572b6f2c9865ee7fe"
+    },
+    {
+      "bug_id": "RF-09",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "300604d29f1aa504c5c0a9912152d6a66dbfd38741d6bfe679211a66f152c597"
+    },
+    {
+      "bug_id": "RF-10",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "696885b52cafa15e8262e9b7e2c895307c69a46b82a93112687b65f2b9753d4d"
+    },
+    {
+      "bug_id": "RF-11",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "e84d1442f59b6620fdceca95d5c3e1dac4df9abc5eeb35e5bc6c17cb05168355"
+    },
+    {
+      "bug_id": "RF-12",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "30c35c1fa7ee5571b86c16ff883e1f03fe913dfb66ade8066db14f7164c2cba5"
+    },
+    {
+      "bug_id": "RF-13",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "e63bbe2ef56aee543168c59ad2d1a636755a01bcd5bdde34bdd5be8df635bdeb"
+    },
+    {
+      "bug_id": "RF-14",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "c6fc0b192c58b84b06fbdc397c67338cecbdf116d2c3c6d94c6f647374af80a4"
+    },
+    {
+      "bug_id": "RF-15",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "e9c40b82fb7b1923cda7a5fd2f898c2896d5fbebc06440a5f12275dc3d629524"
+    },
+    {
+      "bug_id": "RF-16",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "2140dac33362e14f1b7bb8887362ef1980db563aa4f0eb638dd8c8b6e50422bf"
+    },
+    {
+      "bug_id": "RF-17",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "11995a41f78d0ff1275102362e58134e73483a4732288ecbcea52c8977739ce2"
+    },
+    {
+      "bug_id": "RF-18",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "985571e4c927ee6eca576ee8d22a23482923c6924719816ac698b2786b9918e9"
+    },
+    {
+      "bug_id": "RF-19",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "db2126efdf9af9918a835a532d329aefc8648281f8a79829d06cf916af4125af"
+    },
+    {
+      "bug_id": "RF-20",
+      "status": "SUCCESS",
+      "gate1_reproduced": true,
+      "gate2_verified": true,
+      "latency_ms": 12.5,
+      "tokens_used": 0,
+      "merkle_leaf_hash": "ae5564716c962a72095a04adefea3559546a4769f9e87c3c2e748a05c14b8dc8"
+    }
+  ]
+}

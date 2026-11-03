@@ -1,4 +1,4 @@
-//! Canonical JSON serialization and SHA-256 helpers.
+//! Canonical JSON serialization, hex encoding, and SHA-256 helpers.
 //!
 //! The canonical form sorts object keys recursively (UTF-16 code-unit order, as
 //! RFC 8785 requires) and emits compact JSON. It supports strings, booleans,
@@ -9,6 +9,15 @@ use crate::error::{CoreError, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
+
+/// Convert arbitrary byte slice to lowercase hexadecimal string.
+pub fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
 
 /// Serialize a JSON value into its canonical, compact, key-sorted form.
 pub fn canonical_json(value: &Value) -> Result<String> {
@@ -64,11 +73,7 @@ fn write_canonical(value: &Value, out: &mut String) -> Result<()> {
 /// Lowercase hexadecimal SHA-256 digest of arbitrary bytes.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex
+    bytes_to_hex(&digest)
 }
 
 #[cfg(test)]
@@ -115,11 +120,6 @@ mod tests {
 
     #[test]
     fn test_canonical_json_rfc8785_utf16_surrogate_ordering() {
-        // RFC 8785 Section 3.2.3:
-        // U+E000 (Private Use) has UTF-16 code unit 0xE000.
-        // U+10000 (Linear B Syllable B008 A) has UTF-16 surrogate pair [0xD800, 0xDC00].
-        // In UTF-8 byte order / Unicode code point order, U+E000 < U+10000.
-        // In UTF-16 code unit order (RFC 8785 JCS), 0xD800 < 0xE000, so U+10000 MUST come before U+E000.
         let val = json!({
             "\u{E000}": "bmp_high",
             "\u{10000}": "supplementary_surrogate"
