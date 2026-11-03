@@ -40,11 +40,14 @@
     },
     "attestation": {
       "type": "object",
-      "required": ["public_key_hex", "signature_hex", "timestamp"],
+      "required": ["schema_version", "algorithm", "public_key", "signature", "signing_payload", "created_at"],
       "properties": {
-        "public_key_hex": { "type": "string" },
-        "signature_hex": { "type": "string" },
-        "timestamp": { "type": "string" }
+        "schema_version": { "type": "string" },
+        "algorithm": { "type": "string" },
+        "public_key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "signature": { "type": "string", "pattern": "^[0-9a-f]{128}$" },
+        "signing_payload": { "type": "object" },
+        "created_at": { "type": "string" }
       }
     }
   }

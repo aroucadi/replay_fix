@@ -566,11 +566,8 @@ struct ReproExtras {
     yes: bool,
     issue: Option<String>,
     url: Option<String>,
-    #[allow(dead_code)]
     matrix: Option<String>,
-    #[allow(dead_code)]
     rrweb: Option<PathBuf>,
-    #[allow(dead_code)]
     sentry: Option<String>,
 }
 
@@ -815,19 +812,78 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
-    let bug_shorthand = bug.as_deref().or(inferred_from_video);
+    let apm_manifest = if extras.rrweb.is_some() || extras.sentry.is_some() {
+        let session = if let Some(ref rrweb_path) = extras.rrweb {
+            let raw = std::fs::read_to_string(rrweb_path).unwrap_or_else(|e| {
+                fail(
+                    CoreError::Io(e),
+                    &format!("Failed to read RRWeb file {}", rrweb_path.display()),
+                    theme,
+                )
+            });
+            replayfix_core::RrwebParser::parse_json(&raw, "rrweb_session")
+                .unwrap_or_else(|e| fail(e, "Failed to parse RRWeb session", theme))
+        } else {
+            replayfix_core::rrweb::RrwebSession {
+                session_id: "sentry_only".to_string(),
+                start_time: 0,
+                end_time: 0,
+                viewport_width: 1280,
+                viewport_height: 720,
+                base_url: None,
+                interactions: Vec::new(),
+                mutations: Vec::new(),
+            }
+        };
+
+        let crash = if let Some(ref sentry_src) = extras.sentry {
+            let p = Path::new(sentry_src);
+            let raw = std::fs::read_to_string(p).unwrap_or_else(|e| {
+                fail(
+                    CoreError::Io(e),
+                    &format!("Failed to read Sentry crash file {}", p.display()),
+                    theme,
+                )
+            });
+            Some(
+                replayfix_core::SentryIngestion::parse_json(&raw)
+                    .unwrap_or_else(|e| fail(e, "Failed to parse Sentry crash dump", theme)),
+            )
+        } else {
+            None
+        };
+
+        Some(
+            replayfix_core::synthesize_manifest_from_telemetry(
+                &session,
+                crash.as_ref(),
+                Path::new(&repo),
+            )
+            .unwrap_or_else(|e| fail(e, "Failed to synthesize manifest from APM telemetry", theme)),
+        )
+    } else {
+        None
+    };
+
+    let bug_shorthand = bug.as_deref().or(inferred_from_video).or_else(|| {
+        apm_manifest
+            .as_ref()
+            .and_then(|_| extras.mock_heal.then_some("RF-01"))
+    });
     let id = task_id
         .or_else(|| bug_shorthand.map(str::to_string))
         .or_else(|| issue_data.as_ref().map(|d| format!("GH-{}-{}", d.issue_ref.repo, d.issue_ref.issue_number)))
+        .or_else(|| apm_manifest.as_ref().map(|m| m.task_id.clone()))
         .unwrap_or_else(|| {
             usage_error(
-                "Missing required argument '--task-id' (or specify '--bug' / '--issue' / '--manifest')",
+                "Missing required argument '--task-id' (or specify '--bug' / '--issue' / '--manifest' / '--rrweb' / '--sentry')",
                 theme,
             )
         });
     let bug_branch = bug_ref
         .or_else(|| bug_shorthand.map(|b| format!("bug/{b}")))
         .or_else(|| issue_data.as_ref().map(|_| "HEAD".to_string()))
+        .or_else(|| apm_manifest.as_ref().map(|m| m.bug_ref.clone()))
         .unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
     let video_file = video
         .or_else(|| {
@@ -848,9 +904,11 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
                 .as_ref()
                 .map(|_| "recordings/issue.mp4".to_string())
         })
+        .or_else(|| apm_manifest.as_ref().map(|m| m.video_path.clone()))
         .unwrap_or_else(|| usage_error("Missing required argument '--video'", theme));
     let task_title = title
         .or_else(|| issue_data.as_ref().map(|d| d.title.clone()))
+        .or_else(|| apm_manifest.as_ref().map(|m| m.title.clone()))
         .unwrap_or_else(|| format!("Reproduction Task {id}"));
 
     let adapter = server_cmd.is_some().then_some(EnvironmentAdapter {
@@ -1443,10 +1501,28 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 );
             }
 
-            // Spec 150: Permanent Inoculation & Autonomous Git PR Packaging
+            // Spec 150 / Spec 180: Permanent Inoculation & Autonomous Git PR Packaging
             let mut inoc_spec_opt = None;
             if extras.inoculate {
-                if let Ok((spec, _entry, spec_path)) =
+                if let Some(ref matrix_raw) = extras.matrix {
+                    let (engines, presets) = replayfix_core::parse_matrix_arg(matrix_raw);
+                    if let Ok(spec) = replayfix_core::InoculationGenerator::synthesize_matrix_spec(
+                        &fixture, &engines, &presets,
+                    ) {
+                        let spec_path = repo_dir.join(&spec.spec_rel_path);
+                        if let Some(parent) = spec_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::write(&spec_path, &spec.typescript_content);
+                        println!(
+                            "    {} Inoculate : {} (SHA-256: {})",
+                            theme.muted(Symbols::STEP),
+                            spec_path.display(),
+                            short(&spec.spec_sha256)
+                        );
+                        inoc_spec_opt = Some(spec);
+                    }
+                } else if let Ok((spec, _entry, spec_path)) =
                     replayfix_core::InoculationGenerator::inoculate_workspace(
                         &fixture, &repo_dir, &out_dir, None,
                     )
@@ -2192,19 +2268,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Some(Commands::Ingest(args)) => {
-            let code = ingest_cmd::run_ingest(*args)?;
+            let code = ingest_cmd::run_ingest(*args)
+                .unwrap_or_else(|e| fail(e, "APM telemetry ingestion failed", &stderr_theme));
             exit(code);
         }
         Some(Commands::Swarm(args)) => {
-            let code = swarm_cmd::run_swarm_cmd(*args)?;
+            let code = swarm_cmd::run_swarm_cmd(*args)
+                .unwrap_or_else(|e| fail(e, "Distributed swarm execution failed", &stderr_theme));
             exit(code);
         }
         Some(Commands::Dashboard(args)) => {
-            let code = dashboard_cmd::run_dashboard_cmd(*args)?;
+            let code = dashboard_cmd::run_dashboard_cmd(*args)
+                .unwrap_or_else(|e| fail(e, "Dashboard server failed", &stderr_theme));
             exit(code);
         }
         Some(Commands::Notary(args)) => {
-            let code = notary_cmd::run_notary_cmd(*args)?;
+            let code = notary_cmd::run_notary_cmd(*args)
+                .unwrap_or_else(|e| fail(e, "Notary ledger operation failed", &stderr_theme));
             exit(code);
         }
         Some(Commands::Bot(args)) => bot::run_bot(*args, &stdout_theme)?,

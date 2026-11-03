@@ -436,6 +436,114 @@ fn test_notary_append_and_verify_log_consistency() {
     let proof_val: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&proof_out.stdout)).unwrap();
     assert_eq!(proof_val["verified"], true);
+    assert!(proof_val["first_root"].as_str().unwrap().len() == 64);
+    assert!(proof_val["second_root"].as_str().unwrap().len() == 64);
+
+    // 5. Tamper with transparency_log.json and verify fail-closed exit code 40 even with --json
+    let mut tampered: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&log_file).unwrap()).unwrap();
+    tampered["entries"][0]["task_id"] = serde_json::json!("TAMPERED-TASK");
+    fs::write(&log_file, serde_json::to_string_pretty(&tampered).unwrap()).unwrap();
+
+    let tampered_out = run_cli(&[
+        "notary",
+        "verify-log",
+        "--log",
+        log_file.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(
+        tampered_out.status.code().unwrap_or(-1),
+        40,
+        "Tampered log must fail closed with exit code 40"
+    );
+    let tampered_val: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&tampered_out.stdout)).unwrap();
+    assert_eq!(tampered_val["valid"], false);
+    assert_eq!(tampered_val["status"], "INTEGRITY_VIOLATION");
+
+    let _ = fs::remove_dir_all(&temp);
+}
+
+#[test]
+fn test_ingest_rejects_sentry_path_traversal_with_exit_11() {
+    let temp = scratch("ingest-traversal");
+    let repo = temp.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    init_test_git_repo(&repo);
+
+    let sentry_file = temp.join("malicious_crash.json");
+    let sentry_content = serde_json::json!({
+        "event_id": "bad1234567890",
+        "title": "Error: traversal",
+        "exception": {
+            "values": [
+                {
+                    "type": "Error",
+                    "value": "traversal",
+                    "stacktrace": {
+                        "frames": [
+                            {
+                                "filename": "../../../etc/passwd",
+                                "function": "exploit",
+                                "lineno": 1
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    });
+    fs::write(&sentry_file, sentry_content.to_string()).unwrap();
+
+    let out = run_cli(&[
+        "ingest",
+        "--sentry",
+        sentry_file.to_str().unwrap(),
+        "--repo",
+        repo.to_str().unwrap(),
+    ]);
+
+    assert_eq!(
+        out.status.code().unwrap_or(-1),
+        11,
+        "Path traversal in Sentry stack frame must fail closed with exit code 11 (SECURITY_VIOLATION)"
+    );
+
+    let _ = fs::remove_dir_all(&temp);
+}
+
+#[test]
+fn test_inoculate_matrix_includes_pixel7_and_calibrated_dpr_coordinates() {
+    let temp = scratch("inoculate-pixel7");
+    let repo = temp.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    init_test_git_repo(&repo);
+
+    let out_dir = temp.join("out");
+
+    let out = run_cli(&[
+        "inoculate",
+        "--bug",
+        "RF-01",
+        "--repo",
+        repo.to_str().unwrap(),
+        "--output",
+        out_dir.to_str().unwrap(),
+        "--matrix",
+        "chromium,mobile,pixel7,tablet",
+        "--json",
+    ]);
+
+    assert_eq!(out.status.code().unwrap_or(-1), 0);
+
+    let matrix_spec_path = repo.join("tests/repro/rf_rf_01_matrix.spec.ts");
+    let spec_content = fs::read_to_string(&matrix_spec_path).unwrap();
+    assert!(spec_content.contains("Mobile Portrait (iPhone 14)"));
+    assert!(spec_content.contains("Mobile Portrait (Pixel 7)"));
+    assert!(spec_content.contains("dpr: 2.625"));
+    assert!(spec_content.contains("calibratedX:"));
+    assert!(spec_content.contains("calibratedY:"));
 
     let _ = fs::remove_dir_all(&temp);
 }

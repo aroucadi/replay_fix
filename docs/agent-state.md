@@ -1,11 +1,17 @@
 # Agent Living State — ReplayFix
 
 ## 1. Project Phase & Active Task
-- **Active Milestone**: `v1.7.0` (`170-v1.7.0-github-issue-bot` — Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine)
-- **Status**: Production Release Qualification Complete; 311/311 Tests Passing, Zero Panics, 0 Clippy Warnings. Established `replayfix bot` (`--issue <url>` and `--listen <addr>`) with multimodal GitHub issue ingestion, FFmpeg container geometry probing, RFC 2104 constant-time HMAC-SHA256 webhook verification, anti-loop bot protection, issue-specific permanent Playwright inoculation (`tests/repro/rf_issue_<id>.spec.ts`), automated PR dispatch (`replayfix/issue-<id>-<slug>`), and cryptographic issue thread comments.
+- **Active Milestone**: `v1.8.0` (`180-v1.8.0-fleet-dashboard-swarm` — Distributed Multi-Agent Swarm, Live Streaming Dashboard & Production APM Session Replay Ingestion)
+- **Status**: Production Release Qualification Complete; 326/326 Tests Passing, Zero Panics, 0 Clippy Warnings. Established `replayfix ingest` (RRWeb session replay & Sentry crash dump ingestion), `replayfix swarm` (concurrent work-stealing triage cluster with shared `RatePool` & `CircuitBreaker`), `replayfix dashboard` (embedded RFC 6455 WebSocket + SSE observability server & air-gapped `dashboard.html` SPA), `replayfix inoculate --matrix` (cross-browser & multi-device DPR-calibrated Playwright matrices), and `replayfix notary` (RFC 6962 append-only transparency log & consistency proofs).
 - **Release process**: verify repo → specify → plan/tasks → implement → test → review → QA → security → docs/changelog/release notes → ship → verify remote. Release notes live in `docs/release-notes/vX.Y.Z.md`; every tag needs a changelog entry and release notes.
 
 ## 2. Verified Milestones & Evidence
+- [x] **v1.8.0 Distributed Multi-Agent Swarm, Live Streaming Dashboard & Production APM Session Replay Ingestion (Spec 180)**:
+  - Implemented `crates/replayfix-core/src/rrweb.rs` (`RrwebParser`, `SentryIngestion`, `ingest_session_replay`, `translate_sentry_breadcrumbs`, `synthesize_manifest_from_telemetry`) and `crates/replayfix-cli/src/ingest_cmd.rs` (`replayfix ingest`), ingesting RRWeb JSON event streams (arrays or `rrweb_ingest.schema.json` envelopes) and Sentry crash dumps with strict path traversal quarantine (`TaskManifest::assert_safe_path`) and secret redaction.
+  - Implemented `crates/replayfix-core/src/swarm.rs` (`SwarmCoordinator`, `SwarmConfig`, `SwarmTask`, `SwarmSummary`) and `crates/replayfix-cli/src/swarm_cmd.rs` (`replayfix swarm`), coordinating concurrent worker threads with shared `RatePool` and `CircuitBreaker`, ephemeral `ScratchSandbox` + `EphemeralPort` isolation, $\Delta\text{repo}=0$ verification, and RFC 6962 Merkle-attested receipts.
+  - Implemented `crates/replayfix-core/src/dashboard.rs` (`DashboardServer`, `DashboardBroadcaster`, `compute_ws_accept`, `encode_ws_text_frame`), `crates/replayfix-cli/src/dashboard_cmd.rs` (`replayfix dashboard`), and single-file `dashboard.html` SPA with RFC 6455 WebSocket screencast streaming (`/ws/screencast/:task_id`), SSE reasoning streams (`/events/reasoning/:task_id`), loopback CORS validation, and CSP headers.
+  - Extended `crates/replayfix-core/src/inoculate.rs` (`ViewportPreset`, `parse_matrix_arg`, `calibrate_viewport_coords`, `synthesize_matrix_spec`) for `--matrix` cross-browser (`chromium`, `firefox`, `webkit`) and multi-device (`iPhone 14` @ DPR 3.0, `Pixel 7` @ DPR 2.625, `iPad Air` @ DPR 2.0, `Desktop Wide` @ DPR 1.0) regression test generation.
+  - Implemented `crates/replayfix-core/src/notary.rs` (`TransparencyLog`, `TransparencyLogEntry`) and `crates/replayfix-cli/src/notary_cmd.rs` (`replayfix notary append|verify-log|consistency-proof`), providing RFC 6962 append-only transparency logs, consistency proofs ($0x00$/$0x01$), and Ed25519 ledger attestations.
 - [x] **v1.7.0 Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (Spec 170)**:
   - Implemented `crates/replayfix-core/src/github.rs` (`GitHubClient`, `IssueTriageBundle`, `IssueCommenter`, `TriageLabel`, `verify_webhook_signature`, `filter_webhook_event`, `validate_video_container`, `validate_markdown_file_paths`, `redact_github_secrets`) with FFmpeg container geometry probing (`VideoPreprocessor::probe_video`), path traversal quarantine (`TaskManifest::assert_safe_path`), and secret redaction.
   - Implemented `crates/replayfix-cli/src/bot.rs` (`BotArgs`, `IssueTriageRunner`, `WebhookServerHandle`, `run_webhook_listener`, `run_bot`), executing isolated scratch triage ($\Delta\text{repo}=0$), synthesizing `tests/repro/rf_issue_<id>.spec.ts`, committing onto `replayfix/issue-<id>-<slug>` with `Fixes #<id>` and `ReplayFix-Issue: <url>` trailers, opening verified PRs, and commenting visual keyframe + `ariaSnapshot` diffs + `audit_receipt.json` proof back to the issue thread.
@@ -150,8 +156,8 @@
 ## 4. Deferred Items (documented, not hidden)
 - `tracing_subscriber` is initialised for structured diagnostic logging.
 
-## 5. v1.3.0 Readiness
-- **Shipping status**: Spec 000 through Spec 130 (`v1.3.0`) complete, verified, and packaged in `release/v1.3.0/`.
+## 5. v1.8.0 Readiness
+- **Shipping status**: Spec 000 through Spec 180 (`v1.8.0`) complete, verified, and packaged in `release/v1.8.0/`.
 
 ## 6. Next Immediate Task
-- Stand by for `v1.3.0` release tagging or live Meta AI execution runs.
+- Stand by for next milestone instructions or live Meta AI execution runs.

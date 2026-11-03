@@ -164,9 +164,9 @@ pub use reporters::{
     SARIF_SCHEMA_URI, SARIF_VERSION,
 };
 pub use rrweb::{
-    synthesize_manifest_from_telemetry, DomMutationSummary, RrwebInteraction, RrwebParser,
-    RrwebRawEvent, RrwebSession, SentryBreadcrumb, SentryCrashDump, SentryIngestion,
-    SentryStackFrame,
+    ingest_session_replay, synthesize_manifest_from_telemetry, translate_sentry_breadcrumbs,
+    DomMutationSummary, RrwebInteraction, RrwebParser, RrwebRawEvent, RrwebSession,
+    SentryBreadcrumb, SentryCrashDump, SentryIngestion, SentryStackFrame,
 };
 pub use stress::{
     PerturbationProfile, StressPassResult, StressQuorumReport, StressQuorumRunner,
