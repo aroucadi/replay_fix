@@ -140,17 +140,34 @@ impl ExecutionPlan {
         }
     }
 
-    /// Render structured plan card for user review.
+    /// Render structured plan card for user review with rounded Unicode box geometry and Truecolor risk pills.
     pub fn render_card(&self, theme: &Theme) {
+        use crate::ui::CyberPalette;
+
         println!();
-        let bar = "─".repeat(60);
-        println!("  {}", theme.muted(&bar));
+        let top = format!(
+            "  {}{}{}",
+            Symbols::BOX_TL,
+            Symbols::BOX_H.repeat(66),
+            Symbols::BOX_TR
+        );
+        let bot = format!(
+            "  {}{}{}",
+            Symbols::BOX_BL,
+            Symbols::BOX_H.repeat(66),
+            Symbols::BOX_BR
+        );
+        println!("{}", theme.muted(&top));
         println!(
-            "  {} {}",
+            "  {} {} {}",
+            theme.muted(Symbols::BOX_V),
             theme.brand("EXECUTION PLAN //"),
             theme.bold(&self.title)
         );
-        println!("  {}", theme.muted(&bar));
+        println!(
+            "{}",
+            theme.muted(&format!("  ├{}┤", Symbols::BOX_H.repeat(66)))
+        );
         println!(
             "    {} : {}",
             theme.muted("Target Task"),
@@ -164,21 +181,27 @@ impl ExecutionPlan {
         println!();
         println!("  {}", theme.bold("Planned Steps:"));
         for step in &self.steps {
-            let risk_str = match step.risk {
-                RiskLevel::Low => theme.info("[LOW] "),
-                RiskLevel::Medium => theme.warning("[MED] "),
-                RiskLevel::High => theme.error("[HIGH]"),
+            let risk_pill = match step.risk {
+                RiskLevel::Low => {
+                    theme.pill("LOW ", CyberPalette::TITANIUM, CyberPalette::CYAN_BG)
+                }
+                RiskLevel::Medium => {
+                    theme.pill("MED ", CyberPalette::TITANIUM, CyberPalette::AMBER_BG)
+                }
+                RiskLevel::High => {
+                    theme.pill("HIGH", CyberPalette::TITANIUM, CyberPalette::CRIMSON_BG)
+                }
             };
             println!(
                 "    {} {} {: <30} {}",
-                risk_str,
+                risk_pill,
                 theme.muted(Symbols::STEP),
                 theme.bold(step.name),
                 theme.muted(&format!("({})", step.tool_or_component))
             );
             println!("         {}", theme.muted(&step.description));
         }
-        println!("  {}", theme.muted(&bar));
+        println!("{}", theme.muted(&bot));
     }
 }
 

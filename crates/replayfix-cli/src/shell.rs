@@ -7,8 +7,11 @@
 use crate::intent::{AgentIntent, ExecutionPlan, IntentParser};
 use crate::permissions::{PermissionAction, PermissionDecision, RiskLevel};
 use crate::session::AgentSession;
+use crate::tui::brand::{render_compact_hud_emblem, render_hero_splash};
 use crate::tui::dialog::prompt_selection;
 use crate::tui::diff_view::{DiffReviewOutcome, DiffReviewer};
+use crate::tui::motion::render_breathing_prompt;
+use crate::tui::screen::ScreenGuard;
 use crate::tui::spinner::StatusSpinner;
 use crate::ui::{print_banner, print_field, Symbols, Theme};
 use replayfix_core::engine::{HealOutcome, LiveBrowserOptions, MockHealer};
@@ -58,7 +61,9 @@ impl AgentShell {
 
     /// Run the interactive agent loop.
     pub fn run(&mut self) -> std::result::Result<(), Box<dyn std::error::Error>> {
-        print_banner(&self.theme, "Interactive Agent Workspace (v1.5.0)");
+        let (cols, _rows) = ScreenGuard::get_size();
+        println!("{}", render_hero_splash(cols, &self.theme));
+        print_banner(&self.theme, "Interactive Agent Workspace (v1.9.5)");
         println!(
             "  {} Welcome to ReplayFix. Describe your debugging goal or type '/help'.",
             self.theme.brand(Symbols::BULLET)
@@ -78,6 +83,7 @@ impl AgentShell {
         println!("  {}", self.theme.muted(&"─".repeat(60)));
         println!();
 
+        let mut prompt_tick: u64 = 0;
         loop {
             self.state = AgentState::Idle;
             let task_prompt = self
@@ -86,10 +92,14 @@ impl AgentShell {
                 .active_task
                 .as_deref()
                 .unwrap_or("ready");
+            let hud = render_compact_hud_emblem(self.theme.color_enabled);
+            let glyph = render_breathing_prompt(prompt_tick, self.theme.color_enabled);
+            prompt_tick = prompt_tick.wrapping_add(15);
             print!(
-                "  {} [{}] > ",
-                self.theme.brand("replayfix"),
-                self.theme.info(task_prompt)
+                "  {} [{}] {} ",
+                hud,
+                self.theme.info(task_prompt),
+                glyph
             );
             let _ = io::stdout().flush();
 

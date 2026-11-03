@@ -1,11 +1,12 @@
-//! Terminal UI design tokens, color policies, output modes, and rendering architecture for ReplayFix CLI.
+//! Terminal UI design tokens, 24-bit Truecolor RGB policies, output modes,
+//! rounded Unicode box geometry, and background-filled pill badges for ReplayFix CLI (v1.9.5).
 //!
-//! Implements a 10/10 production-grade CLI interaction layer inspired by Cargo, Git, and Claude Code:
+//! Implements the "Living Cybernetic Command Deck" inspired by Claude Code, Charm Lipgloss/Bubbles, and Lazygit:
 //! - Three explicit output modes: Human, Quiet, and Machine.
 //! - Deterministic color precedence: CLI flag `--color` > `NO_COLOR` > `CLICOLOR_FORCE` > `TERM=dumb` > `is_terminal()`.
-//! - Independent capability detection for stdout and stderr.
-//! - Structured diagnostic engine (`DoctorCheckResult`) with Status, Finding, Impact, Remediation, and Evidence.
-//! - High-trust execution cards with clear security boundaries, repository invariants ($\Delta\text{repo}=0$), and verifiable audit summaries.
+//! - 24-bit Truecolor RGB foreground (`\x1b[38;2;R;G;Bm`) and background (`\x1b[48;2;R;G;Bm`) escapes (zero legacy 16-color escapes).
+//! - Rounded Unicode box geometry (`╭───╮`, `╰───╯`) and background-filled pill badges.
+//! - Automatic fallback to unformatted plain stream when `!stdout().is_terminal()`.
 
 use std::env;
 use std::fmt;
@@ -78,30 +79,105 @@ impl ColorOption {
     }
 }
 
-/// ANSI styling primitives.
+/// 24-bit Truecolor RGB triplet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgb(pub u8, pub u8, pub u8);
+
+impl Rgb {
+    /// Linearly interpolate between `self` and `other` with factor `t` clamped to `[0.0, 1.0]`.
+    #[must_use]
+    pub fn lerp(self, other: Self, t: f64) -> Self {
+        let clamped = t.clamp(0.0, 1.0);
+        let r = f64::from(self.0) + (f64::from(other.0) - f64::from(self.0)) * clamped;
+        let g = f64::from(self.1) + (f64::from(other.1) - f64::from(self.1)) * clamped;
+        let b = f64::from(self.2) + (f64::from(other.2) - f64::from(self.2)) * clamped;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Self(r.round() as u8, g.round() as u8, b.round() as u8)
+    }
+
+    /// Format as 24-bit Truecolor foreground escape (`\x1b[38;2;R;G;Bm`).
+    #[must_use]
+    pub fn fg_ansi(self) -> String {
+        format!("\x1b[38;2;{};{};{}m", self.0, self.1, self.2)
+    }
+
+    /// Format as 24-bit Truecolor background escape (`\x1b[48;2;R;G;Bm`).
+    #[must_use]
+    pub fn bg_ansi(self) -> String {
+        format!("\x1b[48;2;{};{};{}m", self.0, self.1, self.2)
+    }
+}
+
+/// 24-bit Truecolor Cybernetic Command Deck Palette.
+pub mod palette {
+    use super::Rgb;
+
+    pub const CYBER_CYAN: Rgb = Rgb(56, 189, 248);
+    pub const EMERALD: Rgb = Rgb(16, 185, 129);
+    pub const EMERALD_BRIGHT: Rgb = Rgb(52, 211, 153);
+    pub const AMBER: Rgb = Rgb(245, 158, 11);
+    pub const CRIMSON: Rgb = Rgb(244, 63, 94);
+    pub const ELECTRIC_BLUE: Rgb = Rgb(96, 165, 250);
+    pub const LAVENDER: Rgb = Rgb(167, 139, 250);
+    pub const FROST_WHITE: Rgb = Rgb(248, 250, 252);
+    pub const MUTED_STEEL: Rgb = Rgb(148, 163, 184);
+    pub const SLATE_BG: Rgb = Rgb(15, 23, 42);
+    pub const PILL_DARK_FG: Rgb = Rgb(9, 13, 22);
+    pub const DOCK_PILL_BG: Rgb = Rgb(30, 41, 59);
+}
+
+/// Cybernetic Truecolor Palette struct for TUI layout and widget themes.
+#[derive(Debug, Clone, Copy)]
+pub struct CyberPalette;
+
+impl CyberPalette {
+    pub const CYAN: Rgb = Rgb(56, 189, 248);
+    pub const CYAN_BG: Rgb = Rgb(12, 74, 110);
+    pub const EMERALD: Rgb = Rgb(16, 185, 129);
+    pub const EMERALD_BG: Rgb = Rgb(6, 78, 59);
+    pub const AMBER: Rgb = Rgb(245, 158, 11);
+    pub const AMBER_BG: Rgb = Rgb(120, 53, 15);
+    pub const CRIMSON: Rgb = Rgb(244, 63, 94);
+    pub const CRIMSON_BG: Rgb = Rgb(136, 19, 55);
+    pub const VIOLET: Rgb = Rgb(168, 85, 247);
+    pub const VIOLET_BG: Rgb = Rgb(59, 7, 100);
+    pub const TITANIUM: Rgb = Rgb(248, 250, 252);
+    pub const MUTED_STEEL: Rgb = Rgb(148, 163, 184);
+    pub const SURFACE_BG: Rgb = Rgb(30, 41, 59);
+    pub const VOID_BG: Rgb = Rgb(15, 23, 42);
+}
+
+/// 24-bit Truecolor ANSI styling primitives (zero legacy 16-color escapes).
 pub mod style {
     pub const RESET: &str = "\x1b[0m";
     pub const BOLD: &str = "\x1b[1m";
-    pub const DIM: &str = "\x1b[2m";
+    pub const DIM: &str = "\x1b[38;2;148;163;184m";
     pub const UNDERLINE: &str = "\x1b[4m";
 
-    pub const RED: &str = "\x1b[31m";
-    pub const GREEN: &str = "\x1b[32m";
-    pub const YELLOW: &str = "\x1b[33m";
-    pub const BLUE: &str = "\x1b[34m";
-    pub const MAGENTA: &str = "\x1b[35m";
-    pub const CYAN: &str = "\x1b[36m";
-    pub const WHITE: &str = "\x1b[37m";
+    pub const RED: &str = "\x1b[38;2;244;63;94m";
+    pub const GREEN: &str = "\x1b[38;2;16;185;129m";
+    pub const YELLOW: &str = "\x1b[38;2;245;158;11m";
+    pub const BLUE: &str = "\x1b[38;2;96;165;250m";
+    pub const MAGENTA: &str = "\x1b[38;2;167;139;250m";
+    pub const CYAN: &str = "\x1b[38;2;56;189;248m";
+    pub const WHITE: &str = "\x1b[38;2;248;250;252m";
 
-    pub const BOLD_RED: &str = "\x1b[1;31m";
-    pub const BOLD_GREEN: &str = "\x1b[1;32m";
-    pub const BOLD_YELLOW: &str = "\x1b[1;33m";
-    pub const BOLD_BLUE: &str = "\x1b[1;34m";
-    pub const BOLD_CYAN: &str = "\x1b[1;36m";
-    pub const BOLD_WHITE: &str = "\x1b[1;37m";
+    pub const BOLD_RED: &str = "\x1b[1;38;2;244;63;94m";
+    pub const BOLD_GREEN: &str = "\x1b[1;38;2;16;185;129m";
+    pub const BOLD_YELLOW: &str = "\x1b[1;38;2;245;158;11m";
+    pub const BOLD_BLUE: &str = "\x1b[1;38;2;96;165;250m";
+    pub const BOLD_CYAN: &str = "\x1b[1;38;2;56;189;248m";
+    pub const BOLD_WHITE: &str = "\x1b[1;38;2;248;250;252m";
+
+    pub const PILL_PASS: &str = "\x1b[1;38;2;9;13;22;48;2;16;185;129m";
+    pub const PILL_FAIL: &str = "\x1b[1;38;2;248;250;252;48;2;244;63;94m";
+    pub const PILL_WARN: &str = "\x1b[1;38;2;9;13;22;48;2;245;158;11m";
+    pub const PILL_RUN: &str = "\x1b[1;38;2;9;13;22;48;2;56;189;248m";
+    pub const PILL_MUTED: &str = "\x1b[1;38;2;226;232;240;48;2;51;65;85m";
+    pub const PILL_HOTKEY: &str = "\x1b[1;38;2;56;189;248;48;2;30;41;59m";
 }
 
-/// Semantic styling painter.
+/// Semantic styling painter with 24-bit Truecolor & background-filled pill badges.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub color_enabled: bool,
@@ -160,6 +236,71 @@ impl Theme {
         self.apply(text, style::DIM)
     }
 
+    /// Render a background-filled Truecolor pill badge (`\x1b[48;2;...m LABEL \x1b[0m`).
+    #[must_use]
+    pub fn pill<'a>(&self, label: &'a str, fg: Rgb, bg: Rgb) -> Pill<'a> {
+        Pill {
+            label,
+            fg,
+            bg,
+            enabled: self.color_enabled,
+        }
+    }
+
+    /// Semantic emerald pass pill badge.
+    #[must_use]
+    pub fn pill_success<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::PILL_DARK_FG, palette::EMERALD)
+    }
+
+    /// Semantic crimson failure pill badge.
+    #[must_use]
+    pub fn pill_error<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::FROST_WHITE, palette::CRIMSON)
+    }
+
+    /// Semantic amber warning pill badge.
+    #[must_use]
+    pub fn pill_warning<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::PILL_DARK_FG, palette::AMBER)
+    }
+
+    /// Semantic cyber-cyan active/info pill badge.
+    #[must_use]
+    pub fn pill_info<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::PILL_DARK_FG, palette::CYBER_CYAN)
+    }
+
+    /// Semantic muted slate pill badge.
+    #[must_use]
+    pub fn pill_muted<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::FROST_WHITE, palette::DOCK_PILL_BG)
+    }
+
+    /// Semantic inverted hotkey command pill badge.
+    #[must_use]
+    pub fn pill_hotkey<'a>(&self, label: &'a str) -> Pill<'a> {
+        self.pill(label, palette::CYBER_CYAN, palette::DOCK_PILL_BG)
+    }
+
+    /// Render a semantic status pill badge with background fill.
+    #[must_use]
+    pub fn status_pill(&self, status: StepStatus) -> Pill<'static> {
+        match status {
+            StepStatus::Done => self.pill_success("PASS"),
+            StepStatus::Fail => self.pill_error("FAIL"),
+            StepStatus::Warn => self.pill_warning("WARN"),
+            StepStatus::Running => self.pill_info("RUN "),
+            StepStatus::Skipped => self.pill_muted("SKIP"),
+        }
+    }
+
+    /// Render an inverted background command pill for dock hotkeys.
+    #[must_use]
+    pub fn command_pill<'a>(&self, text: &'a str) -> Pill<'a> {
+        self.pill_hotkey(text)
+    }
+
     fn apply<'a>(&self, text: &'a str, code: &'static str) -> Styled<'a> {
         Styled {
             text,
@@ -169,7 +310,7 @@ impl Theme {
     }
 }
 
-/// A string slice tagged with an ANSI style code that conditionally formats based on `enabled`.
+/// A string slice tagged with a 24-bit Truecolor ANSI style code that conditionally formats based on `enabled`.
 #[derive(Debug, Clone, Copy)]
 pub struct Styled<'a> {
     text: &'a str,
@@ -187,7 +328,37 @@ impl<'a> fmt::Display for Styled<'a> {
     }
 }
 
-/// Accessible terminal symbols with guaranteed unicode fallbacks.
+/// Background-filled 24-bit Truecolor pill badge (`\x1b[1;38;2;R;G;B;48;2;R;G;Bm LABEL \x1b[0m`).
+#[derive(Debug, Clone, Copy)]
+pub struct Pill<'a> {
+    label: &'a str,
+    fg: Rgb,
+    bg: Rgb,
+    enabled: bool,
+}
+
+impl<'a> fmt::Display for Pill<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.enabled {
+            write!(
+                f,
+                "\x1b[1;38;2;{};{};{};48;2;{};{};{}m {} {}",
+                self.fg.0,
+                self.fg.1,
+                self.fg.2,
+                self.bg.0,
+                self.bg.1,
+                self.bg.2,
+                self.label,
+                style::RESET
+            )
+        } else {
+            write!(f, " {} ", self.label)
+        }
+    }
+}
+
+/// Accessible terminal & Nerd Font symbols with rounded Unicode box geometry.
 #[derive(Debug, Clone, Copy)]
 pub struct Symbols;
 
@@ -199,17 +370,100 @@ impl Symbols {
     pub const ARROW_RIGHT: &str = "→";
     pub const STEP: &str = "›";
     pub const SHIELD: &str = "⛨";
+    pub const PROMPT: &str = "❯";
+    pub const BRANCH: &str = "󰊢";
+    pub const SPEC: &str = "󰈚";
+    pub const SPARK: &str = "⚡";
+    pub const CORE: &str = "󰒓";
+    pub const BOX_TL: &str = "╭";
+    pub const BOX_TR: &str = "╮";
+    pub const BOX_BL: &str = "╰";
+    pub const BOX_BR: &str = "╯";
+    pub const BOX_H: &str = "─";
+    pub const BOX_V: &str = "│";
 }
 
-/// Render a section header banner with consistent visual hierarchy.
+/// Format a rounded Unicode box container (`╭───╮ ... ╰───╯`) around a title and body lines.
+#[must_use]
+pub fn format_rounded_box(
+    theme: &Theme,
+    title: &str,
+    lines: &[String],
+    inner_width: usize,
+) -> String {
+    let mut out = String::new();
+    let w = inner_width.max(title.chars().count().saturating_add(8));
+    let top_rule = format!(
+        "  {}{}{}",
+        Symbols::BOX_TL,
+        Symbols::BOX_H.repeat(w),
+        Symbols::BOX_TR
+    );
+    let bot_rule = format!(
+        "  {}{}{}",
+        Symbols::BOX_BL,
+        Symbols::BOX_H.repeat(w),
+        Symbols::BOX_BR
+    );
+
+    out.push_str(&format!("{}", theme.muted(&top_rule)));
+    out.push('\n');
+    let header_plain = format!(" ReplayFix // {title}");
+    let header_pad = w.saturating_sub(header_plain.chars().count());
+    out.push_str(&format!(
+        "  {} {} {}{}{}",
+        theme.muted(Symbols::BOX_V),
+        theme.brand("ReplayFix //"),
+        theme.bold(title),
+        " ".repeat(header_pad),
+        theme.muted(Symbols::BOX_V)
+    ));
+    out.push('\n');
+
+    if !lines.is_empty() {
+        let mid_rule = format!("  ├{}┤", Symbols::BOX_H.repeat(w));
+        out.push_str(&format!("{}", theme.muted(&mid_rule)));
+        out.push('\n');
+        for line in lines {
+            let char_len = line.chars().count();
+            let pad = w.saturating_sub(char_len.saturating_add(2));
+            out.push_str(&format!(
+                "  {} {}{} {}",
+                theme.muted(Symbols::BOX_V),
+                line,
+                " ".repeat(pad),
+                theme.muted(Symbols::BOX_V)
+            ));
+            out.push('\n');
+        }
+    }
+
+    out.push_str(&format!("{}", theme.muted(&bot_rule)));
+    out
+}
+
+/// Render a rounded Unicode section header banner (`╭───╮` / `╰───╯`).
 pub fn print_banner(theme: &Theme, title: &str) {
     if theme.mode == OutputMode::Quiet || theme.mode == OutputMode::Machine {
         return;
     }
-    let bar = "─".repeat(60);
-    println!("{}", theme.muted(&bar));
-    println!("  {} {}", theme.brand("ReplayFix //"), theme.bold(title));
-    println!("{}", theme.muted(&bar));
+    let inner_width = 62usize.max(title.chars().count().saturating_add(18));
+    let horizontal = Symbols::BOX_H.repeat(inner_width);
+    let top = format!("  {}{}{}", Symbols::BOX_TL, horizontal, Symbols::BOX_TR);
+    let bottom = format!("  {}{}{}", Symbols::BOX_BL, horizontal, Symbols::BOX_BR);
+    let content_len = "ReplayFix // ".chars().count() + title.chars().count();
+    let pad = " ".repeat(inner_width.saturating_sub(content_len.saturating_add(2)));
+
+    println!("{}", theme.muted(&top));
+    println!(
+        "  {} {} {}{}{}",
+        theme.muted(Symbols::BOX_V),
+        theme.brand("ReplayFix //"),
+        theme.bold(title),
+        pad,
+        theme.muted(Symbols::BOX_V)
+    );
+    println!("{}", theme.muted(&bottom));
 }
 
 /// Print a clean labeled field line: `Label : Value (Note)`.
@@ -240,7 +494,7 @@ pub enum StepStatus {
     Skipped,
 }
 
-/// Print an operational phase step with clear status semantics.
+/// Print an operational phase step with background-filled 24-bit Truecolor pill badges.
 pub fn print_step(
     theme: &Theme,
     phase: &str,
@@ -251,15 +505,15 @@ pub fn print_step(
     if theme.mode == OutputMode::Quiet || theme.mode == OutputMode::Machine {
         return;
     }
-    let (icon, label) = match status {
-        StepStatus::Done => (theme.success(Symbols::CHECK), theme.success("PASS")),
-        StepStatus::Fail => (theme.error(Symbols::CROSS), theme.error("FAIL")),
-        StepStatus::Warn => (theme.warning(Symbols::WARN), theme.warning("WARN")),
-        StepStatus::Running => (theme.info(Symbols::BULLET), theme.info("RUN ")),
-        StepStatus::Skipped => (theme.muted(Symbols::ARROW_RIGHT), theme.muted("SKIP")),
+    let (icon, pill) = match status {
+        StepStatus::Done => (theme.success(Symbols::CHECK), theme.pill_success("PASS")),
+        StepStatus::Fail => (theme.error(Symbols::CROSS), theme.pill_error("FAIL")),
+        StepStatus::Warn => (theme.warning(Symbols::WARN), theme.pill_warning("WARN")),
+        StepStatus::Running => (theme.info(Symbols::BULLET), theme.pill_info("RUN ")),
+        StepStatus::Skipped => (theme.muted(Symbols::ARROW_RIGHT), theme.pill_muted("SKIP")),
     };
 
-    println!("  {icon} {: <14} [{label}] {}", theme.bold(phase), headline);
+    println!("  {icon} {: <14} {pill} {}", theme.bold(phase), headline);
     if let Some(d) = detail {
         println!("    {} {}", theme.muted(Symbols::STEP), theme.muted(d));
     }
@@ -284,7 +538,7 @@ pub enum DiagnosticStatus {
     NotChecked,
 }
 
-/// Render structured diagnostics with findings, impacts, and concrete remediation.
+/// Render structured diagnostics with background-filled Truecolor pill badges.
 pub fn print_diagnostics(theme: &Theme, checks: &[DiagnosticCheck]) {
     if theme.mode == OutputMode::Quiet || theme.mode == OutputMode::Machine {
         return;
@@ -293,15 +547,20 @@ pub fn print_diagnostics(theme: &Theme, checks: &[DiagnosticCheck]) {
         let (icon, badge) = match check.status {
             DiagnosticStatus::Ok => (
                 theme.success(Symbols::CHECK),
-                theme.success("[OK]         "),
+                theme.pill_success("OK         "),
             ),
-            DiagnosticStatus::Warn => {
-                (theme.warning(Symbols::WARN), theme.warning("[WARN]       "))
-            }
-            DiagnosticStatus::Fail => (theme.error(Symbols::CROSS), theme.error("[MISSING]    ")),
-            DiagnosticStatus::NotChecked => {
-                (theme.muted(Symbols::BULLET), theme.muted("[NOT CHECKED]"))
-            }
+            DiagnosticStatus::Warn => (
+                theme.warning(Symbols::WARN),
+                theme.pill_warning("WARN       "),
+            ),
+            DiagnosticStatus::Fail => (
+                theme.error(Symbols::CROSS),
+                theme.pill_error("MISSING    "),
+            ),
+            DiagnosticStatus::NotChecked => (
+                theme.muted(Symbols::BULLET),
+                theme.pill_muted("NOT CHECKED"),
+            ),
         };
         println!(
             "  {icon} {} {: <14} {}",
@@ -331,41 +590,64 @@ pub fn print_diagnostics(theme: &Theme, checks: &[DiagnosticCheck]) {
     }
 }
 
-/// Print execution security & trust boundary card.
+/// Print execution security & trust boundary card inside a rounded Unicode box (`╭───╮` / `╰───╯`).
 pub fn print_security_boundary(theme: &Theme, repo: &str, is_read_only: bool, isolated: bool) {
     if theme.mode == OutputMode::Quiet || theme.mode == OutputMode::Machine {
         return;
     }
-    println!();
-    println!(
-        "  {} {}",
-        theme.brand(Symbols::SHIELD),
-        theme.bold("Security & Isolation Guarantees:")
-    );
     let repo_mode = if is_read_only {
         "Strictly Read-Only (Δrepo = 0 invariant enforced)"
     } else {
         "Direct Mutation Permitted"
     };
-    println!(
-        "    {} Target Repository : {} ({})",
-        theme.muted(Symbols::STEP),
-        repo,
-        repo_mode
-    );
     let isolation_status = if isolated {
         "Active (ephemeral scratch workspace in OS temp dir)"
     } else {
         "Disabled (running directly in workspace)"
     };
+
+    let lines = [
+        format!("Target Repository : {repo} ({repo_mode})"),
+        format!("Execution Sandbox  : {isolation_status}"),
+        "Test Freeze Hash   : SHA-256 pre-flight invariant active".to_string(),
+    ];
+    let max_line = lines
+        .iter()
+        .map(|s| s.chars().count().saturating_add(4))
+        .max()
+        .unwrap_or(60)
+        .max(62);
+    let horiz = Symbols::BOX_H.repeat(max_line);
+
+    println!();
     println!(
-        "    {} Execution Sandbox  : {}",
-        theme.muted(Symbols::STEP),
-        isolation_status
+        "  {}",
+        theme.muted(&format!("{}{}{}", Symbols::BOX_TL, horiz, Symbols::BOX_TR))
     );
+    let title = "Security & Isolation Guarantees";
+    let title_pad = " ".repeat(max_line.saturating_sub(title.chars().count().saturating_add(4)));
     println!(
-        "    {} Test Freeze Hash   : SHA-256 pre-flight invariant active",
-        theme.muted(Symbols::STEP)
+        "  {} {} {}{}{}",
+        theme.muted(Symbols::BOX_V),
+        theme.brand(Symbols::SHIELD),
+        theme.bold(title),
+        title_pad,
+        theme.muted(Symbols::BOX_V)
+    );
+    for line in &lines {
+        let pad = " ".repeat(max_line.saturating_sub(line.chars().count().saturating_add(4)));
+        println!(
+            "  {} {} {}{}{}",
+            theme.muted(Symbols::BOX_V),
+            theme.muted(Symbols::STEP),
+            line,
+            pad,
+            theme.muted(Symbols::BOX_V)
+        );
+    }
+    println!(
+        "  {}",
+        theme.muted(&format!("{}{}{}", Symbols::BOX_BL, horiz, Symbols::BOX_BR))
     );
     println!();
 }
@@ -410,16 +692,26 @@ mod tests {
     }
 
     #[test]
-    fn test_theme_methods_produce_expected_styles() {
+    fn test_theme_methods_produce_24bit_truecolor_and_pills() {
         let theme = Theme {
             color_enabled: true,
             mode: OutputMode::Human,
         };
-        assert!(format!("{}", theme.brand("brand")).contains("\x1b[1;36m"));
-        assert!(format!("{}", theme.error("err")).contains("\x1b[1;31m"));
-        assert!(format!("{}", theme.warning("warn")).contains("\x1b[1;33m"));
-        assert!(format!("{}", theme.info("info")).contains("\x1b[1;34m"));
+        assert!(format!("{}", theme.brand("brand")).contains("\x1b[1;38;2;56;189;248m"));
+        assert!(format!("{}", theme.success("ok")).contains("\x1b[1;38;2;16;185;129m"));
+        assert!(format!("{}", theme.error("err")).contains("\x1b[1;38;2;244;63;94m"));
+        assert!(format!("{}", theme.warning("warn")).contains("\x1b[1;38;2;245;158;11m"));
+        assert!(format!("{}", theme.info("info")).contains("\x1b[1;38;2;96;165;250m"));
         assert!(format!("{}", theme.bold("bold")).contains("\x1b[1m"));
-        assert!(format!("{}", theme.muted("dim")).contains("\x1b[2m"));
+        assert!(format!("{}", theme.muted("dim")).contains("\x1b[38;2;148;163;184m"));
+
+        let pass_pill = format!("{}", theme.pill_success("PASS"));
+        assert!(pass_pill.contains("\x1b[1;38;2;9;13;22;48;2;16;185;129m PASS \x1b[0m"));
+
+        let plain_theme = Theme {
+            color_enabled: false,
+            mode: OutputMode::Human,
+        };
+        assert_eq!(format!("{}", plain_theme.pill_success("PASS")), " PASS ");
     }
 }

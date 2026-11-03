@@ -1,14 +1,15 @@
-//! Interactive Terminal Diff Reviewer Component.
+//! Interactive Terminal Diff Reviewer Component (`tui/diff_view.rs`).
 //!
-//! Provides a keyboard-driven, virtualized diff viewer with syntax highlighting,
-//! scrollable viewport bounding, and explicit human confirmation controls.
+//! Provides a keyboard-driven, virtualized diff viewer with 24-bit Truecolor syntax
+//! highlighting, line-number gutters, rounded Unicode box geometry, Sticky Dock command pills,
+//! and double-buffered differential rendering (zero `Clear(All)` full-screen blink).
 
 use crate::approval::{highlight_diff, parse_diff_stats, sanitize_ansi};
+use crate::tui::layout::{style_diff_token_line, DifferentialRenderer};
 use crate::tui::screen::ScreenGuard;
-use crate::ui::Theme;
+use crate::ui::{CyberPalette, Symbols, Theme};
 use crossterm::cursor::MoveTo;
 use crossterm::event::{KeyCode, KeyEvent};
-use crossterm::terminal::{Clear, ClearType};
 use crossterm::QueueableCommand;
 use replayfix_core::digest::sha256_hex;
 use std::io::{self, stdout, Write};
@@ -43,7 +44,7 @@ pub enum DiffReviewOutcome {
     Aborted,
 }
 
-/// Interactive Diff Reviewer widget.
+/// Interactive Diff Reviewer widget with differential frame rendering.
 #[derive(Debug)]
 pub struct DiffReviewer<'a> {
     diff: &'a str,
@@ -54,6 +55,7 @@ pub struct DiffReviewer<'a> {
     patch_sha256: String,
     scroll_offset: usize,
     focus: ReviewFocus,
+    renderer: DifferentialRenderer,
 }
 
 impl<'a> DiffReviewer<'a> {
@@ -72,6 +74,7 @@ impl<'a> DiffReviewer<'a> {
             patch_sha256,
             scroll_offset: 0,
             focus: ReviewFocus::DiffViewport,
+            renderer: DifferentialRenderer::new(),
         }
     }
 
@@ -112,13 +115,13 @@ impl<'a> DiffReviewer<'a> {
                 None
             }
             KeyCode::PageDown | KeyCode::Char('d') | KeyCode::Char(' ') => {
-                let page_step = (rows as usize).saturating_sub(6).max(1);
+                let page_step = usize::from(rows).saturating_sub(6).max(1);
                 self.scroll_offset =
                     (self.scroll_offset + page_step).min(self.lines.len().saturating_sub(1));
                 None
             }
             KeyCode::PageUp | KeyCode::Char('u') => {
-                let page_step = (rows as usize).saturating_sub(6).max(1);
+                let page_step = usize::from(rows).saturating_sub(6).max(1);
                 self.scroll_offset = self.scroll_offset.saturating_sub(page_step);
                 None
             }
@@ -127,7 +130,7 @@ impl<'a> DiffReviewer<'a> {
                 None
             }
             KeyCode::End => {
-                let view_height = (rows as usize).saturating_sub(6).max(1);
+                let view_height = usize::from(rows).saturating_sub(6).max(1);
                 self.scroll_offset = self.lines.len().saturating_sub(view_height);
                 None
             }
@@ -135,13 +138,14 @@ impl<'a> DiffReviewer<'a> {
         }
     }
 
-    /// Launch interactive review loop.
+    /// Launch interactive review loop using double-buffered differential updates.
     pub fn run_interactive(&mut self, theme: &Theme) -> DiffReviewOutcome {
         let _guard = match ScreenGuard::enter_alternate() {
             Ok(g) => g,
             Err(_) => return self.fallback_prompt(theme),
         };
 
+        self.renderer.invalidate();
         loop {
             let (cols, rows) = ScreenGuard::get_size();
             self.render_frame(cols, rows, theme);
@@ -152,7 +156,9 @@ impl<'a> DiffReviewer<'a> {
                         return outcome;
                     }
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    self.renderer.invalidate();
+                }
                 Err(_) => return DiffReviewOutcome::Aborted,
             }
         }
@@ -163,50 +169,76 @@ impl<'a> DiffReviewer<'a> {
     pub fn format_frame(&self, cols: u16, rows: u16, theme: &Theme) -> String {
         if cols < MIN_TERMINAL_COLS || rows < MIN_TERMINAL_ROWS {
             return format!(
-                "Terminal too small (minimum {}x{} required; current {}x{})\n[a: Approve] [r: Reject] [q: Abort]\n",
-                MIN_TERMINAL_COLS, MIN_TERMINAL_ROWS, cols, rows
+                "Terminal too small (minimum {}x{} required; current {}x{})
+{} {} {}
+",
+                MIN_TERMINAL_COLS,
+                MIN_TERMINAL_ROWS,
+                cols,
+                rows,
+                theme.command_pill("a: Approve"),
+                theme.command_pill("r: Reject"),
+                theme.command_pill("q: Abort")
             );
         }
 
         let mut buf = String::with_capacity(4096);
-        let width = cols as usize;
+        let width = usize::from(cols);
+        let inner_width = width.saturating_sub(2);
         let short_sha = self.patch_sha256.get(..12).unwrap_or(&self.patch_sha256);
-        let focus_badge = match self.focus {
-            ReviewFocus::DiffViewport => "[FOCUS: DIFF VIEWPORT]",
-            ReviewFocus::ActionControls => "[FOCUS: ACTION CONTROLS]",
+        let focus_pill = match self.focus {
+            ReviewFocus::DiffViewport => {
+                theme.pill("DIFF VIEWPORT", CyberPalette::TITANIUM, CyberPalette::CYAN_BG)
+            }
+            ReviewFocus::ActionControls => theme.pill(
+                "ACTION CONTROLS",
+                CyberPalette::TITANIUM,
+                CyberPalette::VIOLET_BG,
+            ),
         };
 
+        let top_border = format!(
+            "{}{}{}",
+            Symbols::BOX_TL,
+            Symbols::BOX_H.repeat(inner_width),
+            Symbols::BOX_TR
+        );
+        buf.push_str(&format!("{}
+", theme.muted(&top_border)));
         buf.push_str(&format!(
-            "{}\n",
-            theme.bold(&format!(
-                " ReplayFix Candidate Patch Review // SHA: {} (+{} -{}) {} ",
-                short_sha, self.insertions, self.deletions, focus_badge
-            ))
-        ));
-        buf.push_str(&format!(
-            " Files: {} | Lines: {} | Scroll: {}/{}\n",
+            "{} {} (+{} -{}) {} Files: {} | Scroll: {}/{}
+",
+            theme.muted(Symbols::BOX_V),
+            theme.bold(&format!("ReplayFix Patch Review // {short_sha}")),
+            self.insertions,
+            self.deletions,
+            focus_pill,
             self.files.join(", "),
-            self.lines.len(),
             self.scroll_offset + 1,
             self.lines.len().max(1)
         ));
-        buf.push_str(&format!("{}\n", theme.muted(&"─".repeat(width))));
+        buf.push_str(&format!(
+            "{}
+",
+            theme.muted(&format!("├{}┤", Symbols::BOX_H.repeat(inner_width)))
+        ));
 
-        let available_height = (rows as usize).saturating_sub(5);
+        let available_height = usize::from(rows).saturating_sub(5);
         let end_idx = (self.scroll_offset + available_height).min(self.lines.len());
 
-        for line in &self.lines[self.scroll_offset..end_idx] {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                buf.push_str(&format!("{}\n", theme.success(line)));
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                buf.push_str(&format!("{}\n", theme.error(line)));
-            } else if line.starts_with("@@") {
-                buf.push_str(&format!("{}\n", theme.brand(line)));
-            } else if line.starts_with("+++") || line.starts_with("---") {
-                buf.push_str(&format!("{}\n", theme.bold(line)));
+        for (offset, line) in self.lines[self.scroll_offset..end_idx].iter().enumerate() {
+            let line_no = self.scroll_offset + offset + 1;
+            let gutter = format!("{line_no:>4} {} ", Symbols::BOX_V);
+            if theme.color_enabled {
+                buf.push_str(&format!(
+                    "{}{}
+",
+                    theme.muted(&gutter),
+                    style_diff_token_line(line)
+                ));
             } else {
-                buf.push_str(line);
-                buf.push('\n');
+                buf.push_str(&format!("{gutter}{line}
+"));
             }
         }
 
@@ -214,20 +246,34 @@ impl<'a> DiffReviewer<'a> {
             buf.push('\n');
         }
 
-        buf.push_str(&format!("{}\n", theme.muted(&"─".repeat(width))));
-        buf.push_str(
-            " [Tab: Focus]  [a: Approve & Apply]  [r: Reject]  [j/k: Scroll]  [Space: Page]  [q: Abort] ",
+        let bot_border = format!(
+            "{}{}{}",
+            Symbols::BOX_BL,
+            Symbols::BOX_H.repeat(inner_width),
+            Symbols::BOX_BR
         );
+        buf.push_str(&format!("{}
+", theme.muted(&bot_border)));
+        buf.push_str(&format!(
+            " {}  {}  {}  {}  {} ",
+            theme.command_pill("Enter: Approve"),
+            theme.command_pill("Tab: Cycle"),
+            theme.command_pill("j/k: Scroll"),
+            theme.command_pill("r: Reject"),
+            theme.command_pill("q: Abort")
+        ));
         buf
     }
 
-    fn render_frame(&self, cols: u16, rows: u16, theme: &Theme) {
+    fn render_frame(&mut self, cols: u16, rows: u16, theme: &Theme) {
         let mut out = stdout();
-        let _ = out.queue(Clear(ClearType::All));
         let _ = out.queue(MoveTo(0, 0));
         let frame = self.format_frame(cols, rows, theme);
-        print!("{frame}");
-        let _ = out.flush();
+        let diff_payload = self.renderer.diff_lines(&frame);
+        if !diff_payload.is_empty() {
+            print!("{diff_payload}");
+            let _ = out.flush();
+        }
     }
 
     /// Non-alternate fallback for simple pipes or terminal errors.
@@ -264,9 +310,13 @@ mod tests {
 
     #[test]
     fn test_large_diff_viewport_bounding_2000_lines() {
-        let mut large_diff = String::from("--- a/large.js\n+++ b/large.js\n@@ -1,10 +1,2000 @@\n");
+        let mut large_diff = String::from("--- a/large.js
++++ b/large.js
+@@ -1,10 +1,2000 @@
+");
         for i in 0..2000 {
-            large_diff.push_str(&format!("+ console.log('line {i}');\n"));
+            large_diff.push_str(&format!("+ console.log('line {i}');
+"));
         }
         let mut reviewer = DiffReviewer::new(&large_diff);
         assert_eq!(reviewer.lines.len(), 2003);
@@ -277,6 +327,8 @@ mod tests {
         let theme = Theme::for_stdout(ColorOption::Never, OutputMode::Human);
         let frame = reviewer.format_frame(80, 24, &theme);
         assert!(frame.lines().count() <= 24);
+        assert!(frame.contains('╭'));
+        assert!(frame.contains('╰'));
 
         reviewer.handle_key(KeyCode::End, 24);
         assert!(reviewer.scroll_offset() > 1900);
@@ -285,7 +337,11 @@ mod tests {
     #[test]
     fn test_diff_reviewer_neutralizes_ansi_escape_injection() {
         let malicious =
-            "--- a/app.js\n+++ b/app.js\n@@ -1,1 +1,1 @@\n+\x1b[2J\x1b]50;pwned\x07const x = 1;\n";
+            "--- a/app.js
++++ b/app.js
+@@ -1,1 +1,1 @@
++\x1b[2J\x1b]50;pwned\x07const x = 1;
+";
         let reviewer = DiffReviewer::new(malicious);
         let theme = Theme::for_stdout(ColorOption::Never, OutputMode::Human);
         let frame = reviewer.format_frame(80, 24, &theme);
@@ -295,7 +351,11 @@ mod tests {
 
     #[test]
     fn test_diff_reviewer_tab_focus_and_small_terminal_guard() {
-        let diff = "--- a/app.js\n+++ b/app.js\n@@ -1,1 +1,1 @@\n+const ok = true;\n";
+        let diff = "--- a/app.js
++++ b/app.js
+@@ -1,1 +1,1 @@
++const ok = true;
+";
         let mut reviewer = DiffReviewer::new(diff);
         assert_eq!(reviewer.focus(), ReviewFocus::DiffViewport);
         reviewer.handle_key(KeyCode::Tab, 24);

@@ -1,29 +1,30 @@
-//! Interactive Modal Dialogs & Menus.
+//! Interactive Modal Dialogs & Rounded Cybernetic Cards (`tui/dialog.rs`).
 
-use crate::ui::Theme;
+use crate::ui::{format_rounded_box, Symbols, Theme};
 use std::io::{self, BufRead, Write};
 
-/// Render a structured visual card in the terminal.
+/// Render a structured visual card in the terminal using rounded Unicode box geometry (`╭───╮` / `╰───╯`).
 pub fn render_card(title: &str, body_lines: &[String], theme: &Theme) {
     println!();
-    let bar = "─".repeat(60);
-    println!("  {}", theme.muted(&bar));
-    println!("  {} {}", theme.brand("◈ "), theme.bold(title));
-    println!("  {}", theme.muted(&bar));
-    for line in body_lines {
-        println!("    {line}");
-    }
-    println!("  {}", theme.muted(&bar));
+    println!("{}", format_rounded_box(theme, title, body_lines, 66));
 }
 
 /// Prompt user to choose from a list of options.
 pub fn prompt_selection(prompt: &str, options: &[String], theme: &Theme) -> Option<usize> {
     println!();
-    println!("  {} {}", theme.brand("?"), theme.bold(prompt));
+    println!("  {} {}", theme.brand(Symbols::PROMPT), theme.bold(prompt));
     for (i, opt) in options.iter().enumerate() {
-        println!("    {} {}", theme.muted(&format!("{}. ", i + 1)), opt);
+        println!(
+            "    {} {}",
+            theme.muted(&format!("{}. ", i.saturating_add(1))),
+            opt
+        );
     }
-    print!("  Enter choice (1-{}) or 'q' to cancel: ", options.len());
+    print!(
+        "  {} Enter choice (1-{}) or 'q' to cancel: ",
+        theme.brand(Symbols::PROMPT),
+        options.len()
+    );
     let _ = io::stdout().flush();
 
     let mut input = String::new();
