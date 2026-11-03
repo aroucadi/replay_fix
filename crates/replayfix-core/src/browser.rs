@@ -29,10 +29,10 @@ use std::time::{Duration, Instant};
 pub const BRIDGE_SCRIPT_FILENAME: &str = ".replayfix-playwright-bridge.cjs";
 
 /// Default timeout for launching Node.js + Chromium (`START_BROWSER`).
-pub const DEFAULT_BRIDGE_STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
+pub const DEFAULT_BRIDGE_STARTUP_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// Default timeout for individual bridge commands (`PROBE_PAGE`, `CLICK_AND_OBSERVE`).
-pub const DEFAULT_BRIDGE_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+pub const DEFAULT_BRIDGE_COMMAND_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// Bounded timeout for graceful `SHUTDOWN` IPC before forced process-tree termination.
 const SHUTDOWN_COMMAND_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -72,38 +72,46 @@ function findPlaywrightInNpxCache(cacheDir) {
 }
 
 function loadPlaywright() {
-  const candidates = [];
+  const fastCandidates = [];
   if (process.env.REPLAYFIX_PLAYWRIGHT_PATH) {
-    candidates.push(process.env.REPLAYFIX_PLAYWRIGHT_PATH);
+    fastCandidates.push(process.env.REPLAYFIX_PLAYWRIGHT_PATH);
   }
-  candidates.push('playwright');
+  fastCandidates.push('playwright');
   try {
     const parentNodeModules = path.resolve(__dirname, '..', 'node_modules', 'playwright');
-    candidates.push(parentNodeModules);
+    fastCandidates.push(parentNodeModules);
     const cwdNodeModules = path.resolve(process.cwd(), 'node_modules', 'playwright');
-    candidates.push(cwdNodeModules);
+    fastCandidates.push(cwdNodeModules);
   } catch (_) {}
 
+  if (process.env.LOCALAPPDATA) {
+    const localCache = findPlaywrightInNpxCache(path.join(process.env.LOCALAPPDATA, 'npm-cache'));
+    if (localCache) fastCandidates.push(localCache);
+  }
+  fastCandidates.push('C:/nvm4w/nodejs/node_modules/playwright');
+
+  for (const target of fastCandidates) {
+    try {
+      return require(target);
+    } catch (_) {}
+  }
+
+  const slowCandidates = [];
   try {
     const cacheOut = execSync(
       process.platform === 'win32' ? 'npm.cmd config get cache' : 'npm config get cache',
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 }
     ).trim();
     const fromCache = findPlaywrightInNpxCache(cacheOut);
-    if (fromCache) candidates.push(fromCache);
+    if (fromCache) slowCandidates.push(fromCache);
   } catch (_) {}
 
-  if (process.env.LOCALAPPDATA) {
-    const localCache = findPlaywrightInNpxCache(path.join(process.env.LOCALAPPDATA, 'npm-cache'));
-    if (localCache) candidates.push(localCache);
-  }
-  candidates.push('C:/nvm4w/nodejs/node_modules/playwright');
   try {
     const globalRoot = execSync(process.platform === 'win32' ? 'npm.cmd root -g' : 'npm root -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
-    if (globalRoot) candidates.push(path.join(globalRoot, 'playwright'));
+    if (globalRoot) slowCandidates.push(path.join(globalRoot, 'playwright'));
   } catch (_) {}
 
-  for (const target of candidates) {
+  for (const target of slowCandidates) {
     try {
       return require(target);
     } catch (_) {}
@@ -386,7 +394,7 @@ function sendLine(obj, requestId) {
           throw new Error('DOM_NODE_DETACHED: Target DOM node became hidden or zero-sized before click');
         }
 
-        await locator.click({ timeout: 12000 });
+        await locator.click({ timeout: 20000 });
         await page.waitForTimeout(50);
         ensureActivePage('CLICK_AND_OBSERVE(post-click)');
         let resultText = '';
@@ -811,12 +819,32 @@ impl PlaywrightBridge {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        let mut search_roots = Vec::new();
         if let Ok(cwd) = std::env::current_dir() {
-            let node_modules = cwd.join("node_modules");
-            if node_modules.exists() {
-                if let Some(nm_str) = node_modules.to_str() {
-                    cmd.env("NODE_PATH", nm_str);
+            search_roots.push(cwd);
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                search_roots.push(parent.to_path_buf());
+            }
+        }
+        'search: for root in search_roots {
+            let mut cur: Option<&Path> = Some(root.as_path());
+            while let Some(dir) = cur {
+                let node_modules = dir.join("node_modules");
+                if node_modules.exists() {
+                    if let Some(nm_str) = node_modules.to_str() {
+                        cmd.env("NODE_PATH", nm_str);
+                    }
+                    let pw_dir = node_modules.join("playwright");
+                    if pw_dir.exists() {
+                        if let Some(pw_str) = pw_dir.to_str() {
+                            cmd.env("REPLAYFIX_PLAYWRIGHT_PATH", pw_str);
+                        }
+                        break 'search;
+                    }
                 }
+                cur = dir.parent();
             }
         }
 

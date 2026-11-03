@@ -26,7 +26,7 @@ fn test_sweep_parallel_swarm_generates_valid_telemetry_and_receipt() {
     fs::create_dir_all(&bug3_dir).unwrap();
 
     let manifest_json = r#"{
-  "suite": "synthetic-parallel-suite",
+  "benchmark_suite": "MetaPulse-20",
   "version": "1.9.0",
   "tasks": [
     {
@@ -101,7 +101,7 @@ fn test_sweep_parallel_swarm_generates_valid_telemetry_and_receipt() {
     let telemetry: serde_json::Value = serde_json::from_str(&telemetry_content).unwrap();
 
     assert_eq!(telemetry["schema_version"], "1.9.0");
-    assert_eq!(summary["suite_name"], "synthetic-parallel-suite");
+    assert_eq!(summary["suite_name"], "MetaPulse-20");
     assert_eq!(telemetry["parallel_workers"], 2);
 
     // Ensure Δrepo = 0 on base directory
