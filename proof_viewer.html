@@ -711,7 +711,7 @@
       <div class="brand-titles">
         <h1>
           ReplayFix Sovereign Notary Vault
-          <span class="version-tag">Spec 095 • v1.9.5</span>
+          <span class="version-tag">Spec 200 • v2.0.0</span>
           <span class="sub-tag">Offline Judge Proof Portal &amp; Cryptographic Verifier</span>
         </h1>
         <p>RFC 8785 Canonical JSON • RFC 6962 Merkle Inclusion Proofs • RFC 8032 Pure Ed25519 Non-Repudiation</p>
@@ -835,11 +835,33 @@
 
     <!-- TAB 2: SIGNATURE & PROVENANCE -->
     <section id="tab-signature" class="tab-panel" role="tabpanel">
-      <div class="card">
-        <div class="card-title"><span>RFC 8032 Pure Ed25519 Attestation &amp; Domain-Separated Payload</span></div>
-        <div id="signature-kv" class="kv-list" style="margin-bottom:1.25rem;"></div>
-        <div class="card-title"><span>Reconstructed Canonical Signing Payload Bytes</span></div>
-        <pre id="signing-payload-box" class="code-box"></pre>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title"><span>RFC 8032 Pure Ed25519 Attestation &amp; Domain-Separated Payload</span></div>
+          <div id="signature-kv" class="kv-list" style="margin-bottom:1.25rem;"></div>
+          <div class="card-title"><span>Reconstructed Canonical Signing Payload Bytes</span></div>
+          <pre id="signing-payload-box" class="code-box"></pre>
+        </div>
+        <div class="card">
+          <div class="card-title">
+            <span>Enterprise Multi-Party Attestation Chain (v2.0)</span>
+            <span class="badge-info">RFC 8032 • 3-Party Quorum</span>
+          </div>
+          <div class="kv-list" id="multiparty-chain-list">
+            <div class="kv-row">
+              <div class="kv-key">Role 1 • Developer Signer</div>
+              <div class="kv-val">Ed25519 Author Identity Binding (REPLAYFIX-MULTIPARTY:v2.0:developer)</div>
+            </div>
+            <div class="kv-row">
+              <div class="kv-key">Role 2 • ReplayFix Harness</div>
+              <div class="kv-val">Two-Gate Causal &amp; Δrepo=0 Attestation (REPLAYFIX-MULTIPARTY:v2.0:harness)</div>
+            </div>
+            <div class="kv-row">
+              <div class="kv-key">Role 3 • CI / Judge Notary</div>
+              <div class="kv-val">Transparency Ledger Inclusion Seal (REPLAYFIX-MULTIPARTY:v2.0:ci_judge)</div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

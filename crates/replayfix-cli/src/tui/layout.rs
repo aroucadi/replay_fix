@@ -411,11 +411,7 @@ impl BentoCommandDeck {
             CyberPalette::VIOLET_BG,
         );
         let port_label = format!("PORT {}", self.ephemeral_port);
-        let port_badge = theme.pill(
-            &port_label,
-            CyberPalette::TITANIUM,
-            CyberPalette::CYAN_BG,
-        );
+        let port_badge = theme.pill(&port_label, CyberPalette::TITANIUM, CyberPalette::CYAN_BG);
         let meter_bar = render_fractional_bar(self.progress_ratio, 8, theme.color_enabled);
         let header_line = format!(
             "{} {} {}  {}  {}  {} {} tok/s {}",
@@ -580,19 +576,16 @@ pub fn style_diff_token_line(line: &str) -> String {
             style::RESET
         )
     } else if line.starts_with('+') {
-        format!(
-            "\x1b[38;2;16;185;129;48;2;6;48;36m{}{}",
-            line,
-            style::RESET
-        )
+        format!("\x1b[38;2;16;185;129;48;2;6;48;36m{}{}", line, style::RESET)
     } else if line.starts_with('-') {
+        format!("\x1b[38;2;244;63;94;48;2;68;12;30m{}{}", line, style::RESET)
+    } else {
         format!(
-            "\x1b[38;2;244;63;94;48;2;68;12;30m{}{}",
+            "{}{}{}",
+            CyberPalette::MUTED_STEEL.fg_ansi(),
             line,
             style::RESET
         )
-    } else {
-        format!("{}{}{}", CyberPalette::MUTED_STEEL.fg_ansi(), line, style::RESET)
     }
 }
 

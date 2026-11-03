@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-11-03
+
+**Spec 200 — Sovereign Enterprise Final MMP Release: Distributed Multi-Agent Swarm, Live Streaming Dashboard, APM & OpenTelemetry Ingestion, Cross-Browser Matrix & RFC 6962 Audit Ledger**: Delivers the final unified Sovereign Enterprise MMP release across all 5 architectural pillars and resolves every remaining partial-conformance item identified in the Master Specification Audit (`SPECIFICATION_AUDIT.md`, `ARCHITECTURE_AUDIT.md`, `TEST_QUALITY_AUDIT.md`, `COVERAGE_REPORT.md`, `FINAL_ASSESSMENT.md`). Full notes: [docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md).
+
+### Added
+- **Pillar 1 — Production APM, OpenTelemetry Span Alignment, SourceMap v3 & Secret Scrubbing (`replayfix ingest`, `replayfix-core::rrweb`)**:
+  - Added `OtelSpan`, `AlignedInteractionSpan`, and `OtelIngestion` (`parse_json`, `align_with_rrweb`) to temporally correlate RRWeb user interactions with failing OpenTelemetry frontend/backend trace spans.
+  - Added `SourceMapResolver` (`parse_json`, `resolve_candidate_sources`) to map minified bundle stack frames back to original TypeScript/JavaScript source paths (`src/...`), guarded by `TaskManifest::assert_safe_path`.
+  - Added `sanitize_untrusted_telemetry_text` / `strip_ansi_and_redact` to automatically strip ANSI escape sequences and scrub credentials (`GITHUB_TOKEN`, `META_API_KEY`, `ghp_...`, `github_pat_...`, `sk-...`) from RRWeb inputs, Sentry exceptions, and APM breadcrumbs.
+  - Extended `replayfix ingest` CLI with `--otel <path>` and `--sourcemap <path>`.
+- **Pillar 2 — Distributed Work-Stealing Swarm Cluster (`replayfix swarm`, `replayfix-core::swarm`)**:
+  - Extended `replayfix swarm` with `--tasks <task1.json> <task2.json>...` to ingest task manifest files directly alongside `--bugs`, plus `--notary-log <path>` for automatic receipt notarization.
+  - Integrated live `DashboardBroadcaster` hooks (`with_broadcaster`) and automatic `TransparencyLog` appending (`with_notary_log`) into `SwarmCoordinator`.
+- **Pillar 3 — Real-Time Live Streaming Dashboard (`replayfix dashboard`, `replayfix-core::dashboard`)**:
+  - Extended `replayfix dashboard` with `--open` to launch the live observatory in interactive operator sessions.
+  - Added `/api/notary` (serving `transparency_log.json` state) and `/api/matrix` (serving cross-browser inoculation matrix state) REST endpoints and `broadcast_dom_diff` / `broadcast_gate_verdict` SSE streaming methods.
+- **Pillar 4 — Cross-Browser & Multi-Device Inoculation Matrix (`replayfix inoculate --matrix`, `replayfix-core::inoculate`)**:
+  - Added `calibrate_viewport_with_letterbox` and `verify_matrix_parity` (`MatrixParityCell`, `MatrixParityReport`) across Chromium, Firefox, WebKit, Mobile Portrait, Pixel 7, Tablet, and Desktop presets.
+  - Updated `replayfix inoculate` so `--matrix` works both as a standalone flag (`--matrix`) and with explicit values (`--matrix chromium,firefox,webkit`), and `--bug` defaults to `"RF-01"` when omitted.
+- **Pillar 5 & Audit Convergence — Enterprise Multi-Party Attestation v2.0, 7-Leaf Canonical Merkle Receipts & Gateway Grounding (`crypto.rs`, `receipt.rs`, `gateway.rs`, `proof_viewer.html`)**:
+  - Implemented `AttestationRole` (`Developer`, `Harness`, `CiJudge`), `PartySignature`, and `MultiPartyAttestation` (`sign_chain`, `verify_chain`) in `replayfix-core::crypto` (`FR-066`) and embedded the visual 3-party attestation chain inspector in `proof_viewer.html`.
+  - Added `AuditReceipt::write_canonical_7leaf_artifacts` guaranteeing $\ge 7$ canonical RFC 6962 evidence leaves (`01_candidate.diff` through `07_worktree_manifest.json`) (`FR-026`, `NFR-009`).
+  - Added `replayfix verify --receipt <path> --public-key <key>` alias and file/hex public key loader alongside `replayfix verify-receipt` (`FR-028`).
+  - Added `MetaGatewayClient::ground_with_web_search` (`muse-spark-1.3`) and `synthesize_verification_badge` (`muse-image-1.0`) (`FR-036`).
+  - Added `CoreError::Telemetry` and `CoreError::Security` domain error variants.
+
+---
+
 ## [1.9.5] - 2026-11-03
 
 **Spec 195 — Living Cybernetic Command Deck (24-Bit Truecolor, 60 FPS Motion Engine & Double-Buffered Bento TUI)**: Upgrades the ReplayFix Terminal UI (`crates/replayfix-cli/src/ui.rs` and `crates/replayfix-cli/src/tui/*`) into a 2026-era Living Cybernetic Command Deck inspired by Claude Code, Charm Lipgloss/Bubbles, and Lazygit while maintaining 100% BeautifulRust Law X zero-panic compliance and automatic non-TTY fallback. Full notes: [docs/release-notes/v1.9.5.md](docs/release-notes/v1.9.5.md).

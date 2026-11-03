@@ -7,6 +7,8 @@
 //! - Shared `RatePool` and `CircuitBreaker` token governance.
 //! - Canonical `swarm_summary.json` generation adhering to `contracts/swarm_task.schema.json`.
 
+use crate::crypto::KeypairManager;
+use crate::dashboard::DashboardBroadcaster;
 use crate::digest::{canonical_json, sha256_hex};
 use crate::engine::GateVerdict;
 use crate::error::{CoreError, Result};
@@ -14,6 +16,7 @@ use crate::fixtures::Fixture;
 use crate::fsm::Phase;
 use crate::gateway::{CircuitBreaker, RatePool};
 use crate::manifest::TaskManifest;
+use crate::notary::TransparencyLog;
 use crate::platform::EphemeralPort;
 use crate::receipt::{
     timestamp_now, AuditReceipt, GateRecord, PatchRecord, SCHEMA_VERSION, SUBSTRATE,
@@ -93,6 +96,8 @@ pub struct SwarmCoordinator {
     config: SwarmConfig,
     rate_pool: Arc<Mutex<RatePool>>,
     circuit_breaker: Arc<Mutex<CircuitBreaker>>,
+    broadcaster: Option<DashboardBroadcaster>,
+    notary_log_path: Option<PathBuf>,
 }
 
 impl SwarmCoordinator {
@@ -111,7 +116,23 @@ impl SwarmCoordinator {
             config,
             rate_pool,
             circuit_breaker,
+            broadcaster: None,
+            notary_log_path: None,
         }
+    }
+
+    /// Attach a live `DashboardBroadcaster` to stream worker progress and reasoning events.
+    #[must_use]
+    pub fn with_broadcaster(mut self, broadcaster: DashboardBroadcaster) -> Self {
+        self.broadcaster = Some(broadcaster);
+        self
+    }
+
+    /// Attach an RFC 6962 `TransparencyLog` path to automatically notarize verified receipts.
+    #[must_use]
+    pub fn with_notary_log(mut self, log_path: PathBuf) -> Self {
+        self.notary_log_path = Some(log_path);
+        self
     }
 
     /// Return a snapshot of the shared `RatePool`.
@@ -164,6 +185,7 @@ impl SwarmCoordinator {
             let worker_results = Arc::clone(&results);
             let worker_rate_pool = Arc::clone(&self.rate_pool);
             let worker_cb = Arc::clone(&self.circuit_breaker);
+            let worker_bcast = self.broadcaster.clone();
             let config = self.config.clone();
 
             let handle = thread::spawn(move || -> Result<()> {
@@ -182,6 +204,22 @@ impl SwarmCoordinator {
 
                     let task_start = Instant::now();
                     let now_ms = task_start.elapsed().as_millis() as u64;
+
+                    if let Some(ref bcast) = worker_bcast {
+                        bcast.update_task_status(
+                            &task.task_id,
+                            "RUNNING",
+                            Some(serde_json::json!({ "worker_id": worker_id })),
+                        );
+                        bcast.broadcast_reasoning_token(
+                            &task.task_id,
+                            "muse-spark-1.3",
+                            1,
+                            "Provisioning isolated ScratchSandbox and reproducing defect...",
+                            Some("Worker stole task from queue"),
+                            Some("reproduce_defect"),
+                        );
+                    }
 
                     // Check CircuitBreaker state before executing
                     {
@@ -251,6 +289,18 @@ impl SwarmCoordinator {
                         )
                     };
 
+                    if let Some(ref bcast) = worker_bcast {
+                        bcast.update_task_status(
+                            &outcome.task_id,
+                            &outcome.status,
+                            Some(serde_json::json!({
+                                "worker_id": worker_id,
+                                "port": outcome.port,
+                                "duration_ms": outcome.duration_ms
+                            })),
+                        );
+                    }
+
                     if acquired {
                         if let Ok(mut rp) = worker_rate_pool.lock() {
                             rp.release(ESTIMATED_TOKENS, 1_150);
@@ -296,6 +346,36 @@ impl SwarmCoordinator {
             Ok(guard) => guard.clone(),
             Err(_) => return Err(CoreError::Swarm("Failed to lock final results".to_string())),
         };
+
+        // Append verified receipts to TransparencyLog when notary_log_path is configured
+        if let Some(ref log_path) = self.notary_log_path {
+            let keypair = KeypairManager::load_or_generate(Some(&self.config.output_dir))?;
+            let mut log = TransparencyLog::load_or_new(log_path, &keypair)?;
+            for tr in &task_results {
+                if tr.status == "VERIFIED_HEALED" {
+                    if let Some(ref rpath) = tr.receipt_path {
+                        let p = Path::new(rpath);
+                        let candidate_file = if p.is_file() {
+                            p.to_path_buf()
+                        } else if p.join("audit_receipt.json").is_file() {
+                            p.join("audit_receipt.json")
+                        } else if p.join("04_audit_receipt.json").is_file() {
+                            p.join("04_audit_receipt.json")
+                        } else if let Some(parent) = p.parent() {
+                            parent.join("audit_receipt.json")
+                        } else {
+                            p.to_path_buf()
+                        };
+                        if let Ok(raw) = fs::read_to_string(&candidate_file) {
+                            if let Ok(receipt) = serde_json::from_str::<AuditReceipt>(&raw) {
+                                let _ = log.append_receipt(&receipt, &keypair);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = log.save(log_path);
+        }
 
         let completed = task_results
             .iter()

@@ -553,10 +553,9 @@ pub fn print_diagnostics(theme: &Theme, checks: &[DiagnosticCheck]) {
                 theme.warning(Symbols::WARN),
                 theme.pill_warning("WARN       "),
             ),
-            DiagnosticStatus::Fail => (
-                theme.error(Symbols::CROSS),
-                theme.pill_error("MISSING    "),
-            ),
+            DiagnosticStatus::Fail => {
+                (theme.error(Symbols::CROSS), theme.pill_error("MISSING    "))
+            }
             DiagnosticStatus::NotChecked => (
                 theme.muted(Symbols::BULLET),
                 theme.pill_muted("NOT CHECKED"),

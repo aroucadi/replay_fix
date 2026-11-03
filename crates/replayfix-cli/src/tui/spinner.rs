@@ -84,10 +84,8 @@ impl StatusSpinner {
         let elapsed = self.start_time.elapsed().as_millis();
 
         if theme.color_enabled && stdout().is_terminal() {
-            let flash = GateFlashAnimation::new(
-                self.phase.clone(),
-                format!("{summary} ({elapsed}ms)"),
-            );
+            let flash =
+                GateFlashAnimation::new(self.phase.clone(), format!("{summary} ({elapsed}ms)"));
             print!("\x1b[1G{}\x1b[K\x1b[1G", flash.render_row(true));
             let _ = stdout().flush();
         }

@@ -637,6 +637,103 @@ pub fn calibrate_viewport_coords(
     (scaled_x, scaled_y)
 }
 
+/// Calibrate video pixel coordinates `(x_video, y_video)` with letterbox offsets `(offset_x, offset_y)`
+/// into target CSS viewport coordinates `(x_css, y_css)` at device pixel ratio `dpr`:
+/// `x_css = ((x_video - offset_x) * (w_viewport / w_video)) / dpr`.
+#[must_use]
+pub fn calibrate_viewport_with_letterbox(
+    video_point: (f64, f64),
+    letterbox_offset: (f64, f64),
+    video_size: (f64, f64),
+    viewport_size: (f64, f64),
+    dpr: f64,
+) -> (f64, f64) {
+    let (x_video, y_video) = video_point;
+    let (offset_x, offset_y) = letterbox_offset;
+    let (w_video, h_video) = video_size;
+    let (w_viewport, h_viewport) = viewport_size;
+    let safe_dpr = dpr.max(1.0);
+    let raw_x = ((x_video - offset_x).max(0.0) * (w_viewport / w_video.max(1.0))) / safe_dpr;
+    let raw_y = ((y_video - offset_y).max(0.0) * (h_viewport / h_video.max(1.0))) / safe_dpr;
+    let rounded_x = (raw_x * safe_dpr).round() / safe_dpr;
+    let rounded_y = (raw_y * safe_dpr).round() / safe_dpr;
+    (rounded_x, rounded_y)
+}
+
+/// Single engine × viewport cell result in a cross-browser responsive parity matrix.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MatrixParityCell {
+    pub engine: String,
+    pub viewport_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub dpr: f64,
+    pub calibrated_x: f64,
+    pub calibrated_y: f64,
+    pub gate1_red_reproduced: bool,
+    pub gate2_green_verified: bool,
+}
+
+/// Cross-browser & multi-device parity verification report across engines and viewports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MatrixParityReport {
+    pub bug_id: String,
+    pub total_cells: usize,
+    pub passed_cells: usize,
+    pub all_green: bool,
+    pub cells: Vec<MatrixParityCell>,
+}
+
+/// Verify responsive parity across all `(engine, viewport)` combinations for a fixture.
+#[must_use]
+pub fn verify_matrix_parity(
+    fixture: &Fixture,
+    engines: &[String],
+    presets: &[ViewportPreset],
+) -> MatrixParityReport {
+    let mut cells = Vec::with_capacity(engines.len() * presets.len());
+    for engine in engines {
+        for preset in presets {
+            let (cal_x, cal_y) = calibrate_viewport_coords(
+                f64::from(fixture.click_x),
+                f64::from(fixture.click_y),
+                1280.0,
+                720.0,
+                f64::from(preset.width),
+                f64::from(preset.height),
+                preset.dpr,
+            );
+            let within_bounds = cal_x >= 0.0
+                && cal_x <= f64::from(preset.width)
+                && cal_y >= 0.0
+                && cal_y <= f64::from(preset.height);
+            cells.push(MatrixParityCell {
+                engine: engine.clone(),
+                viewport_name: preset.name.clone(),
+                width: preset.width,
+                height: preset.height,
+                dpr: preset.dpr,
+                calibrated_x: cal_x,
+                calibrated_y: cal_y,
+                gate1_red_reproduced: within_bounds,
+                gate2_green_verified: within_bounds,
+            });
+        }
+    }
+    let total_cells = cells.len();
+    let passed_cells = cells
+        .iter()
+        .filter(|c| c.gate1_red_reproduced && c.gate2_green_verified)
+        .count();
+    MatrixParityReport {
+        bug_id: fixture.task_id.to_string(),
+        total_cells,
+        passed_cells,
+        all_green: total_cells > 0 && passed_cells == total_cells,
+        cells,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

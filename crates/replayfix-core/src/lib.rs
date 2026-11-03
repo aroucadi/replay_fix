@@ -59,8 +59,8 @@ pub use checkpoint::{
     DEFAULT_CHECKPOINT_TTL_SECONDS,
 };
 pub use crypto::{
-    build_signing_payload, verify_attestation, AttestationRecord, KeypairManager, TrustPolicy,
-    VerificationOutcome,
+    build_signing_payload, verify_attestation, AttestationRecord, AttestationRole, KeypairManager,
+    MultiPartyAttestation, PartySignature, TrustPolicy, VerificationOutcome,
 };
 pub use dashboard::{
     base64_encode, compute_ws_accept, encode_ws_text_frame, sha1_digest, DashboardBroadcaster,
@@ -96,12 +96,12 @@ pub use gateway::{
     align_transcript_with_keyframes, escape_untrusted_dom_context, validate_wav_audio,
     CircuitBreaker, CircuitState, ExecutionMode, GatewayConfig, GatewayProvenance, GatewayProvider,
     GatewayRequest, GatewayResponse, KeyframeAlignment, MetaGatewayClient, ModelRole,
-    MultimodalGateway, RatePool, TranscriptSegment, TransportOutcome, WavAudioMetadata,
-    BASETEN_FALLBACK_ENDPOINT, BASETEN_MUSE_SPARK_OPEN_SLUG, DEFAULT_ALIGNMENT_TOLERANCE_MS,
-    DEFAULT_CIRCUIT_COOLDOWN_MS, DEFAULT_CIRCUIT_FAILURE_THRESHOLD, DEFAULT_GATEWAY_TIMEOUT_MS,
-    DEFAULT_MAX_RETRIES, LLAMA_32_11B_VISION_FALLBACK_SLUG, LLAMA_33_70B_FALLBACK_SLUG,
-    MAX_AUDIO_DURATION_MS, META_CONNECT_TIMEOUT_SECS, META_READ_TIMEOUT_SECS,
-    META_RESPONSES_ENDPOINT,
+    MultimodalGateway, RatePool, TranscriptSegment, TransportOutcome, VerificationBadgeResult,
+    WavAudioMetadata, WebSearchGroundingResult, BASETEN_FALLBACK_ENDPOINT,
+    BASETEN_MUSE_SPARK_OPEN_SLUG, DEFAULT_ALIGNMENT_TOLERANCE_MS, DEFAULT_CIRCUIT_COOLDOWN_MS,
+    DEFAULT_CIRCUIT_FAILURE_THRESHOLD, DEFAULT_GATEWAY_TIMEOUT_MS, DEFAULT_MAX_RETRIES,
+    LLAMA_32_11B_VISION_FALLBACK_SLUG, LLAMA_33_70B_FALLBACK_SLUG, MAX_AUDIO_DURATION_MS,
+    META_CONNECT_TIMEOUT_SECS, META_READ_TIMEOUT_SECS, META_RESPONSES_ENDPOINT,
 };
 pub use github::{
     compute_hmac_sha256, constant_time_eq, extract_video_urls_from_markdown, filter_webhook_event,
@@ -116,9 +116,10 @@ pub use ingestion::{
     MockIssueFetcher, SystemIssueFetcher, MAX_ISSUE_PAYLOAD_BYTES,
 };
 pub use inoculate::{
-    calibrate_viewport_coords, parse_matrix_arg, InoculationEntry, InoculationGenerator,
-    InoculationRegistry, InoculationSpec, ViewportPreset, INOCULATION_REGISTRY_FILE,
-    INOCULATION_SCHEMA_VERSION,
+    calibrate_viewport_coords, calibrate_viewport_with_letterbox, parse_matrix_arg,
+    verify_matrix_parity, InoculationEntry, InoculationGenerator, InoculationRegistry,
+    InoculationSpec, MatrixParityCell, MatrixParityReport, ViewportPreset,
+    INOCULATION_REGISTRY_FILE, INOCULATION_SCHEMA_VERSION,
 };
 pub use locator::{
     AmbiguousTieCandidate, BoundingBox, DomCandidate, GroundedTarget, GroundingTelemetry,
@@ -165,9 +166,11 @@ pub use reporters::{
     SARIF_SCHEMA_URI, SARIF_VERSION,
 };
 pub use rrweb::{
-    ingest_session_replay, synthesize_manifest_from_telemetry, translate_sentry_breadcrumbs,
-    DomMutationSummary, RrwebInteraction, RrwebParser, RrwebRawEvent, RrwebSession,
-    SentryBreadcrumb, SentryCrashDump, SentryIngestion, SentryStackFrame,
+    ingest_session_replay, sanitize_untrusted_telemetry_text, synthesize_manifest_from_apm,
+    synthesize_manifest_from_telemetry, translate_sentry_breadcrumbs, AlignedInteractionSpan,
+    DomMutationSummary, OtelIngestion, OtelSpan, RrwebInteraction, RrwebParser, RrwebRawEvent,
+    RrwebSession, SentryBreadcrumb, SentryCrashDump, SentryIngestion, SentryStackFrame,
+    SourceMapResolver,
 };
 pub use stress::{
     PerturbationProfile, StressPassResult, StressQuorumReport, StressQuorumRunner,

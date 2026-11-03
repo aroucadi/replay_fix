@@ -92,6 +92,12 @@ pub enum CoreError {
     #[error("Session replay ingestion error: {0}")]
     SessionReplay(String),
 
+    #[error("APM & OpenTelemetry ingestion error: {0}")]
+    Telemetry(String),
+
+    #[error("Security policy error: {0}")]
+    Security(String),
+
     #[error("Transparency notary error: {0}")]
     Notary(String),
 

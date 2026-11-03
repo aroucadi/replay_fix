@@ -225,6 +225,38 @@ impl DashboardBroadcaster {
         }
     }
 
+    /// Broadcast a side-by-side DOM `ariaSnapshot` diff event for live portal rendering.
+    pub fn broadcast_dom_diff(&self, task_id: &str, before_aria: &str, after_aria: &str) {
+        let ev = serde_json::json!({
+            "event_type": "dom_diff",
+            "task_id": task_id,
+            "timestamp": crate::receipt::timestamp_now(),
+            "dom_diff_data": {
+                "before_aria": before_aria,
+                "after_aria": after_aria
+            }
+        });
+        if let Ok(mut lock) = self.reasoning_events.lock() {
+            lock.push(ev);
+        }
+    }
+
+    /// Broadcast a Gate 1 / Gate 2 / Gate 3 causal verdict transition.
+    pub fn broadcast_gate_verdict(&self, task_id: &str, gate: &str, verdict: &str) {
+        let ev = serde_json::json!({
+            "event_type": "gate_verdict",
+            "task_id": task_id,
+            "timestamp": crate::receipt::timestamp_now(),
+            "gate_data": {
+                "gate": gate,
+                "verdict": verdict
+            }
+        });
+        if let Ok(mut lock) = self.reasoning_events.lock() {
+            lock.push(ev);
+        }
+    }
+
     #[must_use]
     pub fn get_tasks_snapshot(&self) -> Vec<Value> {
         if let Ok(lock) = self.active_tasks.lock() {
@@ -464,10 +496,45 @@ fn handle_dashboard_connection(
         let status = serde_json::json!({
             "status": "online",
             "version": "1.8.0",
+            "release_version": "2.0.0",
             "broadcaster_active": true,
             "tasks_count": broadcaster.get_tasks_snapshot().len()
         });
         send_json_response(&mut stream, &status)?;
+        return Ok(());
+    }
+
+    if method == "GET" && uri == "/api/notary" {
+        let log_path = artifacts_dir.join("transparency_log.json");
+        let payload = if log_path.is_file() {
+            if let Ok(raw) = fs::read_to_string(&log_path) {
+                serde_json::from_str::<Value>(&raw).unwrap_or_else(
+                    |_| serde_json::json!({ "status": "EMPTY", "tree_size": 0, "entries": [] }),
+                )
+            } else {
+                serde_json::json!({ "status": "EMPTY", "tree_size": 0, "entries": [] })
+            }
+        } else {
+            serde_json::json!({ "status": "EMPTY", "tree_size": 0, "entries": [] })
+        };
+        send_json_response(&mut stream, &payload)?;
+        return Ok(());
+    }
+
+    if method == "GET" && uri == "/api/matrix" {
+        let inoc_path = artifacts_dir.join("inoculations.json");
+        let payload = if inoc_path.is_file() {
+            if let Ok(raw) = fs::read_to_string(&inoc_path) {
+                serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| {
+                    serde_json::json!({ "engines": ["chromium", "firefox", "webkit"], "entries": [] })
+                })
+            } else {
+                serde_json::json!({ "engines": ["chromium", "firefox", "webkit"], "entries": [] })
+            }
+        } else {
+            serde_json::json!({ "engines": ["chromium", "firefox", "webkit"], "entries": [] })
+        };
+        send_json_response(&mut stream, &payload)?;
         return Ok(());
     }
 
