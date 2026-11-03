@@ -99,7 +99,35 @@ impl EnvironmentAdapter {
     }
 }
 
+/// Fully dynamic, uninstrumented application reproduction task (Release 1.9).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DynamicReproTask {
+    pub task_id: String,
+    pub repo_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rrweb_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentry_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_behavior: Option<String>,
+}
+
+impl DynamicReproTask {
+    pub fn new(task_id: impl Into<String>, repo_path: impl Into<PathBuf>) -> Self {
+        Self {
+            task_id: task_id.into(),
+            repo_path: repo_path.into(),
+            video_path: None,
+            rrweb_path: None,
+            sentry_path: None,
+            expected_behavior: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskManifest {
     pub task_id: String,
     pub title: String,

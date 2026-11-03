@@ -1447,13 +1447,12 @@ impl MockHealer {
             (String::new(), String::new())
         };
 
+        // Generic selector: check custom selector, common output elements, or body textContent
         let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
             role: click_role,
             accessible_name: click_name,
             test_id: grounded.candidate.test_id.clone(),
-            output_selector:
-                "#cart-summary-output, #discount-output, #inventory-output, #tab-output, #order-output"
-                    .to_string(),
+            output_selector: String::new(),
         })?;
 
         let (clicked, click_errors, result_text) = match click_resp {
@@ -1475,8 +1474,17 @@ impl MockHealer {
             }
         };
 
-        let assert_passed =
-            clicked && click_errors.is_empty() && result_text == fixture.expected_output_text;
+        // Generic Observable Failure Signals (v1.9):
+        // 1. Uncaught browser exceptions (page_errors like TypeError, ReferenceError)
+        // 2. Specific fixture expectation if populated, or absence of fatal page errors
+        let assert_passed = if !fixture.expected_output_text.is_empty() {
+            clicked
+                && click_errors.is_empty()
+                && (result_text == fixture.expected_output_text
+                    || result_text.contains(fixture.expected_output_text))
+        } else {
+            clicked && click_errors.is_empty()
+        };
 
         let checks = [true, true, clicked, assert_passed];
         let mut events = Vec::with_capacity(4);

@@ -94,6 +94,12 @@ pub enum CoreError {
 
     #[error("Transparency notary error: {0}")]
     Notary(String),
+
+    #[error("Benchmark suite error: {0}")]
+    Benchmark(String),
+
+    #[error("Parallel sweep error: {0}")]
+    Sweep(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

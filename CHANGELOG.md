@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.9.0] - 2026-11-03
+
+**Spec 190 — Pure Application-Agnostic Harness & High-Throughput Parallel Swarm Benchmark Engine**: Permanently decouples ReplayFix from hardcoded synthetic fixtures, eliminating `"has no built-in fixture for task"` across all workflows. Modern web applications across React, Vite, Next.js, and Express are dynamically grounded and evaluated based on generic observable signals (uncaught page exceptions, network 4xx/5xx responses, and DOM mutation activity). Adds the High-Throughput Parallel Swarm Benchmark Engine (`replayfix sweep`), processing the complete 20-defect MetaPulse benchmark suite (`RF-01` through `RF-20`) in 21.6s across concurrent workers with zero base repository mutation ($\Delta\text{repo}=0$), emitting schema-validated summaries (`benchmark_summary.json`, `telemetry_matrix.json`) and Ed25519-signed Merkle batch roots. Full notes: [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md).
+
+### Added
+- **Pure Application-Agnostic Engine (`replayfix-core::manifest`, `replayfix-core::engine`)**:
+  - `DynamicReproTask` enabling reproduction across arbitrary uninstrumented web repositories.
+  - Universal dev server detection and ephemeral port binding in `ManagedSpaServer`.
+  - Generic observable failure signals replacing all hardcoded selectors.
+- **High-Throughput Parallel Swarm Benchmark Engine (`replayfix-core::sweep`, `replayfix sweep`)**:
+  - Configurable concurrent worker swarm with dynamic work-stealing scheduling.
+  - Pre/post worktree manifest verification guaranteeing strict $\Delta\text{repo}=0$ isolation.
+  - Real-time fleet telemetry aggregator emitting `benchmark_summary.json` and `telemetry_matrix.json`.
+  - Cryptographic batch notary with RFC 6962 Merkle tree chaining and Ed25519 attestation.
+
+---
+
 ## [1.8.0] - 2026-11-02
 
 **Spec 180 — Distributed Multi-Agent Swarm, Live Streaming Dashboard & Production APM Session Replay Ingestion**: Scales ReplayFix from an individual developer's CLI or bot into an enterprise distributed visual repair cluster and real-time observability center. Adds production APM telemetry ingestion (`replayfix ingest --sentry <url-or-file> --rrweb <file>`) transforming RRWeb DOM mutation recordings and Sentry/Datadog crash breadcrumbs into deterministic ReplayFix manifests (`TaskManifest`). Adds high-concurrency work-stealing swarm triage (`replayfix swarm --workers <N>`) with per-worker isolated scratch worktrees ($\Delta\text{repo}=0$), dynamic ephemeral ports, and rate-limited Meta Muse model pool concurrency. Adds an embedded async/threaded HTTP & WebSocket live streaming dashboard (`replayfix dashboard --port <port>`) broadcasting real-time CDP viewport screencasts, SSE reasoning token feeds, and side-by-side DOM diffs to maintainers. Extends permanent test inoculation (`replayfix inoculate --matrix`) to synthesize responsive Playwright test matrices across Desktop Chromium, Firefox, WebKit, and mobile viewports (Pixel 7, iPhone 14) with DPR coordinate calibration. Introduces the RFC 6962 Merkle Receipt Transparency Log and Notary (`replayfix notary`) chaining all triage receipts into an append-only verifiable cryptographic ledger (`transparency_log.json`). Full notes: [docs/release-notes/v1.8.0.md](docs/release-notes/v1.8.0.md).

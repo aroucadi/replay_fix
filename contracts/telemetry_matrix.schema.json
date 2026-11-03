@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TelemetryMatrix",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "timestamp_iso",
+    "parallel_workers",
+    "mode",
+    "total_tasks",
+    "completed_tasks",
+    "worker_metrics",
+    "latency_histogram"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "timestamp_iso": { "type": "string" },
+    "parallel_workers": { "type": "integer", "minimum": 1 },
+    "mode": { "type": "string", "enum": ["deterministic-fixture", "live-ai"] },
+    "total_tasks": { "type": "integer", "minimum": 0 },
+    "completed_tasks": { "type": "integer", "minimum": 0 },
+    "worker_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["worker_id", "tasks_completed", "active_duration_ms", "idle_duration_ms"],
+        "properties": {
+          "worker_id": { "type": "string" },
+          "tasks_completed": { "type": "integer", "minimum": 0 },
+          "active_duration_ms": { "type": "number", "minimum": 0.0 },
+          "idle_duration_ms": { "type": "number", "minimum": 0.0 }
+        }
+      }
+    },
+    "latency_histogram": {
+      "type": "object",
+      "required": ["buckets", "counts"],
+      "properties": {
+        "buckets": { "type": "array", "items": { "type": "number" } },
+        "counts": { "type": "array", "items": { "type": "integer" } }
+      }
+    }
+  }
+}

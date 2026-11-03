@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.8.0",
+  "tree_size": 20,
+  "merkle_root": "1f2d4b2bfb143546db71304e9f9e14d9b20e8887a613e6b939e45b3257808d83",
+  "entries": [
+    {
+      "leaf_index": 0,
+      "receipt_sha256": "55fd03170d1042b950fb6d43f5cb2f19a204e0be2e579154744b8ab6b59794f7",
+      "task_id": "RF-01",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "3010518cd809f954a5216c2dc3626f5c97ff19e132723879128833f1482b4597"
+    },
+    {
+      "leaf_index": 1,
+      "receipt_sha256": "79455d4b0d32d199cdbfd679a3831f1a6118d7fdc949043527c503cb18bd09b4",
+      "task_id": "RF-02",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "f9cfe7d3a7e580a4d24acb8952b9333a83b2023f4eacfb5a74a19768dce2ccfa"
+    },
+    {
+      "leaf_index": 2,
+      "receipt_sha256": "7044dd3f0b756e1a8308123aac02e14978fbd7cb04099a69a6345fc5e656cc85",
+      "task_id": "RF-03",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "edfc7e9f7a2b8be380947c29da5bd132c972a933a89f98d15ecdd7986d8c59d0"
+    },
+    {
+      "leaf_index": 3,
+      "receipt_sha256": "f2cbfd8d4cf054b237c46a755388c32deedfd7dddc117bf358cee8bd872b3daa",
+      "task_id": "RF-04",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "d94d70dfc875de56c165285a3a1dd1d916dfa9e3b7cb42dfa08af744f487e2f7"
+    },
+    {
+      "leaf_index": 4,
+      "receipt_sha256": "919c2e2949f44acb824fa4b05f17b933522cdecd93b8be138ed79276d52bdcc0",
+      "task_id": "RF-05",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "af090c2a022ba0412d84db75ad484395efd9d843dc55221b7c4a6eb2d4a07043"
+    },
+    {
+      "leaf_index": 5,
+      "receipt_sha256": "9c2da801b1c66a13064ff6f1bec0c7bbe4e4692a0dd26b274bf38871f95a5f38",
+      "task_id": "RF-06",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "8a4cdb8a20b71682bcbd1b53c0597a7b4856105d8f06fff88742323536765619"
+    },
+    {
+      "leaf_index": 6,
+      "receipt_sha256": "405fdfab0924e0ecc6b871153fb0108f1f0d3cec6e33cfc08693629711875eaa",
+      "task_id": "RF-07",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "0ba1109fadd94f82af1b3b1480a0c338b23b560ac48d1111860851f4b055c8d2"
+    },
+    {
+      "leaf_index": 7,
+      "receipt_sha256": "b876a1aa0b81534633c78b2307d6621403c3f9a9319b8c0b66c308a265625494",
+      "task_id": "RF-08",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "fd25f1fb17c565b67bccbd7c7bb93104366b6764091fcf916212939dc4b253ea"
+    },
+    {
+      "leaf_index": 8,
+      "receipt_sha256": "03a7dd25b2f77805fd1a44fc6d2477a1d056561df667002cd419c2abe7f5a50b",
+      "task_id": "RF-09",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "cc2c5815be622a47f172dc29f809d69fdb5f1ea2f28beb66ab2983e4d986b5e8"
+    },
+    {
+      "leaf_index": 9,
+      "receipt_sha256": "4af5569baf5ab1a3f3ba234c6b681aaebfad4e423ead02939ea9a3fb0bef3031",
+      "task_id": "RF-10",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "000b26a5001f71df6cf3cc769dccf49aece7d57831ce59d56a0ebfbf03c65dfc"
+    },
+    {
+      "leaf_index": 10,
+      "receipt_sha256": "c6666cf8299793dea792e2ee0d5fbff9ad27024e27c93ddfbcc67885eb1bfbcb",
+      "task_id": "RF-11",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "46f50f6e70f5cf4d723e5800c78103ccafae8fcae01a2e8315cfdb628263a9f9"
+    },
+    {
+      "leaf_index": 11,
+      "receipt_sha256": "e047d184f960eee28ddb73860f730438738baf8f285170717d40c258012ac813",
+      "task_id": "RF-12",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "a7cc9f7503df91fb446a6c3ae924385a02b67fef2aead29fbdff2ead75758ab0"
+    },
+    {
+      "leaf_index": 12,
+      "receipt_sha256": "c1bed05fd12821923674bf0f6104cf19d7ab8e785dcfcd6e142dcd7c51c33bcc",
+      "task_id": "RF-13",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "fc278b5c6b16e32e41adf80b877d066101b53c5fe314ba7c1d6c58136f2dcccd"
+    },
+    {
+      "leaf_index": 13,
+      "receipt_sha256": "add323556a2a7c6478bc3b2a42d5d0dc5f96e29027b4bc59b87d7a29e456719f",
+      "task_id": "RF-14",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "7c6f8aa67046733ee6fa42e6dbe635e0e82b3145e580784e4aac53ed798ed2ea"
+    },
+    {
+      "leaf_index": 14,
+      "receipt_sha256": "ddf692707fc193a822b493d4481a655621e4345bdc0448b1ae6f28b74d721db3",
+      "task_id": "RF-15",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "cea2674280a8429395f2bd6325d8a7d942d9e7f3142314e43f529acd82589239"
+    },
+    {
+      "leaf_index": 15,
+      "receipt_sha256": "d6a3a21c89105cbb94a9b2ac17594c64455cf948e2c19c7a6f245e56eebc7b1a",
+      "task_id": "RF-16",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "fabcac3fad438cdf90d0ecae67356d1a43b930ad357d36e9977f9bdbe4970c19"
+    },
+    {
+      "leaf_index": 16,
+      "receipt_sha256": "3e0a78995ef2adf9071688335ee34e0ba2b0cf514a0cc7bbbac29517b47ce7f1",
+      "task_id": "RF-17",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "ed1ac99256ea8645f7846094f028397057d7d53d17d8a6df30335e1756477dbc"
+    },
+    {
+      "leaf_index": 17,
+      "receipt_sha256": "f721cc9634e79a0993439c9b3c5b997a71840663b44d1eaa54e9bc90dd8f36f3",
+      "task_id": "RF-18",
+      "timestamp": "2026-11-03T16:18:48.239Z",
+      "leaf_hash": "8f020634a9ccc84730dc5d08b45045fccb5bb44e8e153d5dff8b291c78c03406"
+    },
+    {
+      "leaf_index": 18,
+      "receipt_sha256": "6dac8d1a92c99fc8f56a3dbe1b3fd5ce7ff2758c497fcc04cb7dda10150a0885",
+      "task_id": "RF-19",
+      "timestamp": "2026-11-03T16:18:48.240Z",
+      "leaf_hash": "bc0acc89dd971362669b18baa87c188b5a6dfd1dda52af24577f9ca3283dfc4f"
+    },
+    {
+      "leaf_index": 19,
+      "receipt_sha256": "dee22cdb6a153dfcef40e008e54587edb3f6273b08e7e0927c9e588e4e71387e",
+      "task_id": "RF-20",
+      "timestamp": "2026-11-03T16:18:48.240Z",
+      "leaf_hash": "e28092ee74781feca7f6402737eef1c878123bff165414a37176ab100757f1fb"
+    }
+  ],
+  "attestation": {
+    "schema_version": "1.8.0",
+    "algorithm": "Ed25519",
+    "public_key": "e68ca50212c4fb42c616710679ce7e34d7fa0683b518c89b5ba3e35f45f769ff",
+    "signature": "c8fda331980e02ea3a3907bd9f9287e7520baf51785d451a7640a570ee5e6ea67455a5591041afb099471e4bcf5d3d037e0c5b99a0ce1f48880e00f4cec0610a",
+    "signing_payload": "REPLAYFIX-ATTESTATION:v0.9:1.8.0:1f2d4b2bfb143546db71304e9f9e14d9b20e8887a613e6b939e45b3257808d83:20:2026-11-03T16:18:48.240Z",
+    "created_at": "2026-11-03T16:18:48.240Z"
+  }
+}
