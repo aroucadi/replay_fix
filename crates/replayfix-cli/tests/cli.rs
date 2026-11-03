@@ -1370,6 +1370,24 @@ fn test_attached_spa_mode_connects_to_external_url() {
     let attached_url = external_server.base_url();
     let attached_port = external_server.port();
 
+    // Ensure the external SPA server has fully hydrated both the root HTML shell and /public/app.js
+    // before dispatching the attached browser reproduction run.
+    let hydration_deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut dom_hydrated = false;
+    while std::time::Instant::now() < hydration_deadline {
+        if replayfix_core::probe_http_ready("127.0.0.1", attached_port, "/")
+            && replayfix_core::probe_http_ready("127.0.0.1", attached_port, "/public/app.js")
+        {
+            dom_hydrated = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        dom_hydrated,
+        "Attached SPA server failed DOM hydration readiness checks on port {attached_port}"
+    );
+
     // 1. Attached Mode without --apply preserves \Delta repo = 0 (Shadow Scratch First)
     let out_attached = run_cmd(
         &dir,

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.9.1] - 2026-11-03
+
+**Spec 190 Convergence & Hardening Patch — Benchmark Manifest Harmonization, Fast Playwright Resolution & Attached SPA Hydration Readiness**: Hardens the v1.9.0 Swarm Benchmark Engine and live Playwright CDP bridge across concurrent Windows test and sweep workloads, achieving a 100% pass rate across all 306 workspace tests with zero Clippy warnings and zero non-test panics. Full notes: [docs/release-notes/v1.9.1.md](docs/release-notes/v1.9.1.md).
+
+### Fixed
+- **Benchmark Sweep Manifest Resolution (`replayfix-core::sweep`, `v19_parallel_sweep.rs`)**:
+  - Updated `ManifestParser::load_manifest` to resolve `suite_name` across `"benchmark_suite"`, `"suite"`, and `"suite_name"` keys while defaulting to `"MetaPulse-20"`.
+  - Verified full `(suite_name, tasks)` tuple destructuring in `test_manifest_parser_loads_metapulse_manifest_safely` and harmonized `crates/replayfix-cli/tests/v19_parallel_sweep.rs` with the authoritative `MetaPulse-20` suite name.
+- **Playwright Bridge Module Resolution & CDP Hydration Tolerance (`replayfix-core::browser`)**:
+  - Prioritized fast synchronous filesystem/module candidates (`REPLAYFIX_PLAYWRIGHT_PATH`, `'playwright'`, `node_modules/playwright`, and local npx cache) in `loadPlaywright()` before falling back to `npm.cmd` subprocess invocations.
+  - Added ancestor directory discovery from `current_dir()` and `current_exe()` in `PlaywrightBridge::start_with_script_and_timeouts` to propagate `NODE_PATH` and `REPLAYFIX_PLAYWRIGHT_PATH` into isolated scratch sandboxes.
+  - Increased Windows CDP click hydration timeout to `20,000ms` and default bridge startup/command timeouts to `25s`.
+- **Attached SPA DOM Hydration Readiness (`crates/replayfix-cli/tests/cli.rs`)**:
+  - Added explicit HTTP readiness polling for both the root HTML shell (`/`) and client hydration bundle (`/public/app.js`) before dispatching attached browser reproduction runs in `test_attached_spa_mode_connects_to_external_url`.
+
+---
+
 ## [1.9.0] - 2026-11-03
 
 **Spec 190 — Pure Application-Agnostic Harness & High-Throughput Parallel Swarm Benchmark Engine**: Permanently decouples ReplayFix from hardcoded synthetic fixtures, eliminating `"has no built-in fixture for task"` across all workflows. Modern web applications across React, Vite, Next.js, and Express are dynamically grounded and evaluated based on generic observable signals (uncaught page exceptions, network 4xx/5xx responses, and DOM mutation activity). Adds the High-Throughput Parallel Swarm Benchmark Engine (`replayfix sweep`), processing the complete 20-defect MetaPulse benchmark suite (`RF-01` through `RF-20`) in 21.6s across concurrent workers with zero base repository mutation ($\Delta\text{repo}=0$), emitting schema-validated summaries (`benchmark_summary.json`, `telemetry_matrix.json`) and Ed25519-signed Merkle batch roots. Full notes: [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md).

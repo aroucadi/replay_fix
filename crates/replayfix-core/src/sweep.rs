@@ -221,7 +221,8 @@ impl ManifestParser {
             .map_err(|e| CoreError::Manifest(format!("Invalid manifest JSON schema: {e}")))?;
 
         let suite_name = val
-            .get("suite")
+            .get("benchmark_suite")
+            .or_else(|| val.get("suite"))
             .or_else(|| val.get("suite_name"))
             .and_then(|s| s.as_str())
             .unwrap_or("MetaPulse-20")
@@ -944,7 +945,8 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let manifest_path = repo_root.join("benchmarks/metapulse/MANIFEST.json");
-        let (_suite, tasks) = ManifestParser::load_manifest(&manifest_path).unwrap();
+        let (suite_name, tasks) = ManifestParser::load_manifest(&manifest_path).unwrap();
+        assert_eq!(suite_name, "MetaPulse-20");
         assert_eq!(tasks.len(), 20);
         assert_eq!(tasks[0].bug_id, "RF-01");
         assert_eq!(tasks[19].bug_id, "RF-20");
