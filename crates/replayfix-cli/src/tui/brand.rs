@@ -128,11 +128,7 @@ pub fn render_hero_splash(cols: u16, theme: &Theme) -> String {
 
     if theme.color_enabled {
         let pill_ver = theme.pill("v1.9.0", Rgb(248, 250, 252), Rgb(18, 24, 38));
-        let pill_sub = theme.pill(
-            "Rust Substrate: 60 FPS",
-            Rgb(16, 185, 129),
-            Rgb(6, 48, 36),
-        );
+        let pill_sub = theme.pill("Rust Substrate: 60 FPS", Rgb(16, 185, 129), Rgb(6, 48, 36));
         let pill_ai = theme.pill(
             "Meta AI: Spark 1.3 + Wonder 1.0",
             Rgb(56, 189, 248),
@@ -196,7 +192,9 @@ mod tests {
         let theme_plain = Theme::for_stdout(ColorOption::Never, OutputMode::Human);
         let splash_plain = render_hero_splash(100, &theme_plain);
         assert!(!splash_plain.contains('\x1b'));
-        assert!(splash_plain.contains("▶ REPLAYFIX // Autonomous Bug Reproduction, Causal Verification & Repair"));
-        assert!(splash_plain.contains("[ v1.9.0 ] [ Rust Substrate: 60 FPS ] [ Meta AI: Spark 1.3 + Wonder 1.0 ]"));
+        assert!(splash_plain
+            .contains("▶ REPLAYFIX // Autonomous Bug Reproduction, Causal Verification & Repair"));
+        assert!(splash_plain
+            .contains("[ v1.9.0 ] [ Rust Substrate: 60 FPS ] [ Meta AI: Spark 1.3 + Wonder 1.0 ]"));
     }
 }

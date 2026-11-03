@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src data: blob:; media-src data: blob:; connect-src 'self' ws: wss: http: https:; base-uri 'none'; form-action 'none';">
+  <title>ReplayFix Live Streaming Dashboard — Autonomous Agent Swarm Observatory (v1.9.5)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --void-canvas: #08090c;
+      --void-elevated: #0c0e14;
+      --void-panel: #10131b;
+      --void-well: #050608;
+      --hairline: rgba(255, 255, 255, 0.07);
+      --hairline-strong: rgba(255, 255, 255, 0.15);
+      --klein-blue: #2563eb;
+      --klein-glow: rgba(37, 99, 235, 0.24);
+      --acid-emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.22);
+      --phosphor-amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.22);
+      --crimson-alert: #f43f5e;
+      --crimson-glow: rgba(244, 63, 94, 0.22);
+      --text-bone: #f4f6fb;
+      --text-steel: #94a3b8;
+      --text-graphite: #526077;
+      --font-display: "Syne", "Cabinet Grotesk", sans-serif;
+      --font-sans: "Bricolage Grotesque", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "Space Mono", "JetBrains Mono", ui-monospace, monospace;
+      --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--void-canvas);
+      background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+        radial-gradient(ellipse 80% 50% at 15% 0%, rgba(37, 99, 235, 0.12), transparent 70%),
+        radial-gradient(ellipse 60% 40% at 90% 100%, rgba(16, 185, 129, 0.08), transparent 65%);
+      background-size: 36px 36px, 36px 36px, 100% 100%, 100% 100%;
+      color: var(--text-bone);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Subtle Observatory Scanline Overlay */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 90;
+      background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.0) 0px,
+        rgba(0, 0, 0, 0.0) 2px,
+        rgba(255, 255, 255, 0.012) 3px
+      );
+    }
+
+    @keyframes revealUp {
+      from {
+        opacity: 0;
+        transform: translateY(14px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes pingPulse {
+      0% { transform: scale(0.85); opacity: 0.9; }
+      75% { transform: scale(2.35); opacity: 0; }
+      100% { transform: scale(2.35); opacity: 0; }
+    }
+
+    @keyframes laserSweep {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    /* Mission Control Top Deck */
+    header {
+      background: rgba(8, 9, 12, 0.86);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--hairline);
+      padding: 0.9rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand-cluster {
+      display: flex;
+      align-items: center;
+      gap: 1.1rem;
+    }
+
+    .emblem-frame {
+      width: 42px;
+      height: 42px;
+      background: var(--void-panel);
+      border: 1px solid var(--hairline-strong);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 18px rgba(37, 99, 235, 0.25);
+    }
+
+    .emblem-frame::before,
+    .emblem-frame::after {
+      content: "";
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      border-color: var(--phosphor-amber);
+      border-style: solid;
+    }
+    .emblem-frame::before {
+      top: -1px;
+      left: -1px;
+      border-width: 2px 0 0 2px;
+    }
+    .emblem-frame::after {
+      bottom: -1px;
+      right: -1px;
+      border-width: 0 2px 2px 0;
+    }
+
+    .emblem-frame svg {
+      width: 20px;
+      height: 20px;
+      stroke: var(--acid-emerald);
+      fill: none;
+      stroke-width: 2.2;
+    }
+
+    .brand-titles h1 {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+      color: var(--text-bone);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .version-chip {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 0.15rem 0.55rem;
+      background: rgba(37, 99, 235, 0.16);
+      color: #60a5fa;
+      border: 1px solid rgba(37, 99, 235, 0.45);
+      letter-spacing: 0.06em;
+    }
+
+    .brand-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-steel);
+      letter-spacing: 0.02em;
+      margin-top: 0.15rem;
+    }
+
+    .deck-telemetry-strip {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .hud-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.38rem 0.8rem;
+      background: var(--void-panel);
+      border: 1px solid var(--hairline);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-steel);
+    }
+
+    .hud-pill strong {
+      color: var(--text-bone);
+      font-weight: 700;
+    }
+
+    .status-live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.38rem 0.9rem;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: var(--acid-emerald);
+      font-family: var(--font-mono);
+      font-size: 0.73rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .ping-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--acid-emerald);
+      position: relative;
+    }
+
+    .ping-dot::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 1.5px solid var(--acid-emerald);
+      animation: pingPulse 1.8s var(--ease-out-expo) infinite;
+    }
+
+    /* Main Asymmetric Bento Observatory Grid */
+    main {
+      flex: 1;
+      max-width: 1680px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.5rem 2rem 2.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* Top Telemetry & Rate-Pool Laser Ribbon */
+    .telemetry-bento-row {
+      display: grid;
+      grid-template-columns: 1.1fr 1.1fr 1.4fr 1fr;
+      gap: 1rem;
+      animation: revealUp 0.55s var(--ease-out-expo) both;
+    }
+
+    @media (max-width: 1180px) {
+      .telemetry-bento-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 640px) {
+      .telemetry-bento-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .bento-tile {
+      background: var(--void-elevated);
+      border: 1px solid var(--hairline);
+      padding: 1.05rem 1.25rem;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.25s var(--ease-out-expo), transform 0.25s var(--ease-out-expo);
+    }
+
+    .bento-tile:hover {
+      border-color: var(--hairline-strong);
+      transform: translateY(-2px);
+    }
+
+    .bento-tile::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, var(--klein-blue), var(--acid-emerald), var(--phosphor-amber));
+      opacity: 0.7;
+    }
+
+    .tile-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 0.69rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-steel);
+      margin-bottom: 0.55rem;
+    }
+
+    .tile-tag {
+      padding: 0.1rem 0.45rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--hairline);
+      color: var(--phosphor-amber);
+      font-size: 0.65rem;
+    }
+
+    .tile-metric {
+      font-family: var(--font-mono);
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text-bone);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .laser-meter-track {
+      margin-top: 0.6rem;
+      height: 5px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .laser-meter-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--klein-blue), var(--acid-emerald), var(--phosphor-amber));
+      background-size: 200% 100%;
+      animation: laserSweep 4s linear infinite;
+    }
+
+    .tile-foot {
+      margin-top: 0.45rem;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-graphite);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Asymmetric Core Matrix (58% Viewport + Worker Cluster | 42% Multi-Agent Reasoning Stream) */
+    .observatory-matrix {
+      display: grid;
+      grid-template-columns: 1.38fr 1fr;
+      gap: 1.25rem;
+      animation: revealUp 0.65s var(--ease-out-expo) 0.08s both;
+    }
+
+    @media (max-width: 1180px) {
+      .observatory-matrix {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .observatory-panel {
+      background: var(--void-elevated);
+      border: 1px solid var(--hairline);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .panel-bar {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--hairline);
+      background: rgba(16, 19, 27, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .panel-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+
+    .panel-index {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      padding: 0.12rem 0.42rem;
+      background: rgba(37, 99, 235, 0.18);
+      border: 1px solid rgba(37, 99, 235, 0.45);
+      color: #93c5fd;
+    }
+
+    .panel-title {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+      color: var(--text-bone);
+    }
+
+    .panel-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      padding: 0.2rem 0.6rem;
+      background: var(--void-well);
+      border: 1px solid var(--hairline);
+      color: var(--phosphor-amber);
+    }
+
+    /* Viewport Stage */
+    .viewport-stage {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background: var(--void-well);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      margin: 1rem 1.25rem 0.75rem;
+      border: 1px solid var(--hairline-strong);
+    }
+
+    .screencast-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .reticle-overlay {
+      position: absolute;
+      inset: 12px;
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+      pointer-events: none;
+    }
+
+    .stream-meta-overlay {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      background: rgba(5, 6, 8, 0.88);
+      backdrop-filter: blur(10px);
+      padding: 0.38rem 0.8rem;
+      border: 1px solid var(--hairline-strong);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--text-steel);
+    }
+
+    .stream-meta-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--acid-emerald);
+      box-shadow: 0 0 10px var(--acid-emerald);
+    }
+
+    /* Parallel Worker Health Strip inside Left Column */
+    .worker-health-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.65rem;
+      padding: 0.25rem 1.25rem 1.15rem;
+    }
+
+    @media (max-width: 760px) {
+      .worker-health-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .worker-tile {
+      background: var(--void-well);
+      border: 1px solid var(--hairline);
+      padding: 0.55rem 0.7rem;
+      font-family: var(--font-mono);
+      font-size: 0.69rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .worker-tile-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-bone);
+      font-weight: 700;
+    }
+
+    .worker-state-ok {
+      color: var(--acid-emerald);
+    }
+
+    .worker-state-busy {
+      color: var(--phosphor-amber);
+    }
+
+    /* Multi-Agent Muse Spark Reasoning Stream */
+    .reasoning-feed {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 490px;
+      padding: 1rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+
+    .reasoning-feed::-webkit-scrollbar {
+      width: 5px;
+    }
+    .reasoning-feed::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .feed-item {
+      background: var(--void-well);
+      border: 1px solid var(--hairline);
+      border-left: 3px solid var(--klein-blue);
+      padding: 0.85rem 1rem;
+      transition: border-color 0.2s var(--ease-out-expo), background 0.2s var(--ease-out-expo);
+    }
+
+    .feed-item:hover {
+      background: rgba(16, 19, 27, 0.9);
+      border-color: var(--hairline-strong);
+    }
+
+    .feed-item-tool {
+      border-left-color: var(--phosphor-amber);
+    }
+
+    .feed-item-patch {
+      border-left-color: var(--acid-emerald);
+    }
+
+    .feed-meta {
+      font-family: var(--font-mono);
+      font-size: 0.69rem;
+      font-weight: 700;
+      color: var(--text-steel);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.4rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .feed-meta span.model-slug {
+      color: #60a5fa;
+    }
+
+    .feed-body {
+      color: var(--text-bone);
+      font-size: 0.83rem;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    /* Bottom Dual-Gate Visual Proof & ariaSnapshot Diff Deck */
+    .diff-observatory-deck {
+      background: var(--void-elevated);
+      border: 1px solid var(--hairline);
+      animation: revealUp 0.75s var(--ease-out-expo) 0.14s both;
+    }
+
+    .diff-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem 1.25rem;
+    }
+
+    @media (max-width: 920px) {
+      .diff-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .diff-pane {
+      background: var(--void-well);
+      border: 1px solid var(--hairline);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .diff-pane-header {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--hairline);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .diff-pane-header.red-header {
+      color: var(--crimson-alert);
+      background: rgba(244, 63, 94, 0.07);
+    }
+
+    .diff-pane-header.green-header {
+      color: var(--acid-emerald);
+      background: rgba(16, 185, 129, 0.07);
+    }
+
+    .diff-pane pre {
+      padding: 0.95rem 1.1rem;
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      line-height: 1.55;
+      color: var(--text-steel);
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    .tag-red {
+      color: var(--crimson-alert);
+      padding: 0.1rem 0.45rem;
+      border: 1px solid rgba(244, 63, 94, 0.35);
+    }
+
+    .tag-green {
+      color: var(--acid-emerald);
+      padding: 0.1rem 0.45rem;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-cluster">
+      <div class="emblem-frame" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <polygon points="6 4 20 12 6 20 6 4"></polygon>
+        </svg>
+      </div>
+      <div class="brand-titles">
+        <h1>
+          ReplayFix Live Streaming Dashboard
+          <span class="version-chip">OBSERVATORY // v1.9.5</span>
+        </h1>
+        <p class="brand-subtitle">Autonomous Agent Swarm Observatory &bull; CDP Telemetry &bull; Muse Spark 1.3 (effort: xhigh)</p>
+      </div>
+    </div>
+
+    <div class="deck-telemetry-strip">
+      <div class="hud-pill" title="Target Repository Worktree Integrity">
+        <span>SANDBOX INVARIANT</span>
+        <strong>&Delta;repo = 0</strong>
+      </div>
+      <div class="hud-pill" title="Ephemeral Socket Binding">
+        <span>PORT</span>
+        <strong>:0 DYNAMIC</strong>
+      </div>
+      <div class="status-live-pill" id="live-badge">
+        <span class="ping-dot"></span>
+        <span id="conn-status">WS CONNECTED</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Top Bento Telemetry & Rate-Pool Laser Meters -->
+    <section class="telemetry-bento-row" aria-label="Swarm Telemetry and Rate-Pool Meters">
+      <article class="bento-tile">
+        <div class="tile-header">
+          <span>Active Swarm Workers</span>
+          <span class="tile-tag">WORK-STEALING</span>
+        </div>
+        <div class="tile-metric" id="metric-workers">4</div>
+        <div class="laser-meter-track"><div class="laser-meter-fill" style="width: 100%;"></div></div>
+        <div class="tile-foot">
+          <span>ISOLATED SCRATCH TREES</span>
+          <span>PORT :0</span>
+        </div>
+      </article>
+
+      <article class="bento-tile">
+        <div class="tile-header">
+          <span>CDP Screencast Cadence</span>
+          <span class="tile-tag">1280&times;720</span>
+        </div>
+        <div class="tile-metric" id="metric-fps">30.0</div>
+        <div class="laser-meter-track"><div class="laser-meter-fill" style="width: 88%;"></div></div>
+        <div class="tile-foot">
+          <span>Page.startScreencast</span>
+          <span>DPR 1.0</span>
+        </div>
+      </article>
+
+      <article class="bento-tile">
+        <div class="tile-header">
+          <span>Rate-Pool Token Laser Meter</span>
+          <span class="tile-tag">EFFORT: XHIGH</span>
+        </div>
+        <div class="tile-metric" id="metric-speed">305 tok/s</div>
+        <div class="laser-meter-track"><div class="laser-meter-fill" style="width: 92%;"></div></div>
+        <div class="tile-foot">
+          <span>MUSE SPARK 1.3 + WONDER 1.0</span>
+          <span>ZERO-AUDIO RULE</span>
+        </div>
+      </article>
+
+      <article class="bento-tile">
+        <div class="tile-header">
+          <span>Quarantined Flaky Specs</span>
+          <span class="tile-tag">GATE 3 QUORUM</span>
+        </div>
+        <div class="tile-metric" id="metric-quarantine">0</div>
+        <div class="laser-meter-track"><div class="laser-meter-fill" style="width: 100%;"></div></div>
+        <div class="tile-foot">
+          <span>F_patched \ F_baseline = &empty;</span>
+          <span>100% PARITY</span>
+        </div>
+      </article>
+    </section>
+
+    <!-- Asymmetric Bento Matrix: Left (Viewport + Worker Health Tiles) | Right (Muse Spark Reasoning Stream) -->
+    <div class="observatory-matrix">
+      <section class="observatory-panel" aria-label="Chromium Viewport Screencast and Worker Health">
+        <div class="panel-bar">
+          <div class="panel-title-wrap">
+            <span class="panel-index">DECK 01</span>
+            <h2 class="panel-title">Live Chromium CDP Viewport Screencast</h2>
+          </div>
+          <span class="panel-badge">/ws/screencast/:id &bull; 1280&times;720</span>
+        </div>
+
+        <div class="viewport-stage">
+          <img id="screencast-view" class="screencast-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720' viewBox='0 0 1280 720'%3E%3Crect width='1280' height='720' fill='%23050608'/%3E%3Ccircle cx='640' cy='360' r='96' fill='none' stroke='%232563eb' stroke-width='1.5' stroke-dasharray='6 6'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2310b981' font-family='monospace' font-size='18'%3ECDP VIEWPORT TELEMETRY LOCKED // AWAITING FRAME STREAM%3C/text%3E%3C/svg%3E" alt="Live CDP Screencast Frame">
+          <canvas id="screencast-canvas" width="1280" height="720" style="display:none;"></canvas>
+          <div class="reticle-overlay" aria-hidden="true"></div>
+          <div class="stream-meta-overlay" id="stream-meta">
+            <div class="stream-meta-dot"></div>
+            <span>Stream: Connected &bull; Latency: 18ms</span>
+          </div>
+        </div>
+
+        <div class="worker-health-grid" aria-label="Parallel Worker Health Tiles">
+          <div class="worker-tile">
+            <div class="worker-tile-top"><span>WORKER-01</span><span class="worker-state-ok">GATE 2 GREEN</span></div>
+            <span>RF-01 &bull; :58411</span>
+          </div>
+          <div class="worker-tile">
+            <div class="worker-tile-top"><span>WORKER-02</span><span class="worker-state-busy">PATCHING</span></div>
+            <span>RF-02 &bull; :58412</span>
+          </div>
+          <div class="worker-tile">
+            <div class="worker-tile-top"><span>WORKER-03</span><span class="worker-state-ok">GATE 2 GREEN</span></div>
+            <span>RF-03 &bull; :58413</span>
+          </div>
+          <div class="worker-tile">
+            <div class="worker-tile-top"><span>WORKER-04</span><span class="worker-state-ok">STANDBY</span></div>
+            <span>IDLE &bull; :0 READY</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="observatory-panel" aria-label="Multi-Agent Muse Spark Reasoning Stream">
+        <div class="panel-bar">
+          <div class="panel-title-wrap">
+            <span class="panel-index">DECK 02</span>
+            <h2 class="panel-title">Muse Spark Deliberation Stream (SSE)</h2>
+          </div>
+          <span class="panel-badge">effort: xhigh &bull; Turn 1/3</span>
+        </div>
+
+        <div class="reasoning-feed" id="reasoning-feed" role="log" aria-live="polite">
+          <div class="feed-item">
+            <div class="feed-meta">
+              <span class="model-slug">MUSE-SPARK-1.3 [EFFORT: XHIGH]</span>
+              <span>Turn 1 &bull; Spatial Grounding</span>
+            </div>
+            <div class="feed-body">Grounded user click at coordinates (345.5, 678.0) matching button#add-to-cart. DOM mutation failed to update cart count badge.</div>
+          </div>
+          <div class="feed-item feed-item-tool">
+            <div class="feed-meta">
+              <span style="color:var(--phosphor-amber);">[TOOL: inspect_trace]</span>
+              <span>CDP + Optical Flow</span>
+            </div>
+            <div class="feed-body">Inspected Playwright trace rf_trace.zip: TypeError: Cannot read property of undefined (reading 'price') in src/components/CartSummary.tsx:45.</div>
+          </div>
+          <div class="feed-item feed-item-patch">
+            <div class="feed-meta">
+              <span style="color:var(--acid-emerald);">MUSE-WONDER-1.0</span>
+              <span>Surgical AST Patch</span>
+            </div>
+            <div class="feed-body">Synthesized surgical AST replacement block for CartSummary.tsx enforcing optional chaining and fallback quantity calculation.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Bottom Dual-Gate Visual Proof & ariaSnapshot Grounding Diff -->
+    <section class="diff-observatory-deck" aria-label="Visual Proof Diff">
+      <div class="panel-bar">
+        <div class="panel-title-wrap">
+          <span class="panel-index">DECK 03</span>
+          <h2 class="panel-title">Side-by-Side Visual Proof &amp; ariaSnapshot Grounding Diff</h2>
+        </div>
+        <span class="status-live-pill">Gate 1 RED &rarr; Gate 2 GREEN &rarr; Gate 3 PASSED</span>
+      </div>
+      <div class="diff-grid">
+        <div class="diff-pane">
+          <div class="diff-pane-header red-header">
+            <span>Gate 1 RED Baseline (Unrepaired)</span>
+            <span class="tag-red">FAILING ORACLE</span>
+          </div>
+          <pre>- - banner:
+-   - heading "MetaPulse Store" [level=1]
+-   - button "Cart (0)"
+- - main:
+-   - text: "Cart Total: $0.00 (Out of Sync)"
+-   - button "Add to Cart" [focused]</pre>
+        </div>
+        <div class="diff-pane">
+          <div class="diff-pane-header green-header">
+            <span>Gate 2 GREEN Verified (Repaired)</span>
+            <span class="tag-green">STABILITY 2/2 PASS</span>
+          </div>
+          <pre>+ - banner:
++   - heading "MetaPulse Store" [level=1]
++   - button "Cart (1)"
++ - main:
++   - text: "Cart Total: $49.99 (Synchronized)"
++   - button "Add to Cart"</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Embedded zero-dependency live client
+    (function() {
+      const loc = window.location;
+      const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${loc.host}/ws/screencast/live`;
+      const sseUrl = `${loc.protocol}//${loc.host}/events/reasoning/live`;
+      const statusUrl = `${loc.protocol}//${loc.host}/api/status`;
+
+      const statusEl = document.getElementById('conn-status');
+      const imgEl = document.getElementById('screencast-view');
+      const feedEl = document.getElementById('reasoning-feed');
+      const metaEl = document.getElementById('stream-meta');
+
+      let ws;
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          if (statusEl) statusEl.textContent = 'WS STREAMING';
+        };
+        ws.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.frame_data && data.frame_data.base64_data) {
+              imgEl.src = `data:image/${data.frame_data.format || 'png'};base64,${data.frame_data.base64_data}`;
+              if (metaEl) {
+                metaEl.innerHTML = `<div class="stream-meta-dot"></div><span>Stream: Live &bull; Frame: ${data.timestamp || 'now'}</span>`;
+              }
+            }
+          } catch (e) {}
+        };
+        ws.onerror = () => {
+          if (statusEl) statusEl.textContent = 'POLLING (HTTP)';
+        };
+      } catch (e) {}
+
+      // Connect SSE
+      if (typeof EventSource !== 'undefined') {
+        try {
+          const es = new EventSource(sseUrl);
+          const handleSseEvent = (evt) => {
+            try {
+              const data = JSON.parse(evt.data);
+              if (data.reasoning_data && feedEl) {
+                const item = document.createElement('div');
+                item.className = 'feed-item';
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'feed-meta';
+                const slugSpan = document.createElement('span');
+                slugSpan.className = 'model-slug';
+                slugSpan.textContent = data.reasoning_data.model || 'AGENT';
+                const turnSpan = document.createElement('span');
+                turnSpan.textContent = `Turn ${data.reasoning_data.turn || 1}`;
+                metaDiv.appendChild(slugSpan);
+                metaDiv.appendChild(turnSpan);
+
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'feed-body';
+                bodyDiv.textContent = data.reasoning_data.token || '';
+
+                item.appendChild(metaDiv);
+                item.appendChild(bodyDiv);
+                feedEl.appendChild(item);
+                feedEl.scrollTop = feedEl.scrollHeight;
+              }
+            } catch (e) {}
+          };
+          es.onmessage = handleSseEvent;
+          es.addEventListener('reasoning', handleSseEvent);
+        } catch (e) {}
+      }
+
+      // Periodic status polling
+      setInterval(() => {
+        fetch(statusUrl).then(r => r.json()).then(data => {
+          if (data && data.tasks_count !== undefined) {
+            const workersEl = document.getElementById('metric-workers');
+            if (workersEl) workersEl.textContent = data.tasks_count || 4;
+          }
+        }).catch(() => {});
+      }, 5000);
+    })();
+  </script>
+</body>
+</html>

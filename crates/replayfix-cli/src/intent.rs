@@ -182,9 +182,7 @@ impl ExecutionPlan {
         println!("  {}", theme.bold("Planned Steps:"));
         for step in &self.steps {
             let risk_pill = match step.risk {
-                RiskLevel::Low => {
-                    theme.pill("LOW ", CyberPalette::TITANIUM, CyberPalette::CYAN_BG)
-                }
+                RiskLevel::Low => theme.pill("LOW ", CyberPalette::TITANIUM, CyberPalette::CYAN_BG),
                 RiskLevel::Medium => {
                     theme.pill("MED ", CyberPalette::TITANIUM, CyberPalette::AMBER_BG)
                 }

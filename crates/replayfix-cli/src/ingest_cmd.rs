@@ -8,7 +8,8 @@
 use clap::Args;
 use replayfix_core::error::{CoreError, Result};
 use replayfix_core::rrweb::{
-    synthesize_manifest_from_telemetry, RrwebParser, RrwebSession, SentryCrashDump, SentryIngestion,
+    synthesize_manifest_from_apm, OtelIngestion, OtelSpan, RrwebParser, RrwebSession,
+    SentryCrashDump, SentryIngestion, SourceMapResolver,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,14 @@ pub struct IngestArgs {
     /// File path or HTTPS URL to Sentry crash event JSON
     #[arg(long)]
     pub sentry: Option<String>,
+
+    /// Path to OpenTelemetry (OTel) span export JSON file
+    #[arg(long)]
+    pub otel: Option<PathBuf>,
+
+    /// Path to Source Map v3 (.map) JSON file for stack frame resolution
+    #[arg(long)]
+    pub sourcemap: Option<PathBuf>,
 
     /// Target repository path (default: .)
     #[arg(long, default_value = ".")]
@@ -85,8 +94,38 @@ pub fn run_ingest(args: IngestArgs) -> Result<i32> {
         None
     };
 
+    let otel_spans: Vec<OtelSpan> = if let Some(ref otel_path) = args.otel {
+        let raw = fs::read_to_string(otel_path).map_err(|e| {
+            CoreError::Telemetry(format!(
+                "Failed to read OpenTelemetry file {}: {e}",
+                otel_path.display()
+            ))
+        })?;
+        OtelIngestion::parse_json(&raw)?
+    } else {
+        Vec::new()
+    };
+
+    let sourcemap: Option<SourceMapResolver> = if let Some(ref sm_path) = args.sourcemap {
+        let raw = fs::read_to_string(sm_path).map_err(|e| {
+            CoreError::SessionReplay(format!(
+                "Failed to read SourceMap file {}: {e}",
+                sm_path.display()
+            ))
+        })?;
+        Some(SourceMapResolver::parse_json(&raw)?)
+    } else {
+        None
+    };
+
     let repo_path = Path::new(&args.repo);
-    let manifest = synthesize_manifest_from_telemetry(&session, crash.as_ref(), repo_path)?;
+    let manifest = synthesize_manifest_from_apm(
+        &session,
+        crash.as_ref(),
+        &otel_spans,
+        sourcemap.as_ref(),
+        repo_path,
+    )?;
 
     let out_path = args.output.unwrap_or_else(|| {
         PathBuf::from(".replayfix")
@@ -101,6 +140,8 @@ pub fn run_ingest(args: IngestArgs) -> Result<i32> {
     let serialized = serde_json::to_string_pretty(&manifest)?;
     fs::write(&out_path, serialized)?;
 
+    let aligned_spans = OtelIngestion::align_with_rrweb(&session, &otel_spans, 2_000);
+
     if args.json {
         let json_out = serde_json::json!({
             "status": "INGESTED",
@@ -109,6 +150,9 @@ pub fn run_ingest(args: IngestArgs) -> Result<i32> {
             "manifest_path": out_path.to_string_lossy(),
             "interactions_count": session.interactions.len(),
             "has_crash_dump": crash.is_some(),
+            "otel_spans_count": otel_spans.len(),
+            "aligned_spans_count": aligned_spans.len(),
+            "has_sourcemap": sourcemap.is_some(),
         });
         println!("{}", serde_json::to_string_pretty(&json_out)?);
     } else {
@@ -121,6 +165,16 @@ pub fn run_ingest(args: IngestArgs) -> Result<i32> {
             "    Sentry Crash:  {}",
             if crash.is_some() { "Linked" } else { "None" }
         );
+        if !otel_spans.is_empty() {
+            println!(
+                "    OTel Spans:    {} ({} aligned)",
+                otel_spans.len(),
+                aligned_spans.len()
+            );
+        }
+        if sourcemap.is_some() {
+            println!("    SourceMap:     Resolved");
+        }
     }
 
     Ok(0)

@@ -26,6 +26,10 @@ pub struct DashboardArgs {
     #[arg(long)]
     pub duration: Option<u64>,
 
+    /// Automatically open the live dashboard URL in the default browser
+    #[arg(long)]
+    pub open: bool,
+
     /// Emit machine-readable JSON output
     #[arg(long)]
     pub json: bool,
@@ -35,11 +39,31 @@ pub fn run_dashboard_cmd(args: DashboardArgs) -> Result<i32> {
     let mut handle = DashboardServerHandle::start(args.port, args.artifacts)?;
     let base_url = handle.base_url();
 
+    if args.open && !replayfix_core::trace::is_ci_environment() {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &base_url])
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&base_url).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&base_url)
+                .spawn();
+        }
+    }
+
     if args.json {
         let json_out = serde_json::json!({
             "status": "ONLINE",
             "port": handle.port(),
             "url": base_url,
+            "open_requested": args.open,
             "websocket_endpoint": format!("ws://127.0.0.1:{}/ws/screencast/live", handle.port()),
             "sse_endpoint": format!("http://127.0.0.1:{}/events/reasoning/live", handle.port()),
         });

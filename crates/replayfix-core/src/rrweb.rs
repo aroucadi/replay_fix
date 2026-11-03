@@ -6,10 +6,75 @@
 //! - Synthesizes validated, path-safe `TaskManifest` specs for the ReplayFix Sovereign Healer.
 
 use crate::error::{CoreError, Result};
+use crate::github::redact_github_secrets;
 use crate::manifest::TaskManifest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
+
+/// Strip raw ANSI escape sequences (`\x1b[...m` or control bytes) and scrub secrets
+/// (`GITHUB_TOKEN`, `META_API_KEY`, `ghp_...`, `github_pat_...`, `sk-...`) from untrusted telemetry strings.
+#[must_use]
+pub fn strip_ansi_and_redact(raw: &str) -> String {
+    let mut no_ansi = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                let _ = chars.next();
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if ch == '\0' {
+            continue;
+        }
+        no_ansi.push(ch);
+    }
+    let env_redacted = redact_github_secrets(&no_ansi, &[]);
+    let prefixes = ["ghp_", "github_pat_", "gho_", "ghs_", "sk-", "glpat-"];
+    let mut out = String::with_capacity(env_redacted.len());
+    let mut rest = env_redacted.as_str();
+    while !rest.is_empty() {
+        let mut matched_prefix = None;
+        for p in prefixes {
+            if rest.starts_with(p) {
+                matched_prefix = Some(p);
+                break;
+            }
+        }
+        if let Some(p) = matched_prefix {
+            let after_p = &rest[p.len()..];
+            let token_len = after_p
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .map(char::len_utf8)
+                .sum::<usize>();
+            if token_len >= 8 {
+                out.push_str("[REDACTED]");
+                rest = &after_p[token_len..];
+                continue;
+            }
+        }
+        if let Some(ch) = rest.chars().next() {
+            out.push(ch);
+            rest = &rest[ch.len_utf8()..];
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// Alias for `strip_ansi_and_redact` scrubbing untrusted APM telemetry strings.
+#[must_use]
+pub fn sanitize_untrusted_telemetry_text(raw: &str) -> String {
+    strip_ansi_and_redact(raw)
+}
 
 /// RRWeb Event Types according to rrweb-io specification.
 pub const RRWEB_EVENT_DOM_CONTENT_LOADED: u32 = 0;
@@ -223,7 +288,7 @@ impl RrwebParser {
                                 .data
                                 .get("text")
                                 .and_then(|t| t.as_str())
-                                .map(|s| s.to_string());
+                                .map(strip_ansi_and_redact);
                             let target_id = event.data.get("id").and_then(|v| v.as_i64());
                             interactions.push(RrwebInteraction {
                                 timestamp: event.timestamp,
@@ -475,7 +540,7 @@ impl SentryIngestion {
         Ok(candidates)
     }
 
-    fn normalize_filename(raw: &str) -> String {
+    pub(crate) fn normalize_filename(raw: &str) -> String {
         let mut cleaned = raw.replace('\\', "/");
         if let Some(idx) = cleaned.find("webpack:///") {
             cleaned = cleaned[idx + "webpack:///".len()..].to_string();
@@ -491,6 +556,195 @@ impl SentryIngestion {
     }
 }
 
+/// OpenTelemetry (OTel) Span representation for distributed trace alignment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OtelSpan {
+    pub trace_id: String,
+    pub span_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_span_id: Option<String>,
+    pub name: String,
+    pub start_time_ms: u64,
+    pub end_time_ms: u64,
+    pub status_code: String,
+    #[serde(default)]
+    pub attributes: Value,
+}
+
+/// Time-synchronized correlation between an RRWeb user interaction and an OpenTelemetry span.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AlignedInteractionSpan {
+    pub interaction_timestamp: u64,
+    pub interaction_kind: String,
+    pub span_id: String,
+    pub trace_id: String,
+    pub span_name: String,
+    pub status_code: String,
+    pub delta_ms: u64,
+}
+
+/// Parser and temporal correlator for OpenTelemetry (OTel) span exports.
+#[derive(Debug, Default)]
+pub struct OtelIngestion;
+
+impl OtelIngestion {
+    /// Parse OpenTelemetry JSON spans (either an array of spans or `{ "spans": [...] }`).
+    pub fn parse_json(json_str: &str) -> Result<Vec<OtelSpan>> {
+        let val: Value = serde_json::from_str(json_str).map_err(|e| {
+            CoreError::Telemetry(format!("Failed to parse OpenTelemetry JSON payload: {e}"))
+        })?;
+        let arr = if let Some(a) = val.as_array() {
+            a
+        } else if let Some(a) = val.get("spans").and_then(Value::as_array) {
+            a
+        } else {
+            return Err(CoreError::Telemetry(
+                "Expected OpenTelemetry JSON array or object with 'spans' array".to_string(),
+            ));
+        };
+
+        let mut spans = Vec::with_capacity(arr.len());
+        for item in arr {
+            let trace_id = item
+                .get("trace_id")
+                .or_else(|| item.get("traceId"))
+                .and_then(Value::as_str)
+                .unwrap_or("00000000000000000000000000000000")
+                .to_string();
+            let span_id = item
+                .get("span_id")
+                .or_else(|| item.get("spanId"))
+                .and_then(Value::as_str)
+                .unwrap_or("0000000000000000")
+                .to_string();
+            let parent_span_id = item
+                .get("parent_span_id")
+                .or_else(|| item.get("parentSpanId"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let name =
+                strip_ansi_and_redact(item.get("name").and_then(Value::as_str).unwrap_or("span"));
+            let start_time_ms = item
+                .get("start_time_ms")
+                .and_then(Value::as_u64)
+                .or_else(|| {
+                    item.get("startTimeUnixNano")
+                        .and_then(Value::as_u64)
+                        .map(|n| n / 1_000_000)
+                })
+                .unwrap_or(0);
+            let end_time_ms = item
+                .get("end_time_ms")
+                .and_then(Value::as_u64)
+                .or_else(|| {
+                    item.get("endTimeUnixNano")
+                        .and_then(Value::as_u64)
+                        .map(|n| n / 1_000_000)
+                })
+                .unwrap_or(start_time_ms);
+            let status_code = item
+                .get("status_code")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    item.get("status")
+                        .and_then(|s| s.get("code"))
+                        .and_then(Value::as_str)
+                })
+                .unwrap_or("OK")
+                .to_string();
+            let attributes = item.get("attributes").cloned().unwrap_or(Value::Null);
+
+            spans.push(OtelSpan {
+                trace_id,
+                span_id,
+                parent_span_id,
+                name,
+                start_time_ms,
+                end_time_ms,
+                status_code,
+                attributes,
+            });
+        }
+        Ok(spans)
+    }
+
+    /// Align RRWeb interactions with OpenTelemetry spans within `tolerance_ms`.
+    #[must_use]
+    pub fn align_with_rrweb(
+        session: &RrwebSession,
+        spans: &[OtelSpan],
+        tolerance_ms: u64,
+    ) -> Vec<AlignedInteractionSpan> {
+        let mut aligned = Vec::new();
+        for interaction in &session.interactions {
+            for span in spans {
+                let delta = interaction.timestamp.abs_diff(span.start_time_ms);
+                if delta <= tolerance_ms {
+                    aligned.push(AlignedInteractionSpan {
+                        interaction_timestamp: interaction.timestamp,
+                        interaction_kind: interaction.kind.clone(),
+                        span_id: span.span_id.clone(),
+                        trace_id: span.trace_id.clone(),
+                        span_name: span.name.clone(),
+                        status_code: span.status_code.clone(),
+                        delta_ms: delta,
+                    });
+                }
+            }
+        }
+        aligned
+    }
+}
+
+/// Source Map v3 resolver mapping minified bundle frames back to validated original source files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceMapResolver {
+    pub version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(
+        default,
+        rename = "sourceRoot",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_root: Option<String>,
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub names: Vec<String>,
+}
+
+impl SourceMapResolver {
+    /// Parse a Source Map v3 JSON payload and validate version 3 compliance.
+    pub fn parse_json(json_str: &str) -> Result<Self> {
+        let map: Self = serde_json::from_str(json_str).map_err(|e| {
+            CoreError::SessionReplay(format!("Failed to parse SourceMap v3 JSON: {e}"))
+        })?;
+        if map.version != 3 {
+            return Err(CoreError::SessionReplay(format!(
+                "Unsupported SourceMap version {}: expected 3",
+                map.version
+            )));
+        }
+        Ok(map)
+    }
+
+    /// Resolve candidate original TypeScript/JavaScript source paths from the sourcemap,
+    /// enforcing `TaskManifest::assert_safe_path`.
+    pub fn resolve_candidate_sources(&self) -> Result<Vec<String>> {
+        let mut resolved = Vec::new();
+        for raw_src in &self.sources {
+            let normalized = SentryIngestion::normalize_filename(raw_src);
+            if !normalized.is_empty() && !normalized.contains("node_modules") {
+                TaskManifest::assert_safe_path(&normalized, "sourcemap_source")?;
+                if !resolved.contains(&normalized) {
+                    resolved.push(normalized);
+                }
+            }
+        }
+        Ok(resolved)
+    }
+}
+
 /// Ingest a raw RRWeb JSON payload (array or `rrweb_ingest.schema.json` envelope) into an `RrwebSession`.
 pub fn ingest_session_replay(json_str: &str, session_id: &str) -> Result<RrwebSession> {
     RrwebParser::parse_json(json_str, session_id)
@@ -503,25 +757,37 @@ pub fn translate_sentry_breadcrumbs(crash: &SentryCrashDump) -> Result<(Vec<Stri
         .breadcrumbs
         .iter()
         .map(|b| {
-            let cat = b.category.as_deref().unwrap_or("event");
-            let msg = b.message.as_deref().unwrap_or("unknown");
+            let cat = strip_ansi_and_redact(b.category.as_deref().unwrap_or("event"));
+            let msg = strip_ansi_and_redact(b.message.as_deref().unwrap_or("unknown"));
             format!("{cat}: {msg}")
         })
         .collect();
     Ok((candidate_files, actions))
 }
 
-/// Synthesize a validated `TaskManifest` from RRWeb session and Sentry crash dump.
-pub fn synthesize_manifest_from_telemetry(
+/// Synthesize a validated `TaskManifest` from RRWeb session, Sentry crash dump, OpenTelemetry spans, and SourceMap.
+pub fn synthesize_manifest_from_apm(
     session: &RrwebSession,
     crash: Option<&SentryCrashDump>,
+    otel_spans: &[OtelSpan],
+    sourcemap: Option<&SourceMapResolver>,
     repo_path: &Path,
 ) -> Result<TaskManifest> {
-    let candidate_files = if let Some(c) = crash {
+    let mut candidate_files = if let Some(c) = crash {
         SentryIngestion::extract_candidate_source_files(c)?
     } else {
         Vec::new()
     };
+
+    if let Some(sm) = sourcemap {
+        for resolved in sm.resolve_candidate_sources()? {
+            if !candidate_files.contains(&resolved) {
+                candidate_files.push(resolved);
+            }
+        }
+    }
+
+    let aligned_spans = OtelIngestion::align_with_rrweb(session, otel_spans, 2_000);
 
     let task_id = crash
         .map(|c| format!("APM-{}", &c.event_id[..c.event_id.len().min(8)]))
@@ -533,7 +799,7 @@ pub fn synthesize_manifest_from_telemetry(
         });
 
     let title = crash
-        .map(|c| format!("{}: {}", c.exception_type, c.exception_value))
+        .map(|c| strip_ansi_and_redact(&format!("{}: {}", c.exception_type, c.exception_value)))
         .unwrap_or_else(|| "Production Session Replay Bug".to_string());
 
     let (interaction_x, interaction_y) = session
@@ -541,7 +807,7 @@ pub fn synthesize_manifest_from_telemetry(
         .map(|i| (i.x, i.y))
         .unwrap_or((100.0, 100.0));
 
-    let expected_behavior = if candidate_files.is_empty() {
+    let mut expected_behavior = if candidate_files.is_empty() {
         format!("User interaction at ({interaction_x}, {interaction_y}) should succeed")
     } else {
         format!(
@@ -549,6 +815,14 @@ pub fn synthesize_manifest_from_telemetry(
             candidate_files.join(", ")
         )
     };
+
+    if !aligned_spans.is_empty() {
+        let span_names: Vec<String> = aligned_spans
+            .iter()
+            .map(|s| format!("{}[{}]", s.span_name, s.status_code))
+            .collect();
+        expected_behavior.push_str(&format!(" [otel: {}]", span_names.join(", ")));
+    }
 
     let manifest_json = serde_json::json!({
         "task_id": task_id,
@@ -562,6 +836,15 @@ pub fn synthesize_manifest_from_telemetry(
 
     let manifest_str = serde_json::to_string(&manifest_json)?;
     TaskManifest::parse_str(&manifest_str)
+}
+
+/// Synthesize a validated `TaskManifest` from RRWeb session and Sentry crash dump.
+pub fn synthesize_manifest_from_telemetry(
+    session: &RrwebSession,
+    crash: Option<&SentryCrashDump>,
+    repo_path: &Path,
+) -> Result<TaskManifest> {
+    synthesize_manifest_from_apm(session, crash, &[], None, repo_path)
 }
 
 #[cfg(test)]

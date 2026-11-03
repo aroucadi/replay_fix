@@ -95,12 +95,7 @@ impl AgentShell {
             let hud = render_compact_hud_emblem(self.theme.color_enabled);
             let glyph = render_breathing_prompt(prompt_tick, self.theme.color_enabled);
             prompt_tick = prompt_tick.wrapping_add(15);
-            print!(
-                "  {} [{}] {} ",
-                hud,
-                self.theme.info(task_prompt),
-                glyph
-            );
+            print!("  {} [{}] {} ", hud, self.theme.info(task_prompt), glyph);
             let _ = io::stdout().flush();
 
             let mut input = String::new();

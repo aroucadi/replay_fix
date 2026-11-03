@@ -313,11 +313,16 @@ enum Commands {
         output: Option<PathBuf>,
     },
     /// Verify cryptographic Merkle receipts and Ed25519 attestations
+    #[command(visible_alias = "verify")]
     VerifyReceipt {
         /// Path to receipt file or directory containing merkle_receipt.json / audit_receipt.json
-        path: PathBuf,
-        /// Optional trusted Ed25519 public key (hex) to enforce
+        #[arg(required_unless_present = "receipt")]
+        path: Option<PathBuf>,
+        /// Explicit path to receipt file or directory (alias for positional path)
         #[arg(long)]
+        receipt: Option<PathBuf>,
+        /// Optional trusted Ed25519 public key (hex or file path) to enforce
+        #[arg(long, visible_alias = "public-key")]
         trusted_key: Option<String>,
         /// Emit machine-readable JSON output
         #[arg(long)]
@@ -372,7 +377,7 @@ enum Commands {
     /// Synthesize permanent Playwright regression test (tests/repro/rf_<id>.spec.ts) and update .replayfix/inoculations.json (Release 1.5)
     Inoculate {
         /// Bug identifier (e.g. RF-01)
-        #[arg(long)]
+        #[arg(long, default_value = "RF-01")]
         bug: String,
         /// Path to repository root
         #[arg(long, default_value = ".")]
@@ -387,7 +392,11 @@ enum Commands {
         #[arg(long)]
         json: bool,
         /// Synthesize responsive Playwright test matrix: e.g. chromium,firefox,webkit,mobile,tablet (Release 1.8)
-        #[arg(long)]
+        #[arg(
+            long,
+            num_args = 0..=1,
+            default_missing_value = "chromium,firefox,webkit,mobile-portrait,tablet,desktop"
+        )]
         matrix: Option<String>,
     },
     /// Launch Model Context Protocol (MCP) JSON-RPC 2.0 server over stdio or Streamable HTTP/SSE (Release 1.5)
@@ -1851,8 +1860,20 @@ fn handle_verify_receipt(
     json_output: bool,
     theme: &Theme,
 ) -> ! {
-    let trust_policy = match trusted_key {
-        Some(key) => TrustPolicy::PinnedKeys(HashSet::from([key.to_lowercase()])),
+    let resolved_key = trusted_key.map(|k| {
+        let key_path = Path::new(&k);
+        if key_path.is_file() {
+            std::fs::read_to_string(key_path)
+                .unwrap_or_else(|_| k.clone())
+                .trim()
+                .to_lowercase()
+        } else {
+            k.trim().to_lowercase()
+        }
+    });
+
+    let trust_policy = match resolved_key {
+        Some(key) => TrustPolicy::PinnedKeys(HashSet::from([key])),
         None => TrustPolicy::AllowAny,
     };
 
@@ -2154,6 +2175,7 @@ pub fn handle_inoculate(
         let out = serde_json::json!({
             "status": "INOCULATED",
             "bug_id": spec.bug_id,
+            "matrix_enabled": matrix.is_some(),
             "spec_rel_path": spec.spec_rel_path,
             "written_path": written_path.display().to_string(),
             "spec_sha256": spec.spec_sha256,
@@ -2368,10 +2390,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::VerifyReceipt {
             path,
+            receipt,
             trusted_key,
             json,
         }) => {
-            handle_verify_receipt(path, trusted_key, json, &stdout_theme);
+            let target = path
+                .or(receipt)
+                .unwrap_or_else(|| PathBuf::from(".replayfix"));
+            handle_verify_receipt(target, trusted_key, json, &stdout_theme);
         }
         Some(Commands::Sweep {
             dataset,

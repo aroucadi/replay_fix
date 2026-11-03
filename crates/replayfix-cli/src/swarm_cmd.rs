@@ -4,7 +4,9 @@
 
 use clap::Args;
 use replayfix_core::error::Result;
+use replayfix_core::manifest::TaskManifest;
 use replayfix_core::swarm::{SwarmConfig, SwarmCoordinator, SwarmTask};
+use std::fs;
 use std::path::PathBuf;
 
 /// CLI arguments for `replayfix swarm`.
@@ -18,6 +20,10 @@ pub struct SwarmArgs {
     #[arg(long)]
     pub bugs: Option<String>,
 
+    /// Explicit task manifest JSON paths or bug IDs to dispatch to the work-stealing queue
+    #[arg(long, num_args = 1..)]
+    pub tasks: Option<Vec<String>>,
+
     /// Target repository path (default: .)
     #[arg(long, default_value = ".")]
     pub repo: String,
@@ -25,6 +31,10 @@ pub struct SwarmArgs {
     /// Output artifacts directory (default: .replayfix)
     #[arg(long, default_value = ".replayfix")]
     pub output: PathBuf,
+
+    /// Optional RFC 6962 transparency log path to automatically notarize verified receipts
+    #[arg(long)]
+    pub notary_log: Option<PathBuf>,
 
     /// Deterministic offline mock mode
     #[arg(long)]
@@ -40,30 +50,71 @@ pub struct SwarmArgs {
 }
 
 pub fn run_swarm_cmd(args: SwarmArgs) -> Result<i32> {
-    let bug_list: Vec<String> = if let Some(ref raw) = args.bugs {
-        raw.split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+    let tasks: Vec<SwarmTask> = if let Some(ref raw_tasks) = args.tasks {
+        let mut parsed_tasks = Vec::with_capacity(raw_tasks.len());
+        for item in raw_tasks {
+            let p = PathBuf::from(item);
+            if p.exists() {
+                if let Ok(raw) = fs::read_to_string(&p) {
+                    if let Ok(manifest) = TaskManifest::parse_str(&raw) {
+                        parsed_tasks.push(SwarmTask {
+                            task_id: manifest.task_id.clone(),
+                            bug: Some(manifest.task_id),
+                            title: Some(manifest.title),
+                            manifest_path: Some(p),
+                        });
+                        continue;
+                    }
+                }
+                let stem = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("task")
+                    .to_string();
+                parsed_tasks.push(SwarmTask {
+                    task_id: stem,
+                    bug: None,
+                    title: None,
+                    manifest_path: Some(p),
+                });
+            } else {
+                for token in item.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    parsed_tasks.push(SwarmTask {
+                        task_id: token.to_string(),
+                        bug: Some(token.to_string()),
+                        title: Some(format!("Swarm defect triage for {token}")),
+                        manifest_path: None,
+                    });
+                }
+            }
+        }
+        parsed_tasks
     } else {
-        vec![
-            "RF-01".to_string(),
-            "RF-02".to_string(),
-            "RF-03".to_string(),
-            "RF-04".to_string(),
-            "RF-05".to_string(),
-        ]
-    };
+        let bug_list: Vec<String> = if let Some(ref raw) = args.bugs {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else {
+            vec![
+                "RF-01".to_string(),
+                "RF-02".to_string(),
+                "RF-03".to_string(),
+                "RF-04".to_string(),
+                "RF-05".to_string(),
+            ]
+        };
 
-    let tasks: Vec<SwarmTask> = bug_list
-        .into_iter()
-        .map(|bug_id| SwarmTask {
-            task_id: bug_id.clone(),
-            bug: Some(bug_id.clone()),
-            title: Some(format!("Swarm defect triage for {bug_id}")),
-            manifest_path: None,
-        })
-        .collect();
+        bug_list
+            .into_iter()
+            .map(|bug_id| SwarmTask {
+                task_id: bug_id.clone(),
+                bug: Some(bug_id.clone()),
+                title: Some(format!("Swarm defect triage for {bug_id}")),
+                manifest_path: None,
+            })
+            .collect()
+    };
 
     let config = SwarmConfig {
         num_workers: args.workers,
@@ -74,7 +125,10 @@ pub fn run_swarm_cmd(args: SwarmArgs) -> Result<i32> {
         timeout_secs: args.timeout,
     };
 
-    let coordinator = SwarmCoordinator::new(config);
+    let mut coordinator = SwarmCoordinator::new(config);
+    if let Some(log_path) = args.notary_log {
+        coordinator = coordinator.with_notary_log(log_path);
+    }
     let summary = coordinator.run_swarm(tasks)?;
 
     if args.json {

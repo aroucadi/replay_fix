@@ -84,7 +84,11 @@ impl MotionEngine {
     }
 
     /// Trigger an emerald row flash animation when a verification gate passes.
-    pub fn trigger_gate_pass_flash(&mut self, gate_label: impl Into<String>, summary: impl Into<String>) {
+    pub fn trigger_gate_pass_flash(
+        &mut self,
+        gate_label: impl Into<String>,
+        summary: impl Into<String>,
+    ) {
         self.active_flash = Some(GateFlashAnimation::new(gate_label.into(), summary.into()));
     }
 
@@ -172,10 +176,7 @@ pub fn render_wave_shimmer(
         // Sharpen the crest for a crisp cybernetic shimmer
         let intensity = wave * wave;
         let rgb = base.lerp(peak, intensity);
-        out.push_str(&format!(
-            "\x1b[1;38;2;{};{};{}m{}",
-            rgb.0, rgb.1, rgb.2, ch
-        ));
+        out.push_str(&format!("\x1b[1;38;2;{};{};{}m{}", rgb.0, rgb.1, rgb.2, ch));
     }
     out.push_str(style::RESET);
     out

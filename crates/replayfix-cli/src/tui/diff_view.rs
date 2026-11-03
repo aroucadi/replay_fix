@@ -187,9 +187,11 @@ impl<'a> DiffReviewer<'a> {
         let inner_width = width.saturating_sub(2);
         let short_sha = self.patch_sha256.get(..12).unwrap_or(&self.patch_sha256);
         let focus_pill = match self.focus {
-            ReviewFocus::DiffViewport => {
-                theme.pill("DIFF VIEWPORT", CyberPalette::TITANIUM, CyberPalette::CYAN_BG)
-            }
+            ReviewFocus::DiffViewport => theme.pill(
+                "DIFF VIEWPORT",
+                CyberPalette::TITANIUM,
+                CyberPalette::CYAN_BG,
+            ),
             ReviewFocus::ActionControls => theme.pill(
                 "ACTION CONTROLS",
                 CyberPalette::TITANIUM,
@@ -203,8 +205,11 @@ impl<'a> DiffReviewer<'a> {
             Symbols::BOX_H.repeat(inner_width),
             Symbols::BOX_TR
         );
-        buf.push_str(&format!("{}
-", theme.muted(&top_border)));
+        buf.push_str(&format!(
+            "{}
+",
+            theme.muted(&top_border)
+        ));
         buf.push_str(&format!(
             "{} {} (+{} -{}) {} Files: {} | Scroll: {}/{}
 ",
@@ -237,8 +242,10 @@ impl<'a> DiffReviewer<'a> {
                     style_diff_token_line(line)
                 ));
             } else {
-                buf.push_str(&format!("{gutter}{line}
-"));
+                buf.push_str(&format!(
+                    "{gutter}{line}
+"
+                ));
             }
         }
 
@@ -252,8 +259,11 @@ impl<'a> DiffReviewer<'a> {
             Symbols::BOX_H.repeat(inner_width),
             Symbols::BOX_BR
         );
-        buf.push_str(&format!("{}
-", theme.muted(&bot_border)));
+        buf.push_str(&format!(
+            "{}
+",
+            theme.muted(&bot_border)
+        ));
         buf.push_str(&format!(
             " {}  {}  {}  {}  {} ",
             theme.command_pill("Enter: Approve"),
@@ -310,13 +320,17 @@ mod tests {
 
     #[test]
     fn test_large_diff_viewport_bounding_2000_lines() {
-        let mut large_diff = String::from("--- a/large.js
+        let mut large_diff = String::from(
+            "--- a/large.js
 +++ b/large.js
 @@ -1,10 +1,2000 @@
-");
+",
+        );
         for i in 0..2000 {
-            large_diff.push_str(&format!("+ console.log('line {i}');
-"));
+            large_diff.push_str(&format!(
+                "+ console.log('line {i}');
+"
+            ));
         }
         let mut reviewer = DiffReviewer::new(&large_diff);
         assert_eq!(reviewer.lines.len(), 2003);
@@ -336,8 +350,7 @@ mod tests {
 
     #[test]
     fn test_diff_reviewer_neutralizes_ansi_escape_injection() {
-        let malicious =
-            "--- a/app.js
+        let malicious = "--- a/app.js
 +++ b/app.js
 @@ -1,1 +1,1 @@
 +\x1b[2J\x1b]50;pwned\x07const x = 1;

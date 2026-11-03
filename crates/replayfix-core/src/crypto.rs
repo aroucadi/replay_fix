@@ -47,6 +47,140 @@ pub enum VerificationOutcome {
     VerifiedUntrustedSigner,
 }
 
+/// Role in an Enterprise Multi-Party Attestation Chain (`FR-066`, `docs/trust-architecture.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttestationRole {
+    Developer,
+    Harness,
+    CiJudge,
+}
+
+impl AttestationRole {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Developer => "developer",
+            Self::Harness => "harness",
+            Self::CiJudge => "ci_judge",
+        }
+    }
+}
+
+/// Individual party signature inside a `MultiPartyAttestation` v2.0 chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PartySignature {
+    pub role: AttestationRole,
+    pub algorithm: String,
+    pub public_key: String,
+    pub signature: String,
+    pub signing_payload: String,
+    pub signed_at: String,
+}
+
+/// Enterprise Multi-Party Attestation v2.0 binding Developer, Harness, and CI/Judge signatures
+/// over the canonical RFC 6962 Merkle root (`FR-066`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MultiPartyAttestation {
+    pub schema_version: String,
+    pub merkle_root: String,
+    pub tree_size: usize,
+    pub signatures: Vec<PartySignature>,
+}
+
+impl MultiPartyAttestation {
+    /// Sign a Merkle root across one or more `(AttestationRole, &KeypairManager)` signers.
+    pub fn sign_chain(
+        merkle_root: &str,
+        tree_size: usize,
+        created_at: &str,
+        signers: &[(AttestationRole, &KeypairManager)],
+    ) -> Result<Self> {
+        if signers.is_empty() {
+            return Err(CoreError::SecurityViolation(
+                "MultiPartyAttestation requires at least one party signer".to_string(),
+            ));
+        }
+        let mut signatures = Vec::with_capacity(signers.len());
+        for (role, kp) in signers {
+            let payload = format!(
+                "REPLAYFIX-MULTIPARTY:v2.0:{}:{}:{}:{}",
+                role.as_str(),
+                merkle_root,
+                tree_size,
+                created_at
+            );
+            let sig = kp.sign_bytes(payload.as_bytes());
+            signatures.push(PartySignature {
+                role: *role,
+                algorithm: "Ed25519".to_string(),
+                public_key: kp.public_key_hex(),
+                signature: sig,
+                signing_payload: payload,
+                signed_at: created_at.to_string(),
+            });
+        }
+        Ok(Self {
+            schema_version: "2.0".to_string(),
+            merkle_root: merkle_root.to_string(),
+            tree_size,
+            signatures,
+        })
+    }
+
+    /// Cryptographically verify every party signature in the multi-party chain against
+    /// `expected_merkle_root` and `expected_tree_size`.
+    pub fn verify_chain(
+        &self,
+        expected_merkle_root: &str,
+        expected_tree_size: usize,
+    ) -> Result<usize> {
+        if self.schema_version != "2.0" {
+            return Err(CoreError::SecurityViolation(format!(
+                "Unsupported MultiPartyAttestation schema_version '{}': expected '2.0'",
+                self.schema_version
+            )));
+        }
+        if self.merkle_root != expected_merkle_root || self.tree_size != expected_tree_size {
+            return Err(CoreError::SecurityViolation(
+                "MultiPartyAttestation Merkle root or tree_size mismatch".to_string(),
+            ));
+        }
+        if self.signatures.is_empty() {
+            return Err(CoreError::SecurityViolation(
+                "MultiPartyAttestation contains zero signatures".to_string(),
+            ));
+        }
+        for party in &self.signatures {
+            if party.algorithm != "Ed25519" {
+                return Err(CoreError::SecurityViolation(format!(
+                    "Unsupported algorithm '{}' in MultiPartyAttestation",
+                    party.algorithm
+                )));
+            }
+            let expected_payload = format!(
+                "REPLAYFIX-MULTIPARTY:v2.0:{}:{}:{}:{}",
+                party.role.as_str(),
+                expected_merkle_root,
+                expected_tree_size,
+                party.signed_at
+            );
+            if party.signing_payload != expected_payload {
+                return Err(CoreError::SecurityViolation(format!(
+                    "MultiPartyAttestation payload mismatch for role '{}'",
+                    party.role.as_str()
+                )));
+            }
+            KeypairManager::verify_raw_signature(
+                &party.public_key,
+                party.signing_payload.as_bytes(),
+                &party.signature,
+            )?;
+        }
+        Ok(self.signatures.len())
+    }
+}
+
 /// Manager for generating or loading Ed25519 signing keys.
 pub struct KeypairManager {
     signing_key: SigningKey,
