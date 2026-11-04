@@ -1,4 +1,5 @@
 node_modules
-out
-out-still.log
-
+out/
+out-*.log
+*.mp4
+*.png
