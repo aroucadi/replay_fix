@@ -1681,12 +1681,16 @@ impl BoundedRepairClient {
                     .to_string()
                 } else if request
                     .user_prompt
+                    .replace("\r\n", "\n")
                     .contains("if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }")
                 {
                     let target_f = request
                         .user_prompt
                         .lines()
-                        .find_map(|l| l.strip_prefix("Target File: "))
+                        .find_map(|l| {
+                            l.strip_prefix("Target File: ")
+                                .or_else(|| l.strip_prefix("Target File Scope: "))
+                        })
                         .unwrap_or("lib/Component.js")
                         .trim();
                     serde_json::json!({

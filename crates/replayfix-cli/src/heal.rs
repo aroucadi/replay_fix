@@ -256,8 +256,16 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let (target_file_str, patched_content_str, insertions, deletions, files_changed) =
         if let Some(ref patch) = outcome.verified_patch {
             let orig = sandbox.read_file(&patch.target_file).unwrap_or_default();
-            let patched = if !patch.search_block.is_empty() && orig.contains(&patch.search_block) {
-                orig.replace(&patch.search_block, &patch.replace_block)
+            let orig_norm = orig.replace("\r\n", "\n");
+            let search_norm = patch.search_block.replace("\r\n", "\n");
+            let replace_norm = patch.replace_block.replace("\r\n", "\n");
+            let patched = if !search_norm.is_empty() && orig_norm.contains(&search_norm) {
+                let p = orig_norm.replacen(&search_norm, &replace_norm, 1);
+                if orig.contains("\r\n") {
+                    p.replace('\n', "\r\n")
+                } else {
+                    p
+                }
             } else if let Some(ref fix) = fixture_opt {
                 UnifiedPatcher::apply_diff(fix.buggy_source, fix.builtin_diff)?.patched
             } else {

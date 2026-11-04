@@ -92,7 +92,4 @@ demo-video/out-*.log
 !tests/fixtures/videos/repro_demo.mp4
 
 # External Cloned Benchmark Workspaces
-benchmarks/re-resizable/
-benchmarks/react-date-picker/
-benchmarks/react-resizable/
-benchmarks/vyra/
+benchmarks/react-resizable/repo/

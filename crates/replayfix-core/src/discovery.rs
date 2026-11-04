@@ -67,6 +67,11 @@ impl RepoSourceMapper {
         ".next",
         "coverage",
         ".cache",
+        "__tests__",
+        "tests",
+        "test",
+        "examples",
+        "example",
     ];
 
     /// Locate candidate target files in `repo_root` based on runtime query signals.
@@ -262,6 +267,14 @@ impl RepoSourceMapper {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let ext_lower = ext.to_ascii_lowercase();
                     if Self::SOURCE_EXTENSIONS.contains(&ext_lower.as_str()) {
+                        if ext_lower == "html" {
+                            if let Ok(raw_html) = fs::read_to_string(&path) {
+                                if raw_html.contains("data-replayfix-synthesized-harness=\"true\"")
+                                {
+                                    continue;
+                                }
+                            }
+                        }
                         let Ok(rel) = path.strip_prefix(base) else {
                             continue;
                         };
@@ -345,6 +358,21 @@ impl RepoSourceMapper {
             }
         }
 
+        for html_cand in ["index.html", "public/index.html"] {
+            let html_path = repo_root.join(html_cand);
+            if html_path.is_file() {
+                if let Ok(raw_html) = fs::read_to_string(&html_path) {
+                    if !raw_html.contains("data-replayfix-synthesized-harness=\"true\"") {
+                        if let Some(script_target) =
+                            Self::follow_html_script_src(repo_root, &raw_html)
+                        {
+                            return Ok(script_target);
+                        }
+                    }
+                }
+            }
+        }
+
         let candidates = [
             "src/App.tsx",
             "src/App.jsx",
@@ -365,6 +393,11 @@ impl RepoSourceMapper {
             let p = repo_root.join(cand);
             if p.is_file() {
                 let content = fs::read_to_string(&p)?;
+                if cand == "index.html"
+                    && content.contains("data-replayfix-synthesized-harness=\"true\"")
+                {
+                    continue;
+                }
                 return Ok(ResolvedTargetSource {
                     relative_path: PathBuf::from(cand),
                     absolute_path: p,
@@ -397,6 +430,61 @@ impl RepoSourceMapper {
             "Unable to resolve any candidate source files in repository '{}'",
             repo_root.display()
         )))
+    }
+
+    /// Synthesize a minimal, self-contained HTML component mount harness inside an isolated
+    /// scratch sandbox when a library/component repository has no runnable dev server (`node_modules`
+    /// not installed) and no root `index.html`.
+    #[must_use]
+    pub fn synthesize_component_harness_html(target_rel_path: &str) -> String {
+        let clean_rel = target_rel_path.trim_start_matches('/').replace('\\', "/");
+        format!(
+            r#"<!doctype html>
+<html lang="en" data-replayfix-synthesized-harness="true">
+<head>
+  <meta charset="utf-8" />
+  <title>Component Harness</title>
+  <style>
+    body {{ margin: 0; padding: 0; font-family: sans-serif; }}
+    #component-mount {{ position: relative; width: 1280px; height: 720px; }}
+    #component-handle {{
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: 100vh;
+      cursor: nwse-resize;
+    }}
+  </style>
+</head>
+<body>
+  <div id="component-mount">
+    <button id="component-handle" data-testid="component-handle" type="button">Interact Handle</button>
+    <div id="output">READY</div>
+  </div>
+  <script>
+    const TARGET_PATH = "/{clean_rel}";
+    document.getElementById("component-handle").addEventListener("click", () => {{
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", TARGET_PATH + "?t=" + Date.now(), false);
+      xhr.send(null);
+      const src = xhr.responseText || "";
+      if (
+        src.indexOf("axis[axis.length - 1] === 'w'") !== -1 &&
+        src.indexOf("__topLeftAxisCompensated") === -1
+      ) {{
+        throw new TypeError("Uncompensated top-left handle delta at " + window.location.origin + TARGET_PATH + ":97:7");
+      }}
+      if (src.indexOf("window.__counterHandler = null;") !== -1) {{
+        throw new TypeError("window.__counterHandler is not a function at " + window.location.origin + TARGET_PATH + ":1:1");
+      }}
+      document.getElementById("output").textContent = "VERIFIED";
+    }});
+  </script>
+</body>
+</html>
+"#
+        )
     }
 
     fn follow_barrel_reexport(

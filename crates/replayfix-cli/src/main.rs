@@ -1114,7 +1114,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         let resolved_source = replayfix_core::discovery::RepoSourceMapper::locate_target_file(
             &repo_dir,
             &replayfix_core::discovery::SourceQuery {
-                hint_tokens: &[&m.task_id, "App", "main", "counter", "button"],
+                hint_tokens: &[&m.task_id],
                 ..Default::default()
             },
         );

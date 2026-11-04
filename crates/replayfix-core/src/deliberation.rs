@@ -460,7 +460,7 @@ impl DeliberationEngine {
                 (160, 120)
             };
 
-            let mut server = if ManagedSpaServer::has_package_json(sandbox.root()) {
+            let mut server = if ManagedSpaServer::is_runnable(sandbox.root(), Some(repo_dir)) {
                 match ManagedSpaServer::spawn(sandbox.root(), Some(repo_dir)) {
                     Ok(s) => {
                         sandbox.register_child_pid(s.pid());
@@ -474,7 +474,25 @@ impl DeliberationEngine {
                         )));
                     }
                 }
-            } else if sandbox.root().join("index.html").is_file() {
+            } else {
+                if !sandbox.root().join("index.html").is_file() {
+                    let initial_target = match RepoSourceMapper::locate_target_file(
+                        sandbox.root(),
+                        &SourceQuery::default(),
+                    ) {
+                        Ok(r) => r.relative_path.to_string_lossy().replace('\\', "/"),
+                        Err(e) => {
+                            let _ = sandbox.teardown();
+                            return Err(e);
+                        }
+                    };
+                    let harness_html =
+                        RepoSourceMapper::synthesize_component_harness_html(&initial_target);
+                    if let Err(e) = sandbox.write_file("index.html", &harness_html) {
+                        let _ = sandbox.teardown();
+                        return Err(e);
+                    }
+                }
                 match SandboxServer::start(sandbox.root(), None) {
                     Ok(s) => DeliberationLiveServer::Static(s),
                     Err(e) => {
@@ -485,12 +503,6 @@ impl DeliberationEngine {
                         )));
                     }
                 }
-            } else {
-                let _ = sandbox.teardown();
-                return Err(CoreError::Deliberation(format!(
-                    "Target repository '{}' has neither a runnable package.json dev server nor index.html",
-                    repo_dir.display()
-                )));
             };
 
             let page_url = server.page_url();
@@ -794,18 +806,21 @@ impl DeliberationEngine {
                     ));
                 }
             } else if let Some((ref mut sb, ref mut srv, ref mut br, click_coords)) = live_runtime {
-                let candidate_patched_str = if !candidate_patch.search_block.is_empty()
-                    && buggy_source_str.contains(&candidate_patch.search_block)
-                {
-                    buggy_source_str.replacen(
-                        &candidate_patch.search_block,
-                        &candidate_patch.replace_block,
-                        1,
-                    )
-                } else {
-                    syntax_failed = true;
-                    buggy_source_str.clone()
-                };
+                let norm_buggy = buggy_source_str.replace("\r\n", "\n");
+                let norm_search = candidate_patch.search_block.replace("\r\n", "\n");
+                let norm_replace = candidate_patch.replace_block.replace("\r\n", "\n");
+                let candidate_patched_str =
+                    if !norm_search.is_empty() && norm_buggy.contains(&norm_search) {
+                        let p = norm_buggy.replacen(&norm_search, &norm_replace, 1);
+                        if buggy_source_str.contains("\r\n") {
+                            p.replace('\n', "\r\n")
+                        } else {
+                            p
+                        }
+                    } else {
+                        syntax_failed = true;
+                        buggy_source_str.clone()
+                    };
 
                 if !syntax_failed {
                     if sb

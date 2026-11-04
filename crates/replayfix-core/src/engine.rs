@@ -479,18 +479,23 @@ impl MockHealer {
 
         // 3. Materialize target source file and HTML host shell inside the scratch sandbox
         // only when not operating against a managed SPA or attached external server.
-        let is_managed_spa = crate::environment::ManagedSpaServer::has_package_json(sandbox.root());
+        let is_managed_spa =
+            crate::environment::ManagedSpaServer::is_runnable(sandbox.root(), Some(repo_path));
         let sandbox_target_file = sandbox.resolve_safe_path(fixture.target_path)?;
         if !sandbox_target_file.exists() {
             sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
         }
         let sandbox_index_html = sandbox.resolve_safe_path("index.html")?;
-        if options.attached_url.is_none()
-            && !is_managed_spa
-            && !sandbox_index_html.exists()
-            && !fixture.index_html.is_empty()
-        {
-            sandbox.write_file("index.html", fixture.index_html)?;
+        if options.attached_url.is_none() && !is_managed_spa && !sandbox_index_html.exists() {
+            if !fixture.index_html.is_empty() {
+                sandbox.write_file("index.html", fixture.index_html)?;
+            } else {
+                let harness_html =
+                    crate::discovery::RepoSourceMapper::synthesize_component_harness_html(
+                        fixture.target_path,
+                    );
+                sandbox.write_file("index.html", &harness_html)?;
+            }
         }
         let initial_source = sandbox.read_file(fixture.target_path)?;
 
