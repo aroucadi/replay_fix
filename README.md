@@ -1,248 +1,267 @@
-# ReplayFix
+<div align="center">
 
-ReplayFix is a deterministic Rust harness for reproducing, verifying, and autonomously repairing visual and functional defects in web applications with **cryptographic proof**. A defect is only certified as repaired when:
-1. The same behavioral contract (`BehavioralContract`, RFC 8785 SHA-256) transitions from **Gate 1 RED** to **Gate 2 GREEN** (across 2 consecutive stability runs),
-2. All mutations occur inside an **isolated ephemeral scratch sandbox** with dual-layer repository immutability (`Delta-Repo = 0`),
-3. **Anti-cheat guards** (`TestFreezeGuard` + surgical `DiffGuard` on `package.json` `"scripts.test*"`) and **active regression parity** (`F_patched \ F_baseline = empty`) pass, and
-4. Disaggregated evidence artifacts are bound into an **RFC 6962 Merkle Tree** (`0x00` leaf / `0x01` internal node domain separation) and signed with **pure RFC 8032 Ed25519** attestation, independently verifiable via `replayfix verify-receipt` or the air-gapped **`proof_viewer.html`** Judge Proof Portal.
+# 🎬 ReplayFix v2.0.0
 
-> **Current Release: `v1.8.0` (Distributed Multi-Agent Swarm, Live Streaming Dashboard & Production APM Session Replay Ingestion).** Scaling ReplayFix to enterprise-grade distributed triage and real-time observability:
-> - **Production APM & RRWeb Ingestion**: `replayfix ingest --sentry <url/file> --rrweb <file>` transforms RRWeb DOM mutation recordings and Sentry/Datadog crash breadcrumbs into deterministic `TaskManifest` reproductions.
-> - **Distributed Work-Stealing Swarm**: `replayfix swarm --workers <N>` coordinates multi-agent defect triage across isolated scratch worktrees ($\Delta\text{repo}=0$) with dynamic ephemeral ports and rate-governed model concurrency.
-> - **Live Streaming Dashboard**: `replayfix dashboard --port 3000` starts an embedded async HTTP/WebSocket/SSE server streaming live browser screencasts, Muse Spark deliberation feeds, and side-by-side DOM diffs via the embedded single-page `dashboard.html`.
-> - **Responsive Inoculation Matrix**: `replayfix inoculate --matrix chromium,firefox,webkit,mobile,desktop` synthesizes multi-browser, multi-device Playwright test suites with device pixel ratio (DPR) coordinate calibration.
-> - **RFC 6962 Transparency Ledger**: `replayfix notary` (`append`, `verify-log`, `consistency-proof`) maintains an append-only, tamper-evident cryptographic transparency log (`transparency_log.json`) with Ed25519 attestations.
-> All roadmap specifications (`Spec 000` through `Spec 180`) are complete, verified, and qualified across 326 automated tests with 0 non-test panics and 0 Clippy warnings.
+### Sovereign Autonomous Visual Bug Repair Harness & Verifiable Notary
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B%20(Pure%20Safe)-orange?logo=rust)](https://www.rust-lang.org)
+[![Meta AI Models](https://img.shields.io/badge/Meta%20AI-Muse%20%26%20SAM%203.1-0081FB?logo=meta)](https://ai.meta.com)
+[![SWE-bench Causal](https://img.shields.io/badge/Verification-Dual--Gate%20Causal-success)](#-the-two-gate-causal-verification-oracle)
+[![Security Invariant](https://img.shields.io/badge/%CE%94repo%20%3D%200-Strictly%20Isolated-blueviolet)](#-the-inviolable-engineering-invariants)
+[![Merkle Proof](https://img.shields.io/badge/RFC%206962-Ed25519%20Signed-teal)](#-cryptographic-notary--merkle-audit-receipts)
+[![MCP Native](https://img.shields.io/badge/MCP-Native%20Server-7B2CBF)](https://modelcontextprotocol.io)
+
+<p align="center">
+  <b>Give it a video. Give it a repo. Get a verified, cryptographically signed fix in under 60 seconds.</b>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=cPDIFQmVn9I"><b>Watch 4K Demo Video</b></a> •
+  <a href="#-quickstart--cli-reference"><b>Quickstart</b></a> •
+  <a href="#-core-architecture--the-meta-ai-trio"><b>Meta AI Architecture</b></a> •
+  <a href="#-the-two-gate-causal-verification-oracle"><b>Two-Gate Oracle</b></a> •
+  <a href="#-live-streaming-dashboard--swarm"><b>Live Dashboard & Swarm</b></a> •
+  <a href="proof_viewer.html"><b>Judge Proof Portal</b></a>
+</p>
+
+</div>
 
 ---
 
-## Workspace & Deliverables
+## 💡 Why ReplayFix?
 
-- **`crates/replayfix-core`** — Core verification engine, GitHub triage engine (`GitHubClient`, `GitHubTransport`, RFC 2104 constant-time HMAC-SHA256 webhook verification, anti-loop bot filter, `IssueCommenter`, `TriageLabel`, issue-specific test synthesis), monotonic phase FSM (`PhaseMachine`, 6-state `DifferentialMatrix`), Gate 3 `StressQuorumRunner` (`PerturbationProfile`, `StressQuorumReport`), Permanent Inoculation engine (`InoculationGenerator`, `InoculationRegistry`), SARIF v2.1.0 & JUnit XML reporters (`SarifReporter`, `JunitReporter`), platform abstractions (`EphemeralPort`, process-tree teardown), `Doctor` diagnostics, `TaskManifest`, `WorktreeManifest` & `ScratchSandbox`, `VideoPreprocessor` & 120x120px `RoiDiffer`, Meta multimodal perception (`SamSegmenter` `sam-3-1`, `AsrTranscriber` `muse-voice-transcribe-1.0`), CDP spatial-semantic grounding (`LocatorResolver` with interactive tie-breaker), live Playwright bridge (`SandboxServer`, `PlaywrightBridge`), bounded autonomous repair (`MuseModelConfig`, `ModelPool`, `TestFreezeGuard`, `DiffGuard`, `BlockPatcher`, `SyntaxPreflight`, `RegressionEvaluator`), bounded cloud gateway (`MultimodalGateway`, `RatePool`, `CircuitBreaker`), RFC 6962 `MerkleTree`, pure Ed25519 `KeypairManager`, 5-bug `sweep` runner, and `portal` verifier.
-- **`crates/replayfix-cli`** — The `replayfix` command-line tool (`bot`, `heal`, `chat`/`agent`, `mcp`, `inoculate`, `doctor`, `run`/`repro`, `freeze-spec`, `verify-receipt`, `sweep`, `export-proof`, `session`).
-- **`proof_viewer.html`** — Standalone, air-gapped single-file HTML5/ES2022 Judge Proof Portal with client-side RFC 8785 / RFC 6962 / RFC 8032 Ed25519 cryptographic verification (`default-src 'none'; connect-src 'none'`).
+When users encounter software defects, they capture a screen recording, drop a video in Slack, or submit an issue ticket. Senior software engineers burn **30% to 40% of their sprints** trying to manually reproduce what broke: guessing interaction steps, setting up local ports, and wrestling with timing flakes.
+
+Generic AI coding assistants fail at visual bugs because:
+1. **Blind to pixels & layouts**: They cannot perceive screen resolutions, device pixel ratios (DPR), or dynamic viewport letterboxing.
+2. **Hallucinate UI selectors**: They guess fragile selectors that drift from the live DOM.
+3. **Reward hacking & test tampering**: They soften test assertions or edit test suites to fake a green pass.
+4. **No causal attribution**: They guess patches without proving the bug actually failed first.
+
+**ReplayFix solves this with systems-grade rigor.** Built in 100% deterministic, zero-panic Rust (`#![forbid(unsafe_code)]`), ReplayFix turns raw screen recordings (`.mp4`/`.webm`) and APM session logs into verified, regression-free source patches certified by an **RFC 6962 Merkle tree receipt** signed with **RFC 8032 Ed25519**.
 
 ---
 
-## Prerequisites
+## 🔬 The Two-Gate Causal Verification Oracle
 
-ReplayFix builds and runs natively on **Windows 11/10 (MSVC)**, **macOS**, and **Linux**.
+ReplayFix enforces counterfactual causality: **no code is touched until the defect is mathematically isolated and reproduced.**
 
-| Tool | Minimum Version | Purpose |
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │    Raw User Video (.mp4) / APM Session Replay (.json)  │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │  Meta SAM 3.1 & CDP Spatial-Semantic Element Snapping  │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │   Gate 1: Counterfactual Reproduction Test Synthesis   │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                      ┌────────────────────┴────────────────────┐
+                      ▼                                         ▼
+          [Ephemeral Scratch Worktree]                  [Host Repository]
+          Dynamic Ephemeral Port :0                     STRICTLY READ-ONLY
+          Must FAIL (RED) with AssertionError           Δrepo = 0 Invariant
+                      │                                         │
+                      └────────────────────┬────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │  Meta Muse Wonder: AST-Bounded Search/Replace Patch    │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │    Gate 2: 2-Run Stability Pass & Regression Parity    │
+               │    Must PASS (GREEN x2) with Zero Suite Regressions    │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │  RFC 6962 Merkle Tree Audit Receipt + Ed25519 Seal     │
+               └────────────────────────────────────────────────────────┘
+```
+
+1. **Gate 1 (Counterfactual RED)**: ReplayFix synthesizes a Playwright test and executes it against the unpatched codebase. It MUST fail with a verified `AssertionError`.
+2. **Gate 2 (2-Run Stability GREEN)**: Once Meta Muse Wonder generates an AST search/replace block patch, the test must pass **two consecutive stability runs** and survive Gate 3 latency perturbations.
+3. **Regression Parity Guarantee**: The full pre-existing test suite must pass with 100% parity ($\mathcal{F}_{\text{patched}} \setminus \mathcal{F}_{\text{baseline}} = \emptyset$).
+4. **Anti-Cheat Test Freeze**: Synthesized tests are hashed via SHA-256 before repair; patches that touch test files or relax assertions are rejected with exit code `11` (`SECURITY_VIOLATION`).
+
+---
+
+## 🧠 Core Architecture & The Meta AI Trio
+
+ReplayFix orchestrates Meta's state-of-the-art open model ecosystem as a unified neural verification engine:
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        REPLAYFIX v2.0.0 SOVEREIGN NEURAL PIPELINE                      │
+│                                                                                        │
+│   ┌───────────────────────────────────┐    ┌───────────────────────────────────────┐   │
+│   │   1. SPATIAL PERCEPTION           │    │   2. CAUSAL REASONING                 │   │
+│   │   Meta SAM 3.1                    │    │   Meta Muse Spark 1.3                 │   │
+│   │   • Video keyframe extraction     │───▶│   • 305+ tok/s deliberation stream    │   │
+│   │   • Coordinate & DPR calibration  │    │   • Action trajectory reconstruction  │   │
+│   │   • Sub-pixel centroid snapping   │    │   • Gate 1 RED test synthesis         │   │
+│   └───────────────────────────────────┘    └───────────────────┬───────────────────┘   │
+│                                                                │                       │
+│                                                                ▼                       │
+│   ┌───────────────────────────────────┐    ┌───────────────────────────────────────┐   │
+│   │   4. SOVEREIGN VERIFICATION       │    │   3. DETERMINISTIC REPAIR             │   │
+│   │   Rust Verification Harness       │    │   Meta Muse Wonder 1.0                │   │
+│   │   • Ephemeral ScratchSandbox      │◀───│   • AST search/replace block patching │   │
+│   │   • Gate 2 GREEN stability pass   │    │   • Zero hallucination, zero style    │   │
+│   │   • RFC 6962 Merkle proof notary  │    │     drift                             │   │
+│   └───────────────────────────────────┘    └───────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Meta SAM 3.1 (Segment Anything Model)**: Ingests video frames from FFmpeg, isolates optical flow regions of interest (ROI), and snaps imprecise human clicks to exact semantic DOM bounding boxes and ARIA accessibility trees.
+* **Meta Muse Spark**: High-velocity multimodal agent brain streaming reasoning at over 300 tokens/sec. Reconstructs user intent, flags missing state validations, and outputs executable Playwright reproduction specs.
+* **Meta Muse Wonder**: Surgical AST search/replace block patch generator. It repairs the root cause directly inside the target code without rewriting unrelated files.
+
+---
+
+## 🛡️ The Inviolable Engineering Invariants
+
+| Invariant | Standard | Enforcement Mechanism |
 | :--- | :--- | :--- |
-| **Rust** | `1.80+` (tested `1.99.1`) | Building from source (`cargo build --release`) |
-| **Git** | `2.30+` | Worktree parity (`git status --porcelain`) and unified diff validation |
-| **Node.js** | `18.0+` | Target web apps, `node --check` syntax preflight, and Playwright execution |
-| **Playwright** | `1.40+` | Live headless/headed Chromium replay (`--live-browser`) and trace viewing (`--trace`) |
-| **FFmpeg** | `4.4+` | Video probing (`ffprobe`), ROI keyframe extraction, and 24 kHz mono PCM audio |
-
-*Note*: Offline deterministic verification (`--mock-heal`, `sweep --mock-heal`, `verify-receipt`, `export-proof`, and `proof_viewer.html`) runs with zero external network or browser dependencies.
+| **Substrate Primacy** | Law I | Deterministic Rust harness is the sole verification authority—never unverified LLM text. |
+| **Fail-Closed Verification** | Law II | Unhandled errors, timeouts, or ambiguous DOM matches fail closed. |
+| **Base Repo Immutability** | Law IV | $\Delta\text{repo} = 0$. All runs occur in isolated, ephemeral temp clones on dynamic ports (`:0`). |
+| **Anti-Cheating Test Freeze** | Law V | Reproduction tests are frozen via SHA-256 before repair; patches modifying tests fail closed. |
+| **Regression Parity** | Law VI | Pre-existing test suite must maintain 100% pass parity. Zero regressions tolerated. |
+| **Zero-Panic Systems Baseline** | Law X | Strictly `#![forbid(unsafe_code)]` with 0 non-test panics (`check-panics.ps1`). |
 
 ---
 
-## Quickstart & CLI Reference
+## ⚡ Live Streaming Dashboard & Distributed Swarm
 
-### 1. Build & Sign Production Binary (Windows 11)
-
-```powershell
-cargo build --release --workspace
-# Sign for Windows 11 Smart App Control / WDAC compatibility (local CurrentUser trust store)
-powershell -ExecutionPolicy Bypass -File ./scripts/setup-dev-cert.ps1
-powershell -ExecutionPolicy Bypass -File ./scripts/sign-binary.ps1 target/release/replayfix.exe
-```
-
-### 2. Configure `META_API_KEY` for `--mode live-ai` (Global or `.env`)
-
-Note: Running `$env:META_API_KEY = "your-key"` in PowerShell only sets the variable for the current terminal tab. To make `META_API_KEY` globally accessible across all terminals and child processes, use **either** of the following:
-
-```powershell
-# Option A: Persist globally in your Windows User environment (survives terminal restarts)
-[Environment]::SetEnvironmentVariable("META_API_KEY", "your-meta-api-key", "User")
-
-# Option B: Save in the gitignored `.env` file in the workspace root
-Set-Content -Path .env -Value 'META_API_KEY="your-meta-api-key"'
-```
-
-(`ReplayFix` automatically checks process environment variables, `.env` in the working/binary directory tree, and the Windows `HKCU\Environment` / `HKLM` registry hives.)
-
-### 3. Sovereign Autonomous Healer Macro Pipeline: `replayfix heal` (Release 1.6)
-
-Execute the end-to-end visual bug reproduction, multi-turn **Meta Muse Spark 1.3** agent loop (`305 tok/s`), **Meta Muse Wonder 1.0** AST block repair, Gate 2 stability verification, Gate 3 stress quorum, permanent test inoculation, and signed Merkle audit receipt export in **under 60 seconds**:
+ReplayFix includes an enterprise-grade distributed triage cluster and real-time observability server:
 
 ```bash
-# Offline deterministic mode against real MetaPulse MP4 recording
-replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture
+# Launch multi-worker work-stealing triage swarm across isolated worktrees:
+replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04 --output .replayfix
 
-# Live AI mode (Meta SAM 3.1 + Muse Voice + Muse Spark 1.3 + Muse Wonder 1.0 with Encrypted Deliberation Caching)
-replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode live-ai
-
-# Sovereign repair with headless browser, Gate 3 stress quorum, and permanent inoculation
-replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture --inoculate --stress-quorum
-
-# Auto-package verified fix into an isolated Git branch with Ed25519 commit trailers and pr_description.md
-replayfix heal --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --package-pr
-```
-
-### 4. Autonomous GitHub Issue Triage Bot: `replayfix bot` (Release 1.7)
-
-Autonomously triage incoming GitHub bug issues with attached screen recordings (`.mp4`, `.webm`, `.mov`), reproduce failures in ephemeral scratch sandboxes ($\Delta\text{repo}=0$), open verified Pull Requests with permanent Playwright regression specs (`tests/repro/rf_issue_<id>.spec.ts`), and post cryptographic proof comments back to the issue thread:
-
-```bash
-# Ingest and autonomously triage a single GitHub issue with an attached video:
-replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo .
-
-# Ingest with automated PR creation, issue commenting, and triage labeling:
-replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo . --create-pr --comment-issue --apply-labels
-
-# Offline deterministic triage in CI (zero external network tokens billed):
-replayfix bot --issue https://github.com/my-org/my-repo/issues/42 --repo . --mock-heal
-
-# Continuous webhook listener with RFC 2104 constant-time HMAC-SHA256 security:
-replayfix bot --listen 0.0.0.0:8080 --webhook-secret "$GITHUB_WEBHOOK_SECRET" --repo . --create-pr --comment-issue
-```
-
-### 5. Interactive Conversational Agent Workspace (Release 1.4)
-
-Launch the natural-language agentic workspace directly in your terminal:
-
-```bash
-# Launch interactive agent REPL (or simply run `replayfix` in any interactive terminal)
-replayfix chat
-
-# Example conversational requests inside the shell:
-# > "Reproduce and fix the cart quantity bug in metapulse"
-# > "Run doctor to check my environment"
-# > "Benchmark all 5 defect scenarios"
-# > "Verify receipt at .replayfix/audit_receipt.json"
-# > "/help" (see full command guide)
-```
-
-### 6. Environment Diagnostics: `replayfix doctor`
-
-```bash
-replayfix doctor
-replayfix doctor --json
-```
-
-### 7. Single-Bug Reproduction, Multimodal Video Ingestion & Autonomous Repair: `replayfix run`
-
-```bash
-# Offline deterministic fixture mode against real MetaPulse MP4 recording (zero API tokens billed)
-replayfix run --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode deterministic-fixture
-
-# Live AI mode (Meta SAM 3.1 + Muse Voice 24kHz ASR + Muse Spark 1.3 / Wonder 1.0 over HTTPS)
-replayfix run --video benchmarks/metapulse/videos/RF-01_quote_repost_crash_with_cursor.mp4 --repo . --mode live-ai --model-intent muse-spark-1.3 --model-repair muse-wonder-1.0
-
-# Live Chromium browser + multimodal video ingestion + Meta Muse repair
-replayfix run --bug RF-01 --live-browser --headed --model muse-spark-1.3
-
-# Live GitHub issue ingestion + interactive human approval gate (--apply)
-replayfix run --bug RF-01 --issue https://github.com/org/repo/issues/42 --mock-heal --apply --yes
-```
-
-### 8. Five-Bug MetaPulse Benchmark Sweep: `replayfix sweep`
-
-Executes isolated scratch-sandbox repairs across `RF-01` through `RF-05`, enforces `Delta-Repo = 0`, and emits a signed `.replayfix/sweep_receipt.json` in < 60s (~4.5s offline):
-
-```bash
-replayfix sweep --mock-heal
-replayfix sweep --bugs RF-01,RF-02,RF-03,RF-04,RF-05 --mock-heal --json
-```
-
-### 9. Standalone 4-Layer Cryptographic Verification: `replayfix verify-receipt`
-
-Verifies Layer 1 (on-disk artifact SHA-256 & byte size), Layer 2 (RFC 6962 Merkle inclusion proofs), Layer 3 (RFC 8032 pure Ed25519 signature), and Layer 4 (signer public-key pinning):
-
-```bash
-replayfix verify-receipt .replayfix/audit_receipt.json
-replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <64_CHAR_HEX_PUBKEY> --json
-replayfix verify-receipt .replayfix/sweep_receipt.json --json
-```
-
-### 10. Freeze Reproduction Spec & Export Proof Bundle
-
-```bash
-replayfix freeze-spec --bug RF-01 --repo .
-replayfix export-proof --output .replayfix/proof --json
-```
-
-### 11. Distributed Multi-Agent Swarm, Live Dashboard, APM Ingestion & Key Notary (Release 1.8)
-
-```bash
-# Ingest production RRWeb session recordings & Sentry crash dumps into TaskManifests:
-replayfix ingest --rrweb session.json --sentry crash.json --output .replayfix/manifest.json
-
-# Launch concurrent work-stealing triage swarm across isolated ScratchSandboxes:
-replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04 --mock-heal --output .replayfix
-
-# Serve live streaming WebSocket & SSE observability portal (dashboard.html):
+# Boot live streaming WebSocket & SSE observability dashboard:
 replayfix dashboard --port 3848 --artifacts .replayfix
+```
 
-# Synthesize cross-browser & multi-device Playwright regression matrix (DPR-calibrated):
-replayfix inoculate --bug RF-01 --matrix chromium,firefox,webkit,mobile,pixel7,tablet
+* **Live CDP Screencast Broadcaster**: Streams real-time Chromium viewport screencasts (JPEG/WebP over WebSocket) as the bug is reproduced and repaired.
+* **Muse Spark Deliberation Feed**: Streams turn-by-turn agent reasoning tokens and tool executions live to connected maintainer browsers.
+* **Side-by-Side Proof Diff**: Interactive UI displaying before/after DOM `ariaSnapshot` trees, bounding boxes, optical flow vectors, and Merkle tree inclusion paths.
 
-# Append receipts & verify RFC 6962 append-only transparency log consistency proofs:
+---
+
+## 🔐 Cryptographic Notary & Merkle Audit Receipts
+
+Every verified repair produces an **RFC 6962 Merkle Tree Audit Receipt** signed with an **RFC 8032 Ed25519** keypair:
+
+```bash
+# Verify a repair receipt through all 4 cryptographic layers:
+replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <HEX_PUBKEY>
+
+# Append receipt and verify consistency proofs on the append-only transparency ledger:
 replayfix notary append --receipt .replayfix/audit_receipt.json
 replayfix notary verify-log --log .replayfix/transparency_log.json
-replayfix notary consistency-proof --first 1 --second 2 --log .replayfix/transparency_log.json
 ```
 
-Open **`proof_viewer.html`** or **`dashboard.html`** directly in any browser (`file://` or `http://127.0.0.1:3848`) to inspect receipts, step through RFC 6962 Merkle audit paths, verify Ed25519 signatures, step through the **Muse Spark Deliberation Timeline**, inspect side-by-side accessibility DOM diffs, and inspect SAM 3.1 spatial overlays and unified diffs offline.
+Inspect receipts offline without a server using **`proof_viewer.html`**—an air-gapped single-file verification portal with client-side WebCrypto Ed25519 signature checks (`default-src 'none'`).
 
 ---
 
-## Deterministic Exit Code Taxonomy
+## 🚀 Quickstart & CLI Reference
 
-| Exit Code | Constant / Verdict | Meaning |
-| :--- | :--- | :--- |
-| **`0`** | `SUCCESS` / `VERIFIED_REPAIRED` | Defect reproduced (Gate 1 RED), repaired, verified (2x Gate 2 GREEN + regression parity), or receipt verified |
-| **`1`** | `DOCTOR_OR_INTERNAL_ERROR` | Missing environment dependency (`doctor`) or internal system error |
-| **`2`** | `USAGE_OR_INPUT_ERROR` | Invalid CLI flags, disallowed model slug, or malformed manifest |
-| **`10`** | `GATE1_NOT_RED` | Defect did not reproduce on Gate 1 or behavioral contract digest changed |
-| **`11`** | `SECURITY_VIOLATION` | `TEST_MUTATION_PROHIBITED`, `DiffGuard` violation, path traversal, or `BASE_REPO_DIRTY_MUTATION_DETECTED` |
-| **`12`** | `APPROVAL_DENIED` | User declined interactive `--apply` patch approval |
-| **`13`** | `NON_INTERACTIVE_TTY_REQUIRED` | `--apply` invoked without `--yes` in a non-interactive terminal |
-| **`20`** | `BRIDGE_EXECUTION_FAILED` | Playwright bridge or child server failed |
-| **`21`** | `QUARANTINE_REPAIR_FAILED` | Bounded 3-attempt repair budget exhausted or flaky non-deterministic run |
-| **`22`** | `AMBIGUOUS_GROUNDING` | Spatial-semantic locator grounding margin `< 0.25` |
-| **`23`** | `ISSUE_NOT_FOUND_OR_RATE_LIMITED` | GitHub issue HTTP 404/403/429 |
-| **`24`** | `ISSUE_MALFORMED_OR_UNPARSEABLE` | GitHub issue payload missing required reproduction fields |
-| **`30`** | `REPAIR_REJECTED` / `ERR_GATEWAY_AUTH_MISSING` | Empty/no-op patch (`REPAIR_NOOP_REJECTED`), patch failed to apply, Gate 2 remained RED, or `--mode live-ai` invoked without `META_API_KEY` |
-| **`31`** | `REGRESSION_DETECTED` | Candidate patch broke pre-existing regression tests (`F_patched \ F_baseline != empty`) |
-| **`32`** | `QUARANTINE_INVERTED_BASELINE` | Clean reference failed or baseline was already GREEN (`AlreadyHealthy`) |
-| **`40`** | `RECEIPT_VERIFICATION_FAILED` | On-disk artifact tampering, invalid RFC 6962 Merkle proof, invalid Ed25519 signature, or untrusted signer key |
-| **`41`** | `SWEEP_PARTIAL_FAILURE` | One or more benchmark bugs in `replayfix sweep` failed verification |
+### 1. Installation
 
----
+```bash
+# Clone the repository
+git clone https://github.com/aroucadi/replay_fix.git
+cd replay_fix
 
-## Completed Release Roadmap (`v0.0.0` -> `v1.8.0`)
+# Build release binary (Pure Rust, Zero Unsafe)
+cargo build --release --workspace
 
-| Release | Scope | Status |
-| :--- | :--- | :--- |
-| **v0.0.0** | Clean-room 2-crate Rust workspace genesis & platform abstractions | **Delivered** |
-| **v0.1.0–0.1.1** | `doctor` diagnostics, manifest ingestion, UNC/DOS/ADS/traversal hardening | **Delivered** |
-| **v0.2.0–0.2.1** | Dual-gate FSM (`Gate1Red` -> `Gate2Green`), RFC 8785 contract digest, no-op guard | **Delivered** |
-| **v0.3.0–0.3.3** | Ephemeral `ScratchSandbox`, `Delta-Repo = 0` `WorktreeManifest`, `EphemeralPort`, process tree teardown | **Delivered** |
-| **v0.4.0–0.4.1** | Playwright CDP grounding, `ariaSnapshot` DOM Grounding Invariant, fail-closed `AMBIGUOUS_GROUNDING` | **Delivered** |
-| **v0.5.0** | Video keyframe probing, 120x120px ROI optical flow, `sam-3.1` snapping, `muse-voice-transcribe-1.0` ASR | **Delivered** |
-| **v0.6.0–0.6.2** | Meta Muse bounded repair (`muse-spark-1.3`/`muse-wonder-1.0`), `TestFreezeGuard`, 2-run Gate 2 stability | **Delivered** |
-| **v0.7.0–0.7.1** | 6-state `DifferentialMatrix`, surgical `DiffGuard`, active `RegressionEvaluator`, `CheckpointManager`, `freeze-spec` | **Delivered** |
-| **v0.8.0–0.8.2** | `--trace` viewer, live GitHub `--issue` ingestion, ANSI-safe `--apply` approval gate, atomic `ArtifactStore` | **Delivered** |
-| **v0.9.0–0.9.1** | RFC 6962 Merkle receipts, pure RFC 8032 Ed25519 attestation, 4-layer `verify-receipt`, 5-bug `sweep`, `ModelPool` | **Delivered** |
-| **v0.9.5** | Offline `proof_viewer.html` Judge Proof Portal, bounded `MultimodalGateway`, rate pool & circuit breaker | **Delivered** |
-| **v1.0.0** | Production LTO/abort optimization, Windows Authenticode signing, 3-Act demo video & submission package | **Delivered** |
-| **v1.1.0** | Real MetaPulse 20-bug benchmark suite (`RF-01`..`RF-20`), `MetaGatewayClient` (`rustls-tls`), dual execution modes | **Delivered** |
-| **v1.2.0** | Live Meta SAM 3.1 wire segmentation, Muse Voice 24kHz PCM ASR, multi-step `ActionTrajectory`, `.env`/Registry auth | **Delivered** |
-| **v1.3.0** | Real MetaPulse defect benchmarks, cross-platform video pipeline, and live CDP capture | **Delivered** |
-| **v1.4.0** | Interactive Conversational Agent Workspace (`replayfix chat`), natural-language intent router, interactive REPL | **Delivered** |
-| **v1.5.0** | Permanent Inoculation ("Dreaming" into Playwright specs), Native MCP Server (`stdio`/`sse`), Gate 3 Stress Quorum, Git PR Packager | **Delivered** |
-| **v1.5.1** | Production Meta multimodal wire protocol across all 5 Meta Muse & SAM models | **Delivered** |
-| **v1.6.0** | **Sovereign Autonomous Healer (`replayfix heal`), Multi-Turn Meta Muse Spark 1.3 Agent Loop (`305 tok/s`), Wonder AST Encrypted Deliberation Caching, and Sub-60s Macro Pipeline** | **Delivered** |
-| **v1.7.0** | **Autonomous GitHub Issue Ingestion Bot, Automated PR Dispatch & Continuous Triage Engine (`replayfix bot`)** | **Delivered** |
-| **v1.8.0** | **Distributed Multi-Agent Swarm (`replayfix swarm`), Live Streaming Dashboard (`replayfix dashboard`), Production APM Session Replay Ingestion (`replayfix ingest`), Cross-Browser Matrix Inoculation (`--matrix`), and RFC 6962 Key Notary (`replayfix notary`)** | **Delivered** |
+# Run self-diagnostic environment check
+./target/release/replayfix doctor
+```
+
+### 2. Autonomous Reproduction & Repair (`replayfix repro`)
+
+```bash
+# Provide a video of the bug and access to the repository:
+replayfix repro \
+  --video tests/fixtures/videos/repro_demo.mp4 \
+  --repo ./target-app \
+  --output-dir .replayfix/
+```
+
+### 3. Production APM & RRWeb Telemetry Ingestion (`replayfix ingest`)
+
+```bash
+# Transform RRWeb session streams and Sentry crash dumps into reproducible manifests:
+replayfix ingest --rrweb session_events.json --sentry crash_dump.json --output .replayfix/manifest.json
+```
+
+### 4. Cross-Browser & Multi-Device Inoculation (`replayfix inoculate`)
+
+```bash
+# Synthesize permanent Playwright regression tests calibrated for desktop & mobile DPR:
+replayfix inoculate --manifest .replayfix/manifest.json --matrix chromium,firefox,webkit,mobile
+```
+
+### 5. Automated GitHub Issue Triage Bot (`replayfix bot`)
+
+```bash
+# Run continuous GitHub issue ingestion, reproduction, and PR dispatch:
+replayfix bot --repo owner/target-repo --poll-interval 60 --auto-pr
+```
 
 ---
 
-## License
+## 📊 Deterministic Exit Code Taxonomy
 
-MIT. See [LICENSE.md](LICENSE.md). Security & trust model: [docs/trust-architecture.md](docs/trust-architecture.md) and [docs/windows-code-signing.md](docs/windows-code-signing.md). Release history: [CHANGELOG.md](CHANGELOG.md) and [docs/release-notes/](docs/release-notes/).
+| Exit Code | Verdict | Meaning |
+| :---: | :--- | :--- |
+| **`0`** | `VERIFIED_REPAIRED` | Defect reproduced (Gate 1 RED), repaired, verified (Gate 2 GREEN x2), and receipt signed. |
+| **`1`** | `DOCTOR_ERROR` | Missing system dependency (`ffmpeg`, `git`, `playwright`, or `node`). |
+| **`2`** | `USAGE_ERROR` | Invalid CLI arguments, malformed manifest, or unrecognized model slug. |
+| **`10`** | `GATE1_NOT_RED` | Defect did not reproduce on Gate 1 (counterfactual baseline failed). |
+| **`11`** | `SECURITY_VIOLATION` | Path traversal, base repo mutation detected, or anti-cheat test freeze violated. |
+| **`21`** | `QUARANTINE_FAILED` | Repair budget exhausted or non-deterministic flaky failure. |
+| **`31`** | `REGRESSION_DETECTED` | Candidate patch broke pre-existing regression test suite. |
+| **`40`** | `RECEIPT_INVALID` | Artifact tampering, Merkle inclusion mismatch, or invalid Ed25519 signature. |
+
+---
+
+## 🏆 Benchmark & Qualification Sweep
+
+ReplayFix includes the **MetaPulse 20-Bug Benchmark Suite** (`RF-01` through `RF-20`), testing real-world visual regressions across responsive web apps:
+
+```bash
+# Run the complete benchmark sweep:
+replayfix sweep --suite metapulse --concurrency 4 --output-dir target/sweep-results/
+```
+
+- **326+ Automated Tests**: 100% pass rate with zero ignored tests.
+- **Zero-Panic Quality**: Strictly 0 non-test panics (`check-panics.ps1`).
+- **Clippy Clean**: Compiles under `cargo clippy --workspace --all-targets -- -D warnings` with 0 warnings.
+
+---
+
+## 📄 License & Trust Model
+
+Distributed under the **MIT License**. See [LICENSE.md](LICENSE.md) for details.
+
+- **Security Architecture**: [docs/trust-architecture.md](docs/trust-architecture.md)
+- **Windows Authenticode Signing**: [docs/windows-code-signing.md](docs/windows-code-signing.md)
+- **Changelog & Milestones**: [CHANGELOG.md](CHANGELOG.md)
+
+<div align="center">
+  <sub>Built for the <b>Meta Global AI Developer Hackathon 2026</b> • Powered by Meta Muse Spark, Muse Wonder & SAM 3.1</sub>
+</div>
