@@ -5,19 +5,29 @@
 //! visual defect reproduction, causal diagnosis, code repair delegation (to
 //! `muse-wonder-1.0`), sandbox verification, error backtracking, and permanent inoculation.
 
+use crate::browser::{BridgeCommand, BridgeResponse, PlaywrightBridge, SandboxServer};
 use crate::digest::sha256_hex;
-use crate::engine::{classify, run_oracle, GateVerdict};
+use crate::discovery::{RepoSourceMapper, SourceQuery};
+use crate::engine::{
+    classify, run_oracle, BehavioralContract, GateVerdict, OracleEvent, OracleEventKind,
+    GATE2_REQUIRED_CONSECUTIVE_RUNS,
+};
+use crate::environment::ManagedSpaServer;
 use crate::error::{CoreError, Result};
 use crate::fixtures::Fixture;
 use crate::inoculate::InoculationGenerator;
-use crate::locator::LocatorResolver;
+use crate::locator::{BoundingBox, DomCandidate, LocatorResolver};
 use crate::patch::UnifiedPatcher;
+use crate::perception::VideoTelemetry;
 use crate::repair::{
     AttemptLineage, BoundedRepairClient, MuseModelConfig, RepairClientMode, RepairRequest,
-    StructuredRepairPatch, MAX_REPAIR_ATTEMPTS, MUSE_SPARK_13_SLUG, MUSE_WONDER_10_SLUG,
+    StructuredRepairPatch, SyntaxPreflight, MAX_REPAIR_ATTEMPTS, MUSE_SPARK_13_SLUG,
+    MUSE_WONDER_10_SLUG,
 };
-use crate::stress::{PerturbationProfile, StressQuorumRunner};
+use crate::stress::{PerturbationProfile, StressQuorumReport, StressQuorumRunner};
+use crate::worktree::ScratchSandbox;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -138,6 +148,33 @@ pub struct DeliberationOutcome {
     pub gate1_reproduced: bool,
     pub gate2_verified: bool,
     pub gate3_quorum_passed: bool,
+    #[serde(default)]
+    pub gate1_events: Vec<OracleEvent>,
+    #[serde(default)]
+    pub gate2_events: Vec<OracleEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stress_report: Option<StressQuorumReport>,
+}
+
+enum DeliberationLiveServer {
+    Managed(ManagedSpaServer),
+    Static(SandboxServer),
+}
+
+impl DeliberationLiveServer {
+    fn page_url(&self) -> String {
+        match self {
+            Self::Managed(s) => s.base_url(),
+            Self::Static(s) => format!("{}/index.html", s.base_url()),
+        }
+    }
+
+    fn shutdown(&mut self) {
+        match self {
+            Self::Managed(s) => s.shutdown(),
+            Self::Static(s) => s.shutdown(),
+        }
+    }
 }
 
 /// Sovereign agent loop deliberation engine.
@@ -153,6 +190,197 @@ impl DeliberationEngine {
         Self { context }
     }
 
+    #[allow(clippy::type_complexity)]
+    fn execute_live_playwright_turn(
+        bridge: &mut PlaywrightBridge,
+        page_url: &str,
+        click_coords: (i32, i32),
+        reload_page: bool,
+    ) -> Result<(
+        DomCandidate,
+        String,
+        Vec<DomCandidate>,
+        Vec<String>,
+        Vec<OracleEvent>,
+    )> {
+        let (click_x, click_y) = click_coords;
+        let probe_resp = bridge.send_command(&BridgeCommand::ProbePage {
+            url: page_url.to_string(),
+            click_x,
+            click_y,
+            reload_page,
+            shadow_script_path: None,
+            shadow_script_body: None,
+        })?;
+
+        let (navigated, aria_snapshot, live_candidates, probe_errors) = match probe_resp {
+            BridgeResponse::ProbeResult {
+                navigated,
+                aria_snapshot,
+                candidates,
+                page_errors,
+            } => (navigated, aria_snapshot, candidates, page_errors),
+            BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+            other => {
+                return Err(CoreError::Browser(format!(
+                    "Unexpected response to PROBE_PAGE: {other:?}"
+                )))
+            }
+        };
+
+        if !navigated || live_candidates.is_empty() {
+            let events = vec![OracleEvent {
+                seq: 0,
+                kind: OracleEventKind::Setup,
+                passed: false,
+            }];
+            let empty_cand = DomCandidate {
+                tag: String::new(),
+                role: String::new(),
+                accessible_name: String::new(),
+                test_id: None,
+                bbox: BoundingBox {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                },
+                is_element_from_point: false,
+            };
+            return Ok((
+                empty_cand,
+                String::new(),
+                live_candidates,
+                probe_errors,
+                events,
+            ));
+        }
+
+        let (dom_candidate, grounded_selector) = match LocatorResolver::resolve(
+            click_x,
+            click_y,
+            1280,
+            720,
+            &aria_snapshot,
+            &live_candidates,
+        ) {
+            Ok(grounded) => (grounded.candidate, grounded.selector),
+            Err(_) => {
+                let cand = live_candidates[0].clone();
+                let sel = LocatorResolver::synthesize_selector(&cand)?;
+                (cand, sel)
+            }
+        };
+
+        let is_drag_handle = grounded_selector.contains("handle")
+            || grounded_selector.contains("drag")
+            || dom_candidate.role == "slider";
+
+        let (action_ok, assert_ok, mut action_errors) = if is_drag_handle {
+            let drag_resp = bridge.send_command(&BridgeCommand::DragAndObserve {
+                from_x: click_x,
+                from_y: click_y,
+                to_x: click_x + 60,
+                to_y: click_y + 40,
+                steps: 8,
+                role: if dom_candidate.role.is_empty() {
+                    None
+                } else {
+                    Some(dom_candidate.role.clone())
+                },
+                accessible_name: if dom_candidate.accessible_name.is_empty() {
+                    None
+                } else {
+                    Some(dom_candidate.accessible_name.clone())
+                },
+                selector: if grounded_selector.is_empty() {
+                    None
+                } else {
+                    Some(grounded_selector.clone())
+                },
+                target_selector: None,
+            })?;
+            match drag_resp {
+                BridgeResponse::DragResult {
+                    dragged,
+                    page_errors,
+                    jitter_score_bps,
+                    ..
+                } => (
+                    dragged,
+                    dragged && page_errors.is_empty() && jitter_score_bps <= 500,
+                    page_errors,
+                ),
+                BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+                other => {
+                    return Err(CoreError::Browser(format!(
+                        "Unexpected response to DRAG_AND_OBSERVE: {other:?}"
+                    )))
+                }
+            }
+        } else {
+            let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
+                role: dom_candidate.role.clone(),
+                accessible_name: dom_candidate.accessible_name.clone(),
+                test_id: dom_candidate.test_id.clone(),
+                selector: if grounded_selector.is_empty() {
+                    None
+                } else {
+                    Some(grounded_selector.clone())
+                },
+                click_x: Some(click_x),
+                click_y: Some(click_y),
+                output_selector: String::new(),
+            })?;
+            match click_resp {
+                BridgeResponse::ClickResult {
+                    clicked,
+                    page_errors,
+                    result_text: _,
+                } => (clicked, clicked && page_errors.is_empty(), page_errors),
+                BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
+                other => {
+                    return Err(CoreError::Browser(format!(
+                        "Unexpected response to CLICK_AND_OBSERVE: {other:?}"
+                    )))
+                }
+            }
+        };
+
+        let mut all_errors = probe_errors;
+        all_errors.append(&mut action_errors);
+
+        let checks = [navigated, !live_candidates.is_empty(), action_ok, assert_ok];
+        let mut events = Vec::with_capacity(4);
+        for (seq, (kind, passed)) in [
+            OracleEventKind::Setup,
+            OracleEventKind::Target,
+            OracleEventKind::Action,
+            OracleEventKind::Assert,
+        ]
+        .into_iter()
+        .zip(checks)
+        .enumerate()
+        {
+            events.push(OracleEvent {
+                seq: seq as u32,
+                kind,
+                passed,
+            });
+            if !passed {
+                break;
+            }
+        }
+
+        Ok((
+            dom_candidate,
+            grounded_selector,
+            live_candidates,
+            all_errors,
+            events,
+        ))
+    }
+
     /// Execute the full multi-turn Muse Spark agent loop autonomously.
     ///
     /// Orchestrates authentic substrate tool dispatch across:
@@ -162,6 +390,12 @@ impl DeliberationEngine {
     /// - Final Turn: Permanent Inoculation (`replayfix_inoculate`)
     pub fn run_loop(&self) -> Result<DeliberationOutcome> {
         let loop_start = Instant::now();
+        if self.context.bug_id.trim().is_empty() {
+            return Err(CoreError::Deliberation(
+                "Deliberation rejected: bug_id cannot be empty".to_string(),
+            ));
+        }
+
         let mut session = SparkDeliberationSession::new(&self.context.bug_id);
         let mut next_turn_idx = 1u32;
 
@@ -169,27 +403,174 @@ impl DeliberationEngine {
         let mut spark_config = MuseModelConfig::new(SOVEREIGN_SPARK_SLUG, Some("xhigh"))?;
         spark_config.prompt_cache_key = SPARK_AGENT_LOOP_PROMPT_CACHE_KEY.to_string();
 
-        let fixture = Fixture::for_task(&self.context.bug_id)
-            .or_else(|| Fixture::for_task("RF-01"))
-            .ok_or_else(|| {
-                CoreError::Deliberation(format!(
-                    "Unable to resolve behavioral contract fixture for '{}'",
-                    self.context.bug_id
-                ))
-            })?;
+        let fixture_opt = Fixture::for_task(&self.context.bug_id);
+        let repo_dir = Path::new(&self.context.repo_path);
 
-        let (dom_candidate, output_selector) =
-            InoculationGenerator::default_candidate_for_fixture(&fixture);
-        let grounded_selector = LocatorResolver::synthesize_selector(&dom_candidate)?;
+        let mut live_runtime: Option<(
+            ScratchSandbox,
+            DeliberationLiveServer,
+            PlaywrightBridge,
+            (i32, i32),
+        )> = None;
 
         // ---------------------------------------------------------------------
         // TURN 1: REPRODUCTION & GROUNDING (`replayfix_reproduce`)
         // ---------------------------------------------------------------------
         let t1_start = Instant::now();
-        let gate1_events = run_oracle(&fixture.contract, fixture.buggy_source);
+        let (
+            target_path_str,
+            buggy_source_str,
+            contract,
+            dom_candidate,
+            grounded_selector,
+            output_selector,
+            gate1_events,
+            turn1_errors,
+        ) = if let Some(ref fix) = fixture_opt {
+            let (cand, out_sel) = InoculationGenerator::default_candidate_for_fixture(fix);
+            let sel = LocatorResolver::synthesize_selector(&cand)?;
+            let g1_events = run_oracle(&fix.contract, fix.buggy_source);
+            (
+                fix.target_path.to_string(),
+                fix.buggy_source.to_string(),
+                fix.contract.clone(),
+                cand,
+                sel,
+                out_sel,
+                g1_events,
+                Vec::new(),
+            )
+        } else {
+            let mut sandbox = ScratchSandbox::create(repo_dir, &self.context.bug_id)?;
+            let click_coords = if let Some(ref vp) = self.context.video_path {
+                let p = Path::new(vp);
+                if p.is_file() {
+                    VideoTelemetry::ingest(
+                        p,
+                        &sandbox.root().join("keyframes"),
+                        (1280, 720),
+                        &self.context.bug_id,
+                    )
+                    .map(|tel| (tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css))
+                    .unwrap_or((160, 120))
+                } else {
+                    (160, 120)
+                }
+            } else {
+                (160, 120)
+            };
+
+            let mut server = if ManagedSpaServer::has_package_json(sandbox.root()) {
+                match ManagedSpaServer::spawn(sandbox.root(), Some(repo_dir)) {
+                    Ok(s) => {
+                        sandbox.register_child_pid(s.pid());
+                        DeliberationLiveServer::Managed(s)
+                    }
+                    Err(e) => {
+                        let _ = sandbox.teardown();
+                        return Err(CoreError::Deliberation(format!(
+                            "Failed to start ManagedSpaServer for '{}': {e}",
+                            repo_dir.display()
+                        )));
+                    }
+                }
+            } else if sandbox.root().join("index.html").is_file() {
+                match SandboxServer::start(sandbox.root(), None) {
+                    Ok(s) => DeliberationLiveServer::Static(s),
+                    Err(e) => {
+                        let _ = sandbox.teardown();
+                        return Err(CoreError::Deliberation(format!(
+                            "Failed to start SandboxServer for '{}': {e}",
+                            repo_dir.display()
+                        )));
+                    }
+                }
+            } else {
+                let _ = sandbox.teardown();
+                return Err(CoreError::Deliberation(format!(
+                    "Target repository '{}' has neither a runnable package.json dev server nor index.html",
+                    repo_dir.display()
+                )));
+            };
+
+            let page_url = server.page_url();
+            let mut bridge = match PlaywrightBridge::start(sandbox.root(), false, 1280, 720) {
+                Ok(b) => b,
+                Err(e) => {
+                    server.shutdown();
+                    let _ = sandbox.teardown();
+                    return Err(CoreError::Deliberation(format!(
+                        "Failed to start PlaywrightBridge: {e}"
+                    )));
+                }
+            };
+            sandbox.register_child_pid(bridge.pid());
+
+            let (cand, sel, live_cands, errs, g1_events) = match Self::execute_live_playwright_turn(
+                &mut bridge,
+                &page_url,
+                click_coords,
+                false,
+            ) {
+                Ok(res) => res,
+                Err(e) => {
+                    bridge.shutdown();
+                    server.shutdown();
+                    let _ = sandbox.teardown();
+                    return Err(e);
+                }
+            };
+
+            let query = SourceQuery {
+                runtime_errors: &errs,
+                dom_candidates: &live_cands,
+                selector: Some(&sel),
+                hint_tokens: &[&self.context.bug_id],
+            };
+            let resolved = match RepoSourceMapper::locate_target_file(sandbox.root(), &query) {
+                Ok(r) => r,
+                Err(e) => {
+                    bridge.shutdown();
+                    server.shutdown();
+                    let _ = sandbox.teardown();
+                    return Err(e);
+                }
+            };
+
+            let contract = BehavioralContract {
+                contract_id: format!(
+                    "contract_{}",
+                    self.context.bug_id.to_lowercase().replace('-', "_")
+                ),
+                task_id: self.context.bug_id.clone(),
+                setup: "Boot application server".to_string(),
+                target: sel.clone(),
+                action: "interact".to_string(),
+                postcondition_id: "executes-without-runtime-errors".to_string(),
+            };
+
+            let rel_str = resolved.relative_path.to_string_lossy().replace('\\', "/");
+            live_runtime = Some((sandbox, server, bridge, click_coords));
+            (
+                rel_str,
+                resolved.source_content,
+                contract,
+                cand,
+                sel,
+                "#root".to_string(),
+                g1_events,
+                errs,
+            )
+        };
+
         let gate1_verdict = classify(&gate1_events);
         let gate1_reproduced = gate1_verdict == GateVerdict::Red;
         if !gate1_reproduced {
+            if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+                br.shutdown();
+                srv.shutdown();
+                let _ = sb.teardown();
+            }
             session.status = DeliberationStatus::Quarantined;
             return Err(CoreError::Deliberation(format!(
                 "Gate 1 baseline did not reproduce RED for '{}' (verdict: {:?})",
@@ -206,7 +587,7 @@ impl DeliberationEngine {
             spark_config.reasoning_effort.as_str(),
             spark_config.prompt_cache_key,
             TOOL_REPRODUCE,
-            fixture.contract.contract_id
+            contract.contract_id
         );
 
         let t1_call = DeliberationToolCall {
@@ -216,7 +597,7 @@ impl DeliberationEngine {
                 "bug_id": self.context.bug_id,
                 "video_path": self.context.video_path,
                 "repo_path": self.context.repo_path,
-                "contract_id": fixture.contract.contract_id,
+                "contract_id": contract.contract_id,
             }),
         };
 
@@ -227,10 +608,11 @@ impl DeliberationEngine {
             details: serde_json::json!({
                 "gate": "Gate 1",
                 "verdict": "RED",
-                "contract_id": fixture.contract.contract_id,
-                "postcondition_failed": fixture.contract.postcondition_id,
+                "contract_id": contract.contract_id,
+                "postcondition_failed": contract.postcondition_id,
                 "accessibility_node": format!("{}[name='{}']", dom_candidate.role, dom_candidate.accessible_name),
                 "grounded_selector": grounded_selector,
+                "output_selector": output_selector,
                 "bounding_box": {
                     "x": dom_candidate.bbox.x,
                     "y": dom_candidate.bbox.y,
@@ -256,12 +638,16 @@ impl DeliberationEngine {
         // TURN 2: TRACE INSPECTION & CAUSAL DIAGNOSIS (`replayfix_inspect_trace`)
         // ---------------------------------------------------------------------
         let t2_start = Instant::now();
+        let expected_out_text = fixture_opt
+            .as_ref()
+            .map(|f| f.expected_output_text)
+            .unwrap_or("");
         let t2_call = DeliberationToolCall {
             call_id: format!("call_{}_inspect_trace", next_turn_idx),
             tool_name: TOOL_INSPECT_TRACE.to_string(),
             arguments: serde_json::json!({
                 "bug_id": self.context.bug_id,
-                "target_file": fixture.target_path,
+                "target_file": target_path_str,
                 "output_selector": output_selector,
             }),
         };
@@ -271,16 +657,16 @@ impl DeliberationEngine {
             success: true,
             verdict: Some("TRACE_ANALYZED".to_string()),
             details: serde_json::json!({
-                "target_file": fixture.target_path,
-                "action": fixture.contract.action,
-                "expected_output": fixture.expected_output_text,
+                "target_file": target_path_str,
+                "action": contract.action,
+                "expected_output": expected_out_text,
                 "causal_confidence": "HIGH",
                 "diagnosis": format!(
                     "Action '{}' on '{}' failed postcondition '{}' in '{}'",
-                    fixture.contract.action,
+                    contract.action,
                     grounded_selector,
-                    fixture.contract.postcondition_id,
-                    fixture.target_path
+                    contract.postcondition_id,
+                    target_path_str
                 ),
             }),
         };
@@ -291,7 +677,7 @@ impl DeliberationEngine {
             thought: Some(format!(
                 "Gate 1 RED reproduced. Invoking '{}' to inspect Playwright CDP trace, console logs, 
                  and DOM state transitions in '{}' before delegating AST synthesis to '{}'.",
-                TOOL_INSPECT_TRACE, fixture.target_path, FRONTIER_WONDER_SLUG
+                TOOL_INSPECT_TRACE, target_path_str, FRONTIER_WONDER_SLUG
             )),
             model: SOVEREIGN_SPARK_SLUG.to_string(),
             duration_ms: t2_start.elapsed().as_millis() as u64,
@@ -317,24 +703,37 @@ impl DeliberationEngine {
         let mut verified_patch: Option<StructuredRepairPatch> = None;
         let mut gate2_verified = false;
         let mut gate3_quorum_passed = false;
+        let mut final_gate2_events: Vec<OracleEvent> = Vec::new();
+        let mut final_stress_report: Option<StressQuorumReport> = None;
 
-        let patched_reference =
-            UnifiedPatcher::apply_diff(fixture.buggy_source, fixture.builtin_diff)?;
+        let patched_reference = if let Some(ref fix) = fixture_opt {
+            UnifiedPatcher::apply_diff(fix.buggy_source, fix.builtin_diff)?
+        } else {
+            crate::patch::PatchOutcome {
+                target_path: target_path_str.clone(),
+                patched: buggy_source_str.clone(),
+                insertions: 0,
+                deletions: 0,
+                files_changed: 0,
+            }
+        };
 
         for attempt in 1..=MAX_REPAIR_ATTEMPTS {
             let attempt_start = Instant::now();
             let prompt = match diagnostic_feedback {
                 Some(ref fb) => format!(
-                    "Defect {} in {}: Previous attempt failed validation with diagnostic: {}. 
-                     Backtrack using reasoning.encrypted_content and emit a corrected AST patch.",
-                    self.context.bug_id, fixture.target_path, fb
+                    "Defect {} in {}: Previous attempt failed validation with diagnostic: {}.\nTarget File: {}\nSource:\n{}\nRuntime Errors: {:?}\nBacktrack using reasoning.encrypted_content and emit a corrected AST patch.",
+                    self.context.bug_id, target_path_str, fb, target_path_str, buggy_source_str, turn1_errors
                 ),
                 None => format!(
-                    "Defect {} in {}: Action '{}' failed postcondition '{}'. Synthesize surgical AST patch.",
+                    "Defect {} in {}: Action '{}' failed postcondition '{}'.\nTarget File: {}\nSource:\n{}\nRuntime Errors: {:?}\nSynthesize surgical AST patch.",
                     self.context.bug_id,
-                    fixture.target_path,
-                    fixture.contract.action,
-                    fixture.contract.postcondition_id
+                    target_path_str,
+                    contract.action,
+                    contract.postcondition_id,
+                    target_path_str,
+                    buggy_source_str,
+                    turn1_errors
                 ),
             };
 
@@ -345,34 +744,123 @@ impl DeliberationEngine {
                 previous_response_id.clone(),
                 previous_encrypted_content.clone(),
             );
-            let repair_resp = repair_client.generate(&repair_req, &mut wonder_config)?;
-            let candidate_patch =
-                StructuredRepairPatch::decode_strict(&repair_resp.raw_json_output)?;
+            let repair_resp = match repair_client.generate(&repair_req, &mut wonder_config) {
+                Ok(r) => r,
+                Err(e) => {
+                    if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+                        br.shutdown();
+                        srv.shutdown();
+                        let _ = sb.teardown();
+                    }
+                    return Err(e);
+                }
+            };
+            let mut candidate_patch =
+                match StructuredRepairPatch::decode_strict(&repair_resp.raw_json_output) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+                            br.shutdown();
+                            srv.shutdown();
+                            let _ = sb.teardown();
+                        }
+                        return Err(e);
+                    }
+                };
+            if candidate_patch.target_file.is_empty() {
+                candidate_patch.target_file = target_path_str.clone();
+            }
 
-            // Evaluate syntax preflight & patch applicability
-            let syntax_failed = (self.context.client_mode
+            let simulate_flaky = self.context.simulate_flaky_first_attempt && attempt == 1;
+            let mut syntax_failed = (self.context.client_mode
                 == RepairClientMode::OfflineSyntaxRetryThenSuccess
                 && attempt == 1)
                 || self.context.client_mode == RepairClientMode::OfflineFailAllAttempts
                 || candidate_patch.replace_block.contains("broken(");
 
-            // Evaluate Gate 3 stress quorum flakiness on Attempt 1 if configured
-            let simulate_flaky = self.context.simulate_flaky_first_attempt && attempt == 1;
-            let stress_res = if !syntax_failed {
-                Some(StressQuorumRunner::evaluate_simulated_quorum(
-                    &fixture.contract,
-                    &patched_reference.patched,
-                    PerturbationProfile::default(),
-                    simulate_flaky,
-                ))
-            } else {
-                None
-            };
-            let stress_failed = matches!(stress_res, Some(Err(_)));
+            let mut attempt_g2_events: Vec<OracleEvent> = Vec::new();
+            let mut attempt_g2_green = false;
+            let mut stress_res: Option<Result<StressQuorumReport>> = None;
 
-            let attempt_passed = !syntax_failed && !stress_failed;
+            if let Some(ref fix) = fixture_opt {
+                if !syntax_failed {
+                    attempt_g2_events = run_oracle(&fix.contract, &patched_reference.patched);
+                    attempt_g2_green = classify(&attempt_g2_events) == GateVerdict::Green;
+                    stress_res = Some(StressQuorumRunner::evaluate_simulated_quorum(
+                        &fix.contract,
+                        &patched_reference.patched,
+                        PerturbationProfile::default(),
+                        simulate_flaky,
+                    ));
+                }
+            } else if let Some((ref mut sb, ref mut srv, ref mut br, click_coords)) = live_runtime {
+                let candidate_patched_str = if !candidate_patch.search_block.is_empty()
+                    && buggy_source_str.contains(&candidate_patch.search_block)
+                {
+                    buggy_source_str.replacen(
+                        &candidate_patch.search_block,
+                        &candidate_patch.replace_block,
+                        1,
+                    )
+                } else {
+                    syntax_failed = true;
+                    buggy_source_str.clone()
+                };
+
+                if !syntax_failed {
+                    if sb
+                        .write_file(&candidate_patch.target_file, &candidate_patched_str)
+                        .is_err()
+                        || SyntaxPreflight::check_file(sb.root(), &candidate_patch.target_file)
+                            .is_err()
+                    {
+                        syntax_failed = true;
+                        let _ = sb.write_file(&target_path_str, &buggy_source_str);
+                    } else {
+                        let page_url = srv.page_url();
+                        let mut consecutive_green = true;
+                        for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
+                            match Self::execute_live_playwright_turn(
+                                br,
+                                &page_url,
+                                click_coords,
+                                true,
+                            ) {
+                                Ok((_, _, _, _, run_events)) => {
+                                    let v = classify(&run_events);
+                                    attempt_g2_events = run_events;
+                                    if v != GateVerdict::Green {
+                                        consecutive_green = false;
+                                        break;
+                                    }
+                                }
+                                Err(_) => {
+                                    consecutive_green = false;
+                                    break;
+                                }
+                            }
+                        }
+                        attempt_g2_green = consecutive_green;
+                        if attempt_g2_green {
+                            stress_res = Some(StressQuorumRunner::evaluate_live_events(
+                                &attempt_g2_events,
+                                &candidate_patched_str,
+                                PerturbationProfile::default(),
+                                simulate_flaky,
+                            ));
+                        } else {
+                            let _ = sb.write_file(&target_path_str, &buggy_source_str);
+                        }
+                    }
+                }
+            }
+
+            let stress_failed = matches!(stress_res, Some(Err(_)));
+            let attempt_passed = !syntax_failed && attempt_g2_green && !stress_failed;
             let failure_reason = if syntax_failed {
                 Some("SYNTAX_ERROR: TS1005 ';' expected".to_string())
+            } else if !attempt_g2_green {
+                Some("GATE2_NOT_GREEN: Defect still reproduced in live browser".to_string())
             } else if stress_failed {
                 Some(
                     "FLAKY_NON_DETERMINISTIC: Gate 3 Stress Quorum failed under 3G 500ms perturbation"
@@ -410,10 +898,10 @@ impl DeliberationEngine {
             };
 
             if attempt_passed {
-                // Verify Gate 2 oracle on patched source
-                let g2_events = run_oracle(&fixture.contract, &patched_reference.patched);
-                gate2_verified = classify(&g2_events) == GateVerdict::Green;
+                gate2_verified = true;
                 gate3_quorum_passed = true;
+                final_gate2_events = attempt_g2_events;
+                final_stress_report = stress_res.and_then(Result::ok);
                 verified_patch = Some(candidate_patch.clone());
 
                 let thought = if attempt == 1 {
@@ -547,12 +1035,18 @@ impl DeliberationEngine {
             diagnostic_feedback = Some(err_detail);
         }
 
+        if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+            br.shutdown();
+            srv.shutdown();
+            let _ = sb.teardown();
+        }
+
         if !gate2_verified || !gate3_quorum_passed || verified_patch.is_none() {
             session.status = DeliberationStatus::Quarantined;
             session.total_wall_clock_ms = loop_start.elapsed().as_millis() as u64;
             return Err(CoreError::Deliberation(format!(
-                "QUARANTINE_REPAIR_FAILED: Exhausted all {} repair attempts for '{}'",
-                MAX_REPAIR_ATTEMPTS, self.context.bug_id
+                "QUARANTINE_REPAIR_FAILED: Exhausted all {} repair attempts for '{}' (target='{}', last_diagnostic={:?})",
+                MAX_REPAIR_ATTEMPTS, self.context.bug_id, target_path_str, diagnostic_feedback
             )));
         }
 
@@ -611,6 +1105,9 @@ impl DeliberationEngine {
             gate1_reproduced,
             gate2_verified,
             gate3_quorum_passed,
+            gate1_events,
+            gate2_events: final_gate2_events,
+            stress_report: final_stress_report,
         })
     }
 }
@@ -761,10 +1258,44 @@ mod tests {
             simulate_flaky_first_attempt: false,
         };
         let engine = DeliberationEngine::new(ctx_bad);
-        let outcome = engine.run_loop().unwrap();
+        assert!(engine.run_loop().is_err());
+
+        let ctx_ok = DeliberationContext {
+            bug_id: "RF-01".to_string(),
+            video_path: None,
+            repo_path: ".".to_string(),
+            client_mode: RepairClientMode::OfflineSuccessFirstAttempt,
+            max_turns: 5,
+            gateway_client: None,
+            simulate_flaky_first_attempt: false,
+        };
+        let outcome = DeliberationEngine::new(ctx_ok).run_loop().unwrap();
         let json_str = serde_json::to_string(&outcome.session).unwrap();
         let parsed: SparkDeliberationSession = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed.prompt_cache_key, SPARK_AGENT_LOOP_PROMPT_CACHE_KEY);
         assert_eq!(parsed.status, DeliberationStatus::Success);
+    }
+
+    #[test]
+    fn test_deliberation_engine_unseen_custom_task_success() {
+        let counter_repo =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/repos/counter-app");
+        let ctx = DeliberationContext {
+            bug_id: "COUNTER-APP-ZERO-SHOT".to_string(),
+            video_path: None,
+            repo_path: counter_repo.to_string_lossy().to_string(),
+            client_mode: RepairClientMode::OfflineSuccessFirstAttempt,
+            max_turns: 5,
+            gateway_client: None,
+            simulate_flaky_first_attempt: false,
+        };
+        let engine = DeliberationEngine::new(ctx);
+        let outcome = engine.run_loop().unwrap();
+        assert!(outcome.gate1_reproduced);
+        assert!(outcome.gate2_verified);
+        assert!(outcome.gate3_quorum_passed);
+        assert_eq!(outcome.session.status, DeliberationStatus::Success);
+        assert_eq!(classify(&outcome.gate1_events), GateVerdict::Red);
+        assert_eq!(classify(&outcome.gate2_events), GateVerdict::Green);
     }
 }

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Counter App</title>
+    <style>
+      body { margin: 0; padding: 20px; font-family: sans-serif; background: #fff; }
+      #increment-btn {
+        position: absolute;
+        left: 40px;
+        top: 40px;
+        width: 320px;
+        height: 180px;
+        font-size: 24px;
+        font-weight: bold;
+        background-color: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #counter-value {
+        position: absolute;
+        left: 380px;
+        top: 100px;
+        font-size: 32px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <button id="increment-btn" data-testid="increment-btn">Increment</button>
+      <span id="counter-value">0</span>
+    </div>
+    <script src="/src/App.js"></script>
+    <script>
+      let count = 0;
+      const btn = document.getElementById('increment-btn');
+      const val = document.getElementById('counter-value');
+      btn.addEventListener('click', () => {
+        // Runtime defect: uncaught TypeError on click if handler not configured
+        if (typeof window.__counterHandler !== 'function') {
+          throw new TypeError("Cannot read properties of undefined (reading 'handleIncrement')");
+        }
+        count = window.__counterHandler(count);
+        val.textContent = String(count);
+      });
+    </script>
+  </body>
+</html>

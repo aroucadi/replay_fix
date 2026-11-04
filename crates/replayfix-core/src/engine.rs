@@ -263,6 +263,20 @@ enum AutonomousRepairResult {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+struct LiveTaskRef<'a> {
+    task_id: &'a str,
+    target_path: &'a str,
+    buggy_source: &'a str,
+    index_html: &'a str,
+    click_x: i32,
+    click_y: i32,
+    viewport_width: u32,
+    viewport_height: u32,
+    expected_output_text: &'a str,
+    contract: &'a BehavioralContract,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MockHealer;
 
@@ -357,6 +371,51 @@ impl MockHealer {
     /// isolated `ScratchSandbox` over an OS-assigned ephemeral localhost port.
     pub fn run_live_browser_in_repo(
         fixture: &Fixture,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        options: &LiveBrowserOptions,
+    ) -> Result<HealOutcome> {
+        let task_ref = LiveTaskRef {
+            task_id: fixture.task_id,
+            target_path: fixture.target_path,
+            buggy_source: fixture.buggy_source,
+            index_html: fixture.index_html,
+            click_x: fixture.click_x,
+            click_y: fixture.click_y,
+            viewport_width: fixture.viewport_width,
+            viewport_height: fixture.viewport_height,
+            expected_output_text: fixture.expected_output_text,
+            contract: &fixture.contract,
+        };
+        Self::run_live_browser_core(&task_ref, diff, repo_path, extra_excludes, options)
+    }
+
+    /// Run the full two-gate loop in a live Chromium browser for an owned [`DynamicTaskSpec`].
+    pub fn run_live_browser_dynamic(
+        spec: &crate::discovery::DynamicTaskSpec,
+        diff: &str,
+        repo_path: &Path,
+        extra_excludes: &[PathBuf],
+        options: &LiveBrowserOptions,
+    ) -> Result<HealOutcome> {
+        let task_ref = LiveTaskRef {
+            task_id: &spec.task_id,
+            target_path: &spec.target_path,
+            buggy_source: &spec.buggy_source,
+            index_html: &spec.index_html,
+            click_x: spec.click_x,
+            click_y: spec.click_y,
+            viewport_width: spec.viewport_width,
+            viewport_height: spec.viewport_height,
+            expected_output_text: &spec.expected_output_text,
+            contract: &spec.contract,
+        };
+        Self::run_live_browser_core(&task_ref, diff, repo_path, extra_excludes, options)
+    }
+
+    fn run_live_browser_core(
+        fixture: &LiveTaskRef<'_>,
         diff: &str,
         repo_path: &Path,
         extra_excludes: &[PathBuf],
@@ -895,12 +954,22 @@ impl MockHealer {
         }
 
         let stress_quorum_report = if options.stress_quorum || options.mock_flaky {
-            match crate::stress::StressQuorumRunner::evaluate_simulated_quorum(
-                &fixture.contract,
-                &outcome.patched,
-                crate::stress::PerturbationProfile::default(),
-                options.mock_flaky,
-            ) {
+            let quorum_res = if Fixture::for_task(task_id).is_some() {
+                crate::stress::StressQuorumRunner::evaluate_simulated_quorum(
+                    fixture.contract,
+                    &outcome.patched,
+                    crate::stress::PerturbationProfile::default(),
+                    options.mock_flaky,
+                )
+            } else {
+                crate::stress::StressQuorumRunner::evaluate_live_events(
+                    &gate2_events,
+                    &outcome.patched,
+                    crate::stress::PerturbationProfile::default(),
+                    options.mock_flaky,
+                )
+            };
+            match quorum_res {
                 Ok(report) => {
                     if let Some(obs) = &options.observer {
                         obs.on_event(crate::observer::SubstrateEvent::StressQuorumEvaluated {
@@ -1018,7 +1087,7 @@ impl MockHealer {
     /// 180s wall-clock budget), enforcing `TestFreezeGuard`, `StructuredRepairPatch::decode_strict`,
     /// `BlockPatcher::apply`, `SyntaxPreflight::check_file`, and 2-run Gate 2 stability.
     fn execute_autonomous_repair_loop<F>(
-        fixture: &Fixture,
+        fixture: &LiveTaskRef<'_>,
         sandbox: &mut ScratchSandbox,
         initial_source: &str,
         freeze_guard: &TestFreezeGuard,
@@ -1350,7 +1419,7 @@ impl MockHealer {
 
     fn execute_browser_gate(
         bridge: &mut PlaywrightBridge,
-        fixture: &Fixture,
+        fixture: &LiveTaskRef<'_>,
         page_url: &str,
         click_coords: (i32, i32),
         candidate_override: Option<&[DomCandidate]>,
@@ -1452,6 +1521,13 @@ impl MockHealer {
             role: click_role,
             accessible_name: click_name,
             test_id: grounded.candidate.test_id.clone(),
+            selector: if grounded.selector.is_empty() {
+                None
+            } else {
+                Some(grounded.selector.clone())
+            },
+            click_x: Some(click_x),
+            click_y: Some(click_y),
             output_selector: String::new(),
         })?;
 
@@ -1589,8 +1665,20 @@ impl MockHealer {
 
         let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
             if let Some((model_config, client_mode)) = autonomous_config {
+                let task_ref = LiveTaskRef {
+                    task_id: fixture.task_id,
+                    target_path: fixture.target_path,
+                    buggy_source: fixture.buggy_source,
+                    index_html: fixture.index_html,
+                    expected_output_text: fixture.expected_output_text,
+                    click_x: fixture.click_x,
+                    click_y: fixture.click_y,
+                    viewport_width: fixture.viewport_width,
+                    viewport_height: fixture.viewport_height,
+                    contract: &fixture.contract,
+                };
                 let auto_res = Self::execute_autonomous_repair_loop(
-                    fixture,
+                    &task_ref,
                     &mut sandbox,
                     &initial_source,
                     &freeze_guard,

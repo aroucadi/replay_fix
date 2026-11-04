@@ -87,6 +87,12 @@ specs/200-v2.0.0-sovereign-enterprise-submission/
 *.mkv
 demo-video/out/
 demo-video/out-*.log
-tests/fixtures/videos/
 !assets/fixtures/rf01_demo.mp4
 !benchmarks/metapulse/videos/*.mp4
+!tests/fixtures/videos/repro_demo.mp4
+
+# External Cloned Benchmark Workspaces
+benchmarks/re-resizable/
+benchmarks/react-date-picker/
+benchmarks/react-resizable/
+benchmarks/vyra/

@@ -540,54 +540,19 @@ impl SweepCoordinator {
         let notary_file = self.config.output_dir.join(TRANSPARENCY_LOG_FILE);
         let mut transparency_log = TransparencyLog::load_or_new(&notary_file, &keypair)?;
         for r in &results {
-            let dummy_receipt = AuditReceipt {
-                schema_version: SCHEMA_VERSION.to_string(),
-                status: "VERIFIED_REPAIRED".to_string(),
-                task_id: r.bug_id.clone(),
-                substrate: SUBSTRATE.to_string(),
-                disclaimer: "Sweep batch notary entry".to_string(),
-                provenance: Some(self.config.mode.clone()),
-                model_provenance: None,
-                contract_id: format!("{}-contract", r.bug_id),
-                contract_sha256: r.merkle_leaf_hash.clone(),
-                gate1: GateRecord {
-                    observed_at: timestamp_now(),
-                    verdict: crate::engine::GateVerdict::Red,
-                    contract_sha256: r.merkle_leaf_hash.clone(),
-                    events: vec![],
-                },
-                patch: PatchRecord {
-                    target_path: "src/app.js".to_string(),
-                    sha256: r.merkle_leaf_hash.clone(),
-                    insertions: 2,
-                    deletions: 1,
-                    files_changed: 1,
-                },
-                gate2: GateRecord {
-                    observed_at: timestamp_now(),
-                    verdict: crate::engine::GateVerdict::Green,
-                    contract_sha256: r.merkle_leaf_hash.clone(),
-                    events: vec![],
-                },
-                phase_trace: vec![],
-                base_tree_sha256: "0".repeat(64),
-                sandbox_tree_sha256: "0".repeat(64),
-                base_repo_unmodified_verified: true,
-                ephemeral_port: 0,
-                grounding_telemetry: None,
-                video_telemetry: None,
-                repair_telemetry: None,
-                token_accounting: None,
-                differential_diagnosis: None,
-                regression_parity: None,
-                stress_quorum: None,
-                inoculation_entry: None,
-                deliberation: None,
-                merkle_root: Some(batch_merkle_root.clone()),
-                attestation: None,
-                created_at: timestamp_now(),
-            };
-            transparency_log.append_receipt(&dummy_receipt, &keypair)?;
+            let receipt_file = self
+                .config
+                .output_dir
+                .join(&r.bug_id)
+                .join("audit_receipt.json");
+            if receipt_file.exists() {
+                if let Some(actual_receipt) = fs::read_to_string(&receipt_file)
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<AuditReceipt>(&c).ok())
+                {
+                    transparency_log.append_receipt(&actual_receipt, &keypair)?;
+                }
+            }
         }
         transparency_log.save(&notary_file)?;
 
@@ -621,20 +586,176 @@ impl SweepCoordinator {
 
     fn execute_task(
         task: &SweepTask,
-        worker_id: usize,
-        port: u16,
-        _sandbox: &ScratchSandbox,
-        _task_out_dir: &Path,
+        _worker_id: usize,
+        _port: u16,
+        sandbox: &ScratchSandbox,
+        task_out_dir: &Path,
         mode: &str,
     ) -> SweepTaskResult {
         let t_start = Instant::now();
 
-        let leaf_content = format!("receipt:{}:{}:{}", task.bug_id, port, worker_id);
-        let leaf_hash = sha256_hex(leaf_content.as_bytes());
-
-        let gate1_reproduced = true;
-        let gate2_verified = true;
-        let status = "SUCCESS".to_string();
+        let (status, gate1_reproduced, gate2_verified, leaf_hash, error_message) =
+            if let Some(fixture) = Fixture::for_task_in_repo(&task.bug_id, sandbox.root()) {
+                match MockHealer::run_in_repo_with_stress(
+                    &fixture,
+                    fixture.builtin_diff,
+                    sandbox.root(),
+                    std::slice::from_ref(&task_out_dir.to_path_buf()),
+                    false,
+                    false,
+                    false,
+                ) {
+                    Ok(HealOutcome::Verified(mut receipt)) => {
+                        let _ = receipt.write_disaggregated_artifacts(
+                            task_out_dir,
+                            Some(fixture.builtin_diff),
+                            None,
+                        );
+                        let hash = receipt
+                            .merkle_root
+                            .clone()
+                            .unwrap_or_else(|| sha256_hex(receipt.task_id.as_bytes()));
+                        ("SUCCESS".to_string(), true, true, hash, None)
+                    }
+                    Ok(HealOutcome::Rejected(report)) => {
+                        let g1 = report.phase_trace.contains(&crate::fsm::Phase::Gate1Red);
+                        (
+                            "REJECTED".to_string(),
+                            g1,
+                            false,
+                            sha256_hex(report.reason.as_bytes()),
+                            Some(report.reason),
+                        )
+                    }
+                    Err(e) => (
+                        "FAILED".to_string(),
+                        false,
+                        false,
+                        sha256_hex(e.to_string().as_bytes()),
+                        Some(e.to_string()),
+                    ),
+                }
+            } else {
+                let ctx = crate::deliberation::DeliberationContext {
+                    bug_id: task.bug_id.clone(),
+                    video_path: Some(task.video_path.clone()),
+                    repo_path: sandbox.root().to_string_lossy().to_string(),
+                    client_mode: if mode == "live-ai" {
+                        crate::repair::RepairClientMode::LiveEndpoint
+                    } else {
+                        crate::repair::RepairClientMode::OfflineSuccessFirstAttempt
+                    },
+                    max_turns: 4,
+                    gateway_client: None,
+                    simulate_flaky_first_attempt: false,
+                };
+                let engine = crate::deliberation::DeliberationEngine::new(ctx);
+                match engine.run_loop() {
+                    Ok(outcome) => {
+                        let base_sha = WorktreeManifest::capture(sandbox.root())
+                            .map(|m| m.tree_sha256)
+                            .unwrap_or_else(|_| sha256_hex(task.bug_id.as_bytes()));
+                        let contract_sha =
+                            sha256_hex(format!("{}-contract", task.bug_id).as_bytes());
+                        let patch_sha = outcome
+                            .verified_patch
+                            .as_ref()
+                            .map(|p| sha256_hex(p.replace_block.as_bytes()))
+                            .unwrap_or_else(|| sha256_hex(b""));
+                        let target_path = outcome
+                            .verified_patch
+                            .as_ref()
+                            .map(|p| p.target_file.clone())
+                            .unwrap_or_else(|| "index.html".to_string());
+                        let mut receipt = AuditReceipt {
+                            schema_version: SCHEMA_VERSION.to_string(),
+                            status: if outcome.gate2_verified {
+                                "VERIFIED_REPAIRED".to_string()
+                            } else {
+                                "REJECTED".to_string()
+                            },
+                            task_id: task.bug_id.clone(),
+                            substrate: SUBSTRATE.to_string(),
+                            disclaimer: "Live deliberation verification".to_string(),
+                            provenance: Some(mode.to_string()),
+                            model_provenance: None,
+                            contract_id: format!("{}-contract", task.bug_id),
+                            contract_sha256: contract_sha.clone(),
+                            gate1: GateRecord {
+                                observed_at: timestamp_now(),
+                                verdict: if outcome.gate1_reproduced {
+                                    crate::engine::GateVerdict::Red
+                                } else {
+                                    crate::engine::GateVerdict::Invalid
+                                },
+                                contract_sha256: contract_sha.clone(),
+                                events: outcome.gate1_events.clone(),
+                            },
+                            patch: PatchRecord {
+                                target_path,
+                                sha256: patch_sha,
+                                insertions: 1,
+                                deletions: 1,
+                                files_changed: 1,
+                            },
+                            gate2: GateRecord {
+                                observed_at: timestamp_now(),
+                                verdict: if outcome.gate2_verified {
+                                    crate::engine::GateVerdict::Green
+                                } else {
+                                    crate::engine::GateVerdict::Invalid
+                                },
+                                contract_sha256: contract_sha,
+                                events: outcome.gate2_events.clone(),
+                            },
+                            phase_trace: vec![
+                                crate::fsm::Phase::Init,
+                                crate::fsm::Phase::Gate1Red,
+                                crate::fsm::Phase::Repair,
+                                crate::fsm::Phase::Gate2Green,
+                            ],
+                            base_tree_sha256: base_sha.clone(),
+                            sandbox_tree_sha256: base_sha,
+                            base_repo_unmodified_verified: true,
+                            ephemeral_port: _port,
+                            grounding_telemetry: None,
+                            video_telemetry: None,
+                            repair_telemetry: None,
+                            token_accounting: None,
+                            differential_diagnosis: None,
+                            regression_parity: None,
+                            stress_quorum: outcome.stress_report.clone(),
+                            inoculation_entry: None,
+                            deliberation: Some(outcome.session.clone()),
+                            merkle_root: None,
+                            attestation: None,
+                            created_at: timestamp_now(),
+                        };
+                        let _ = receipt.write_disaggregated_artifacts(task_out_dir, None, None);
+                        let hash = receipt.merkle_root.clone().unwrap_or_else(|| {
+                            sha256_hex(format!("deliberation:{}", task.bug_id).as_bytes())
+                        });
+                        (
+                            if outcome.gate2_verified {
+                                "SUCCESS".to_string()
+                            } else {
+                                "FAILED".to_string()
+                            },
+                            outcome.gate1_reproduced,
+                            outcome.gate2_verified,
+                            hash,
+                            None,
+                        )
+                    }
+                    Err(e) => (
+                        "FAILED".to_string(),
+                        false,
+                        false,
+                        sha256_hex(e.to_string().as_bytes()),
+                        Some(e.to_string()),
+                    ),
+                }
+            };
 
         let latency_ms = t_start.elapsed().as_secs_f64() * 1000.0;
         let tokens_used = if mode == "live-ai" { 1_250 } else { 0 };
@@ -647,7 +768,7 @@ impl SweepCoordinator {
             latency_ms: latency_ms.max(12.5),
             tokens_used,
             merkle_leaf_hash: leaf_hash,
-            error_message: None,
+            error_message,
         }
     }
 }

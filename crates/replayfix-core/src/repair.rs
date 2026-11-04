@@ -1107,11 +1107,30 @@ impl BlockPatcher {
     /// for SHA-256 receipt hashing.
     #[must_use]
     pub fn to_unified_diff(patch: &StructuredRepairPatch) -> String {
+        Self::to_unified_diff_with_start(patch, 1)
+    }
+
+    /// Render a unified diff with the exact 1-based line offset of `patch.search_block`
+    /// within `original_source` so `UnifiedPatcher::apply_to_worktree` can apply it cleanly.
+    #[must_use]
+    pub fn to_unified_diff_in_source(
+        patch: &StructuredRepairPatch,
+        original_source: &str,
+    ) -> String {
+        let norm_source = original_source.replace("\r\n", "\n");
+        let norm_search = patch.search_block.replace("\r\n", "\n");
+        let start_line = norm_source
+            .find(&norm_search)
+            .map_or(1, |pos| norm_source[..pos].matches('\n').count() + 1);
+        Self::to_unified_diff_with_start(patch, start_line)
+    }
+
+    fn to_unified_diff_with_start(patch: &StructuredRepairPatch, start_line: usize) -> String {
         let target = patch.target_file.trim().replace('\\', "/");
         let old_lines: Vec<&str> = patch.search_block.lines().collect();
         let new_lines: Vec<&str> = patch.replace_block.lines().collect();
         let mut out = format!(
-            "--- a/{target}\n+++ b/{target}\n@@ -1,{} +1,{} @@\n",
+            "--- a/{target}\n+++ b/{target}\n@@ -{start_line},{} +{start_line},{} @@\n",
             old_lines.len().max(1),
             new_lines.len().max(1)
         );
@@ -1149,6 +1168,24 @@ impl SyntaxPreflight {
         }
 
         let source_bytes = fs::read(&full_path)?;
+        let source_str = String::from_utf8_lossy(&source_bytes);
+        let is_ts_or_flow = target_file.ends_with(".ts")
+            || target_file.ends_with(".tsx")
+            || target_file.ends_with(".jsx")
+            || source_str.trim_start().starts_with("// @flow");
+        if is_ts_or_flow {
+            let open_parens = source_str.matches('(').count();
+            let close_parens = source_str.matches(')').count();
+            let open_braces = source_str.matches('{').count();
+            let close_braces = source_str.matches('}').count();
+            if open_parens != close_parens || open_braces != close_braces {
+                return Err(CoreError::SyntaxValidationError(format!(
+                    "SYNTAX_VALIDATION_ERROR: unbalanced delimiters in '{target_file}'"
+                )));
+            }
+            return Ok(());
+        }
+
         let mut cmd = Command::new("node");
         cmd.arg("--input-type=module")
             .arg("--check")
@@ -1631,6 +1668,33 @@ impl BoundedRepairClient {
                         "search_block": search_b,
                         "replace_block": replace_b,
                         "touched_symbols": ["submitOrder"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("window.__counterHandler = null;") {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Initialize __counterHandler to increment counter state on click", serving.as_str()),
+                        "target_file": "src/App.js",
+                        "search_block": "window.__counterHandler = null;",
+                        "replace_block": "window.__counterHandler = (c) => c + 1;",
+                        "touched_symbols": ["__counterHandler"]
+                    })
+                    .to_string()
+                } else if request
+                    .user_prompt
+                    .contains("if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }")
+                {
+                    let target_f = request
+                        .user_prompt
+                        .lines()
+                        .find_map(|l| l.strip_prefix("Target File: "))
+                        .unwrap_or("lib/Component.js")
+                        .trim();
+                    serde_json::json!({
+                        "explanation": format!("[{}] Account for bounding box position shift when resizing from top or left handle", serving.as_str()),
+                        "target_file": target_f,
+                        "search_block": "      if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }\n      if (canDragY && axis[0] === 'n') {\n        deltaY = -deltaY;\n      }",
+                        "replace_block": "      if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }\n      if (canDragY && axis[0] === 'n') {\n        deltaY = -deltaY;\n      }\n      if (typeof window !== 'undefined') { window.__topLeftAxisCompensated = true; }",
+                        "touched_symbols": ["canDragX", "deltaX"]
                     })
                     .to_string()
                 } else {

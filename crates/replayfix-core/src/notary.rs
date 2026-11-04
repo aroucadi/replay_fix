@@ -395,7 +395,7 @@ fn bytes32_to_hex(bytes: &[u8; 32]) -> String {
 mod tests {
     use super::*;
 
-    fn dummy_receipt(id: &str) -> AuditReceipt {
+    fn test_receipt(id: &str) -> AuditReceipt {
         let gate1 = crate::receipt::GateRecord {
             observed_at: "2026-11-02T00:00:00Z".to_string(),
             verdict: crate::engine::GateVerdict::Red,
@@ -463,7 +463,7 @@ mod tests {
 
         // Append 4 receipts
         for i in 1..=4 {
-            let receipt = dummy_receipt(&format!("RF-0{i}"));
+            let receipt = test_receipt(&format!("RF-0{i}"));
             log.append_receipt(&receipt, &keypair).unwrap();
         }
         assert_eq!(log.tree_size, 4);
@@ -474,7 +474,7 @@ mod tests {
 
         // Append 3 more receipts (total 7)
         for i in 5..=7 {
-            let receipt = dummy_receipt(&format!("RF-0{i}"));
+            let receipt = test_receipt(&format!("RF-0{i}"));
             log.append_receipt(&receipt, &keypair).unwrap();
         }
         assert_eq!(log.tree_size, 7);

@@ -89,6 +89,7 @@ pub struct SamSnapResult {
 #[serde(rename_all = "lowercase")]
 pub enum ActionType {
     Click,
+    Drag,
     Input,
     Navigate,
 }
@@ -98,6 +99,7 @@ impl ActionType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Click => "click",
+            Self::Drag => "drag",
             Self::Input => "input",
             Self::Navigate => "navigate",
         }
@@ -110,6 +112,8 @@ pub struct UserAction {
     pub t_ms: u64,
     pub action_type: ActionType,
     pub sam_snap: SamSnapResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drag_end_css: Option<(i32, i32)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narration_cue: Option<NarrationCue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -660,6 +664,8 @@ pub struct VideoTelemetry {
     pub interaction: InteractionEvidence,
     pub sam_snap: SamSnapResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drag_end_css: Option<(i32, i32)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narration: Option<NarrationCue>,
     pub keyframe_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -857,6 +863,7 @@ impl VideoTelemetry {
                 t_ms: ev.t_ms,
                 action_type: act_type,
                 sam_snap: snap,
+                drag_end_css: None,
                 narration_cue: narration.clone(),
                 latency_ms: sam_latency_ms,
             });
@@ -868,6 +875,7 @@ impl VideoTelemetry {
             video_metadata,
             interaction,
             sam_snap,
+            drag_end_css: None,
             narration,
             keyframe_paths,
             action_trajectory,
@@ -1012,6 +1020,7 @@ data: [DONE]\n";
             t_ms: 500,
             action_type: ActionType::Click,
             sam_snap: snap,
+            drag_end_css: None,
             narration_cue: None,
             latency_ms: Some(42),
         };

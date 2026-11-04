@@ -1,0 +1,68 @@
+[
+  {
+    "type": 4,
+    "data": {
+      "href": "http://localhost:3000/",
+      "width": 1280,
+      "height": 720
+    },
+    "timestamp": 1600000000000
+  },
+  {
+    "type": 2,
+    "data": {
+      "node": {
+        "id": 1,
+        "type": 0,
+        "childNodes": [
+          {
+            "id": 2,
+            "type": 1,
+            "name": "html",
+            "childNodes": [
+              {
+                "id": 3,
+                "type": 1,
+                "name": "body",
+                "childNodes": [
+                  {
+                    "id": 4,
+                    "type": 1,
+                    "name": "button",
+                    "attributes": {
+                      "id": "increment-btn",
+                      "data-testid": "increment-btn"
+                    },
+                    "childNodes": [
+                      {
+                        "id": 5,
+                        "type": 2,
+                        "textContent": "Increment"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "initialOffset": {
+        "top": 0,
+        "left": 0
+      }
+    },
+    "timestamp": 1600000000100
+  },
+  {
+    "type": 3,
+    "data": {
+      "source": 2,
+      "type": 2,
+      "id": 4,
+      "x": 100,
+      "y": 100
+    },
+    "timestamp": 1600000000500
+  }
+]
