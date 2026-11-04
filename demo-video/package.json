@@ -4,9 +4,11 @@
   "description": "",
   "scripts": {
     "audio": "node scripts/gen-audio.mjs",
+    "audio:outro": "node scripts/gen-outro-audio.mjs",
     "build": "tsc --noEmit",
     "start": "remotion studio",
-    "render": "remotion render IntroComposition out/replayfix_intro_20s.mp4 --gl=angle"
+    "render": "remotion render IntroComposition out/replayfix_intro_20s.mp4 --gl=angle",
+    "render:outro": "remotion render OutroComposition out/replayfix_outro_10s.mp4 --codec=h264 --crf=16"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +18,7 @@
   "dependencies": {
     "@remotion/cli": "^4.0.540",
     "@remotion/google-fonts": "^4.0.540",
+    "@remotion/noise": "^4.0.540",
     "@remotion/tailwind": "^4.0.540",
     "@types/react": "^19.3.0",
     "autoprefixer": "^10.6.2",

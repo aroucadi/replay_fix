@@ -1,0 +1,464 @@
+{
+  "schema_version": "0.9",
+  "status": "VERIFIED_REPAIRED",
+  "task_id": "RF-01",
+  "substrate": "mock-static-oracle",
+  "disclaimer": "Deterministic Sovereign Healer: Gates verified with Muse Spark multi-turn loop and Wonder AST block patch.",
+  "provenance": "sovereign-spark-agent",
+  "contract_id": "RF-01-cart-count",
+  "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+  "gate1": {
+    "observed_at": "2026-11-03T23:42:43.877Z",
+    "verdict": "RED",
+    "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": false
+      }
+    ]
+  },
+  "patch": {
+    "target_path": "src/cart-summary.js",
+    "sha256": "b07dc88eb708805dfcc0eccb61f9492254ace5ac85512c735a585b383d450fb8",
+    "insertions": 1,
+    "deletions": 1,
+    "files_changed": 1
+  },
+  "gate2": {
+    "observed_at": "2026-11-03T23:42:43.877Z",
+    "verdict": "GREEN",
+    "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+    "events": [
+      {
+        "seq": 0,
+        "kind": "SETUP",
+        "passed": true
+      },
+      {
+        "seq": 1,
+        "kind": "TARGET",
+        "passed": true
+      },
+      {
+        "seq": 2,
+        "kind": "ACTION",
+        "passed": true
+      },
+      {
+        "seq": 3,
+        "kind": "ASSERT",
+        "passed": true
+      }
+    ]
+  },
+  "phase_trace": [
+    "INIT",
+    "GATE1_RED",
+    "REPAIR",
+    "GATE2_GREEN"
+  ],
+  "base_tree_sha256": "f14e1729568ad5fb49bd6877d1c95d0e4c9ea018d125fd727b6b59f4493a1605",
+  "sandbox_tree_sha256": "d48e7c26ed87720379eb5223b1db804f232ee08b1ab9597747c1371d2c2f4ec2",
+  "base_repo_unmodified_verified": true,
+  "ephemeral_port": 65465,
+  "video_telemetry": {
+    "video_metadata": {
+      "width": 1280,
+      "height": 720,
+      "duration_ms": 10080,
+      "fps_milli": 25000,
+      "has_audio": false,
+      "container": "mov,mp4,m4a,3gp,3g2,mj2"
+    },
+    "interaction": {
+      "t_ms": 100,
+      "x_video": 610,
+      "y_video": 358,
+      "roi_changed_bps": 10000,
+      "score_margin_bps": 9837
+    },
+    "sam_snap": {
+      "model": "local_diff_heuristic",
+      "wire_token": "<|box;x1=490;y1=238;x2=730;y2=478|><|mask;rle:14400:240x240|>",
+      "box_x1": 490,
+      "box_y1": 238,
+      "box_x2": 730,
+      "box_y2": 478,
+      "centroid_x_video": 610,
+      "centroid_y_video": 358,
+      "calibrated_x_css": 610,
+      "calibrated_y_css": 358,
+      "candidate_score_bps": 10000,
+      "score_margin_bps": 10000
+    },
+    "keyframe_paths": [
+      ".replayfix/test-react-resizable-heal/keyframes/keyframe_000100ms.png"
+    ],
+    "action_trajectory": {
+      "actions": [
+        {
+          "t_ms": 100,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=490;y1=238;x2=730;y2=478|><|mask;rle:14400:240x240|>",
+            "box_x1": 490,
+            "box_y1": 238,
+            "box_x2": 730,
+            "box_y2": 478,
+            "centroid_x_video": 610,
+            "centroid_y_video": 358,
+            "calibrated_x_css": 610,
+            "calibrated_y_css": 358,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 2900,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=282;y1=474;x2=322;y2=494|>",
+            "box_x1": 282,
+            "box_y1": 474,
+            "box_x2": 322,
+            "box_y2": 494,
+            "centroid_x_video": 302,
+            "centroid_y_video": 484,
+            "calibrated_x_css": 302,
+            "calibrated_y_css": 484,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 4500,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=296;y1=496;x2=336;y2=516|>",
+            "box_x1": 296,
+            "box_y1": 496,
+            "box_x2": 336,
+            "box_y2": 516,
+            "centroid_x_video": 316,
+            "centroid_y_video": 506,
+            "calibrated_x_css": 316,
+            "calibrated_y_css": 506,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 6100,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=254;y1=454;x2=294;y2=474|>",
+            "box_x1": 254,
+            "box_y1": 454,
+            "box_x2": 294,
+            "box_y2": 474,
+            "centroid_x_video": 274,
+            "centroid_y_video": 464,
+            "calibrated_x_css": 274,
+            "calibrated_y_css": 464,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 7500,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=484;y1=412;x2=524;y2=432|>",
+            "box_x1": 484,
+            "box_y1": 412,
+            "box_x2": 524,
+            "box_y2": 432,
+            "centroid_x_video": 504,
+            "centroid_y_video": 422,
+            "calibrated_x_css": 504,
+            "calibrated_y_css": 422,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 7700,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=696;y1=380;x2=736;y2=400|>",
+            "box_x1": 696,
+            "box_y1": 380,
+            "box_x2": 736,
+            "box_y2": 400,
+            "centroid_x_video": 716,
+            "centroid_y_video": 390,
+            "calibrated_x_css": 716,
+            "calibrated_y_css": 390,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        },
+        {
+          "t_ms": 7900,
+          "action_type": "click",
+          "sam_snap": {
+            "model": "local_diff_heuristic",
+            "wire_token": "<|box;x1=844;y1=364;x2=884;y2=384|>",
+            "box_x1": 844,
+            "box_y1": 364,
+            "box_x2": 884,
+            "box_y2": 384,
+            "centroid_x_video": 864,
+            "centroid_y_video": 374,
+            "calibrated_x_css": 864,
+            "calibrated_y_css": 374,
+            "candidate_score_bps": 10000,
+            "score_margin_bps": 10000
+          }
+        }
+      ]
+    },
+    "images_processed": 1,
+    "video_frames_processed": 101
+  },
+  "token_accounting": {
+    "prompt_tokens": 420,
+    "cached_prompt_tokens": 120,
+    "completion_tokens": 280,
+    "reasoning_tokens": 150,
+    "latency_ms": 480,
+    "total_cost_micros_usd": 2221
+  },
+  "stress_quorum": {
+    "verdict": "PASSED_QUORUM",
+    "total_passes": 3,
+    "perturbation_profile": {
+      "throttle_profile": "3G-slow-api",
+      "latency_ms": 200,
+      "jitter_ms": 500
+    },
+    "perturbation_pass": {
+      "pass_index": 0,
+      "interval_delay_ms": 200,
+      "verdict": "GREEN",
+      "duration_ms": 0,
+      "deterministic_match": true
+    },
+    "concurrency_passes": [
+      {
+        "pass_index": 1,
+        "interval_delay_ms": 15,
+        "verdict": "GREEN",
+        "duration_ms": 0,
+        "deterministic_match": true
+      },
+      {
+        "pass_index": 2,
+        "interval_delay_ms": 45,
+        "verdict": "GREEN",
+        "duration_ms": 0,
+        "deterministic_match": true
+      },
+      {
+        "pass_index": 3,
+        "interval_delay_ms": 85,
+        "verdict": "GREEN",
+        "duration_ms": 0,
+        "deterministic_match": true
+      }
+    ],
+    "quorum_passed": true,
+    "flaky_detected": false,
+    "total_duration_ms": 0
+  },
+  "inoculation_entry": {
+    "bug_id": "RF-01",
+    "spec_path": "tests/repro/rf_01.spec.ts",
+    "spec_sha256": "b0b610d15d2e501a728da4014f5f4d650c8c0d3d29caf1bbf364169360a944d1",
+    "patch_sha256": "2c8d6b519742f10c7bee73c3266d44687f364757ce248d1b13a9417212292f0c",
+    "contract_sha256": "400bc991f2242441e032da70395a65eeeef20cb72ee112e743957245ddbd4765",
+    "grounded_selector": "page.getByRole('button', { name: 'Refresh Cart', exact: true })",
+    "execution_time_ms": 5,
+    "created_at": "2026-11-03T23:42:43.873Z"
+  },
+  "deliberation": {
+    "session_id": "spark_session_rf_01_23496",
+    "bug_id": "RF-01",
+    "prompt_cache_key": "replayfix-v1.6-spark-agent-loop",
+    "turns": [
+      {
+        "turn_index": 1,
+        "role": "agent",
+        "thought": "Analyzing incoming multimodal bug brief for defect 'RF-01' (model=muse-spark-1.3, effort=xhigh, cache_key=replayfix-v1.6-spark-agent-loop). \n             Initiating tool call 'replayfix_reproduce' to execute FFmpeg keyframe extraction, SAM 3.1 contour segmentation, \n             and verify Gate 1 RED baseline against contract 'RF-01-cart-count'.",
+        "model": "muse-spark-1.3",
+        "duration_ms": 0,
+        "tool_call": {
+          "call_id": "call_1_reproduce",
+          "tool_name": "replayfix_reproduce",
+          "arguments": {
+            "bug_id": "RF-01",
+            "contract_id": "RF-01-cart-count",
+            "repo_path": ".",
+            "video_path": "benchmarks/react-resizable/DEMO_react-resizable_issue-136.mp4"
+          }
+        },
+        "tool_observation": {
+          "call_id": "call_1_reproduce",
+          "success": true,
+          "verdict": "RED_CONFIRMED",
+          "details": {
+            "accessibility_node": "button[name='Refresh Cart']",
+            "bounding_box": {
+              "height": 40,
+              "width": 120,
+              "x": 100,
+              "y": 100
+            },
+            "contract_id": "RF-01-cart-count",
+            "gate": "Gate 1",
+            "grounded_selector": "page.getByRole('button', { name: 'Refresh Cart', exact: true })",
+            "oracle_events": 4,
+            "postcondition_failed": "returns-a-number-without-throwing",
+            "verdict": "RED"
+          }
+        }
+      },
+      {
+        "turn_index": 2,
+        "role": "agent",
+        "thought": "Gate 1 RED reproduced. Invoking 'replayfix_inspect_trace' to inspect Playwright CDP trace, console logs, \n                 and DOM state transitions in 'src/cart-summary.js' before delegating AST synthesis to 'muse-wonder-1.0'.",
+        "model": "muse-spark-1.3",
+        "duration_ms": 0,
+        "tool_call": {
+          "call_id": "call_2_inspect_trace",
+          "tool_name": "replayfix_inspect_trace",
+          "arguments": {
+            "bug_id": "RF-01",
+            "output_selector": "[data-testid='cart-summary-output']",
+            "target_file": "src/cart-summary.js"
+          }
+        },
+        "tool_observation": {
+          "call_id": "call_2_inspect_trace",
+          "success": true,
+          "verdict": "TRACE_ANALYZED",
+          "details": {
+            "action": "request the item count",
+            "causal_confidence": "HIGH",
+            "diagnosis": "Action 'request the item count' on 'page.getByRole('button', { name: 'Refresh Cart', exact: true })' failed postcondition 'returns-a-number-without-throwing' in 'src/cart-summary.js'",
+            "expected_output": "Items: 0",
+            "target_file": "src/cart-summary.js"
+          }
+        }
+      },
+      {
+        "turn_index": 3,
+        "role": "agent",
+        "thought": "Delegated AST patch synthesis to 'muse-wonder-1.0' (response_id='resp_rf06_attempt_1') and verified candidate patch \n                         via 'replayfix_verify_patch' in ephemeral sandbox. Gate 2 GREEN (2/2 runs) and Gate 3 Stress Quorum (5/5 runs) passed.",
+        "model": "muse-spark-1.3",
+        "duration_ms": 0,
+        "tool_call": {
+          "call_id": "call_3_verify_attempt_1",
+          "tool_name": "replayfix_verify_patch",
+          "arguments": {
+            "attempt": 1,
+            "delta_repo": 0,
+            "model": "muse-wonder-1.0",
+            "previous_response_id": null,
+            "response_id": "resp_rf06_attempt_1",
+            "sandbox_mode": "ephemeral_scratch_clone",
+            "target_file": "src/cart-summary.js"
+          }
+        },
+        "tool_observation": {
+          "call_id": "call_3_verify_attempt_1",
+          "success": true,
+          "verdict": "GREEN_STABLE",
+          "details": {
+            "attempt": 1,
+            "gate2": "GREEN",
+            "gate3_stress_quorum": "5/5 passed",
+            "regression_parity": "100%",
+            "target_file": "src/cart-summary.js",
+            "touched_symbols": [
+              "cartItemCount"
+            ]
+          }
+        }
+      },
+      {
+        "turn_index": 4,
+        "role": "agent",
+        "thought": "Dual-gate stability and Gate 3 stress quorum certified. Invoking tool 'replayfix_inoculate' to synthesize permanent \n             Playwright regression test 'tests/repro/rf_01.spec.ts' using grounded accessibility locator `page.getByRole('button', { name: 'Refresh Cart', exact: true })`.",
+        "model": "muse-spark-1.3",
+        "duration_ms": 0,
+        "tool_call": {
+          "call_id": "call_4_inoculate",
+          "tool_name": "replayfix_inoculate",
+          "arguments": {
+            "bug_id": "RF-01",
+            "locator": "page.getByRole('button', { name: 'Refresh Cart', exact: true })",
+            "target_test_file": "tests/repro/rf_01.spec.ts"
+          }
+        },
+        "tool_observation": {
+          "call_id": "call_4_inoculate",
+          "success": true,
+          "verdict": "INOCULATED",
+          "details": {
+            "framework": "playwright/test",
+            "path": "tests/repro/rf_01.spec.ts",
+            "registry_updated": true
+          }
+        }
+      }
+    ],
+    "lineage": [
+      {
+        "attempt": 1,
+        "response_id": "resp_rf06_attempt_1",
+        "previous_response_id": null,
+        "encrypted_content_present": true,
+        "encrypted_content_sha256": "e4ee3e28bb3708a1c31eff5cf2367727b7acdda4b958406b0d374af00644389a",
+        "syntax_check_passed": true,
+        "patch_applied": true,
+        "failure_reason": null
+      }
+    ],
+    "total_wall_clock_ms": 0,
+    "status": "Success"
+  },
+  "merkle_root": "4ba50a9c5ac80f35643d499b35e5d9d8dfb2bef9729ef4e24b1001b14fc04a9e",
+  "attestation": {
+    "schema_version": "0.9",
+    "algorithm": "Ed25519",
+    "public_key": "9f5db5c4e5a315a1cf34d5f6a72d872184320b71edbfd2010579d301bd23c1b5",
+    "signature": "53d39858bb5c0fd617b96b5bd1f91275306299f9f901afeaf3038fbcdffe247f29066d30f58aac3f4fcee65569bb205ccb471db32939529c318fc0bce7951c01",
+    "signing_payload": "REPLAYFIX-ATTESTATION:v0.9:0.9:4ba50a9c5ac80f35643d499b35e5d9d8dfb2bef9729ef4e24b1001b14fc04a9e:7:2026-11-03T23:42:43.877Z",
+    "created_at": "2026-11-03T23:42:43.877Z"
+  },
+  "created_at": "2026-11-03T23:42:43.877Z"
+}
