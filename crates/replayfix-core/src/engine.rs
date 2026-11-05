@@ -1125,7 +1125,7 @@ impl MockHealer {
                         has_video,
                         sam_is_live,
                         has_stress,
-                        false,
+                        true,
                     )
                 } else {
                     crate::receipt::StageExecutionMatrix::deterministic_mock(has_video)

@@ -1905,11 +1905,22 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 }
             }
 
+            if let Some(ref sc) = receipt.stage_classification {
+                ui::print_stage_classification(theme, sc);
+            }
             println!();
-            println!(
-                "  {} Next: inspect audit receipt or pass --live-browser --headed to watch Chromium replay.",
-                theme.info(Symbols::ARROW_RIGHT)
-            );
+            if extras.live_browser && m.headed {
+                println!(
+                    "  {} Next: headed Chromium replay verified — inspect audit receipt at {} or pass --apply to apply patch.",
+                    theme.info(Symbols::ARROW_RIGHT),
+                    path.display()
+                );
+            } else {
+                println!(
+                    "  {} Next: inspect audit receipt or pass --live-browser --headed to watch Chromium replay.",
+                    theme.info(Symbols::ARROW_RIGHT)
+                );
+            }
             println!();
             exit(exit_codes::SUCCESS);
         }
