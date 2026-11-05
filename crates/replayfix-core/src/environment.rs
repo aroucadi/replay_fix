@@ -286,6 +286,22 @@ impl ManagedSpaServer {
         SpaToolchain::detect(repo_dir).is_ok()
     }
 
+    /// Returns `true` when `working_dir` has a detectable `package.json` dev/start script AND
+    /// the required runtime (`node <script>` file or `node_modules`) is present on disk.
+    #[must_use]
+    pub fn is_runnable(working_dir: &Path, base_repo: Option<&Path>) -> bool {
+        let Ok((_, prog, args)) = SpaToolchain::detect(working_dir) else {
+            return false;
+        };
+        if prog == "node" {
+            return args
+                .first()
+                .is_some_and(|script| working_dir.join(script).is_file());
+        }
+        working_dir.join("node_modules").is_dir()
+            || base_repo.is_some_and(|b| b.join("node_modules").is_dir())
+    }
+
     /// Alias for [`Self::has_package_json`].
     #[must_use]
     pub fn is_managed_spa(repo_dir: &Path) -> bool {

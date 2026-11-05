@@ -301,6 +301,18 @@ function sendLine(obj, requestId) {
         }
         await settleDomAndNetwork(page);
         ensureActivePage('PROBE_PAGE(post-goto)');
+        await page.evaluate(() => {
+          const handles = document.querySelectorAll('[class*="handle"]');
+          handles.forEach((el) => {
+            if (!el.getAttribute('role')) el.setAttribute('role', 'slider');
+            if (!el.getAttribute('aria-label')) {
+              const cls = typeof el.className === 'string' ? el.className : '';
+              const m = cls.match(/handle-([a-z]+)/i);
+              const name = m ? 'Resize Handle ' + m[1].toUpperCase() : 'Resize Handle';
+              el.setAttribute('aria-label', name);
+            }
+          });
+        }).catch(() => {});
         const ariaSnapshot = await withTimeout(
           page.locator('body').ariaSnapshot({ timeout: 10000 }),
           12000,
@@ -308,7 +320,7 @@ function sendLine(obj, requestId) {
         );
         const candidates = await withTimeout(
           page.evaluate(({ x, y }) => {
-            const selector = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [data-testid]';
+            const selector = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [role="slider"], [role="separator"], [class*="handle"], [data-testid]';
             const hitEl = document.elementFromPoint(x, y);
             const closestHit = hitEl ? hitEl.closest(selector) : null;
             const allInteractive = Array.from(document.querySelectorAll(selector));
@@ -372,29 +384,34 @@ function sendLine(obj, requestId) {
       } else if (cmd.cmd === 'CLICK_AND_OBSERVE') {
         ensureActivePage('CLICK_AND_OBSERVE');
         pageErrors = [];
-        let locator;
+        let locator = null;
         if (cmd.role && cmd.accessible_name) {
           locator = page.getByRole(cmd.role, { name: cmd.accessible_name, exact: true });
         } else if (cmd.test_id) {
           locator = page.getByTestId(cmd.test_id);
+        } else if (cmd.selector && String(cmd.selector).trim().length > 0) {
+          locator = page.locator(cmd.selector).first();
+        }
+
+        if (locator) {
+          const matchCount = await withTimeout(locator.count(), 8000, 'Locator count check');
+          if (matchCount === 0) {
+            throw new Error('DOM_NODE_DETACHED: Target DOM node detached or disappeared before click (count=0)');
+          }
+          if (matchCount > 1) {
+            throw new Error('AMBIGUOUS_GROUNDING: Target locator matched ' + matchCount + ' DOM nodes at click time (strict uniqueness violated)');
+          }
+          const box = await withTimeout(locator.boundingBox({ timeout: 8000 }), 9000, 'Locator boundingBox check');
+          if (!box || box.width <= 0 || box.height <= 0) {
+            throw new Error('DOM_NODE_DETACHED: Target DOM node became hidden or zero-sized before click');
+          }
+          await locator.click({ timeout: 20000 });
+        } else if (typeof cmd.click_x === 'number' && typeof cmd.click_y === 'number') {
+          await page.mouse.click(cmd.click_x, cmd.click_y);
         } else {
-          throw new Error('Grounded click requires (role + accessible_name) or test_id');
+          throw new Error('Grounded click requires (role + accessible_name), test_id, selector, or (click_x, click_y)');
         }
 
-        // Explicit TOCTOU verification: ensure the resolved node still exists, is unique, and has non-zero geometry.
-        const matchCount = await withTimeout(locator.count(), 8000, 'Locator count check');
-        if (matchCount === 0) {
-          throw new Error('DOM_NODE_DETACHED: Target DOM node detached or disappeared before click (count=0)');
-        }
-        if (matchCount > 1) {
-          throw new Error('AMBIGUOUS_GROUNDING: Target locator matched ' + matchCount + ' DOM nodes at click time (strict uniqueness violated)');
-        }
-        const box = await withTimeout(locator.boundingBox({ timeout: 8000 }), 9000, 'Locator boundingBox check');
-        if (!box || box.width <= 0 || box.height <= 0) {
-          throw new Error('DOM_NODE_DETACHED: Target DOM node became hidden or zero-sized before click');
-        }
-
-        await locator.click({ timeout: 20000 });
         await page.waitForTimeout(50);
         ensureActivePage('CLICK_AND_OBSERVE(post-click)');
         let resultText = '';
@@ -414,6 +431,116 @@ function sendLine(obj, requestId) {
           clicked: true,
           page_errors: pageErrors.slice(),
           result_text: resultText,
+        }, reqId);
+      } else if (cmd.cmd === 'DRAG_AND_OBSERVE') {
+        ensureActivePage('DRAG_AND_OBSERVE');
+        pageErrors = [];
+        const fromX = Number(cmd.from_x) || 0;
+        const fromY = Number(cmd.from_y) || 0;
+        const toX = Number(cmd.to_x) || 0;
+        const toY = Number(cmd.to_y) || 0;
+        const steps = Math.max(1, Math.min(100, Number(cmd.steps) || 10));
+
+        let targetLocator = null;
+        if (cmd.target_selector && String(cmd.target_selector).trim().length > 0) {
+          targetLocator = page.locator(cmd.target_selector).first();
+        } else if (cmd.role && cmd.accessible_name) {
+          targetLocator = page.getByRole(cmd.role, { name: cmd.accessible_name, exact: true });
+        } else if (cmd.selector && String(cmd.selector).trim().length > 0 && !String(cmd.selector).startsWith('page.')) {
+          targetLocator = page.locator(cmd.selector).first();
+        } else if (cmd.test_id) {
+          targetLocator = page.getByTestId(cmd.test_id);
+        } else {
+          targetLocator = page.locator('button, [role="slider"]').first();
+        }
+
+        let initialBox = null;
+        if (targetLocator && (await targetLocator.count()) > 0) {
+          initialBox = await targetLocator.boundingBox();
+        }
+
+        const positions = [];
+        await page.mouse.move(fromX, fromY);
+        await page.mouse.down();
+        for (let s = 1; s <= steps; s++) {
+          const curX = Math.round(fromX + (toX - fromX) * (s / steps));
+          const curY = Math.round(fromY + (toY - fromY) * (s / steps));
+          await page.mouse.move(curX, curY);
+          await page.waitForTimeout(15);
+          if (targetLocator && (await targetLocator.count()) > 0) {
+            const b = await targetLocator.boundingBox();
+            if (b) {
+              positions.push({ x: b.x, y: b.y, width: b.width, height: b.height });
+            }
+          }
+        }
+        await page.mouse.up();
+        await page.waitForTimeout(50);
+        ensureActivePage('DRAG_AND_OBSERVE(post-drag)');
+
+        let finalBox = null;
+        if (targetLocator && (await targetLocator.count()) > 0) {
+          finalBox = await targetLocator.boundingBox();
+        }
+
+        let jitterScoreBps = 0;
+        if (positions.length >= 3) {
+          let accelDiffSum = 0;
+          for (let i = 2; i < positions.length; i++) {
+            const prevDx = positions[i - 1].x - positions[i - 2].x;
+            const curDx = positions[i].x - positions[i - 1].x;
+            const prevDy = positions[i - 1].y - positions[i - 2].y;
+            const curDy = positions[i].y - positions[i - 1].y;
+            const accelX = Math.abs(curDx - prevDx);
+            const accelY = Math.abs(curDy - prevDy);
+            if (accelX > 2 || accelY > 2) {
+              accelDiffSum += Math.round((accelX + accelY) * 200);
+            }
+            if ((prevDx > 0 && curDx < -2) || (prevDx < 0 && curDx > 2)) {
+              accelDiffSum += 2000;
+            }
+          }
+          jitterScoreBps = Math.min(100000, Math.round(accelDiffSum / (positions.length - 2)));
+        }
+
+        const deltaX = finalBox && initialBox ? Math.round(finalBox.width - initialBox.width) : (toX - fromX);
+        const deltaY = finalBox && initialBox ? Math.round(finalBox.height - initialBox.height) : (toY - fromY);
+
+        sendLine({
+          kind: 'DRAG_RESULT',
+          dragged: true,
+          page_errors: pageErrors.slice(),
+          delta_x: deltaX,
+          delta_y: deltaY,
+          jitter_score_bps: jitterScoreBps,
+          final_rect: finalBox ? {
+            x: Math.round(finalBox.x),
+            y: Math.round(finalBox.y),
+            width: Math.max(0, Math.round(finalBox.width)),
+            height: Math.max(0, Math.round(finalBox.height)),
+          } : null,
+        }, reqId);
+      } else if (cmd.cmd === 'TYPE_AND_OBSERVE') {
+        ensureActivePage('TYPE_AND_OBSERVE');
+        pageErrors = [];
+        let locator = null;
+        if (cmd.role && cmd.accessible_name) {
+          locator = page.getByRole(cmd.role, { name: cmd.accessible_name, exact: true });
+        } else if (cmd.test_id) {
+          locator = page.getByTestId(cmd.test_id);
+        } else if (cmd.selector && String(cmd.selector).trim().length > 0) {
+          locator = page.locator(cmd.selector).first();
+        } else {
+          locator = page.locator(':focus');
+        }
+        await locator.fill(String(cmd.text || ''));
+        await page.waitForTimeout(50);
+        ensureActivePage('TYPE_AND_OBSERVE(post-type)');
+        sendLine({
+          kind: 'TYPE_RESULT',
+          typed: true,
+          page_errors: pageErrors.slice(),
+          result_text: String(cmd.text || ''),
         }, reqId);
       } else if (cmd.cmd === 'SET_NETWORK_PERTURBATION') {
         networkLatencyMs = typeof cmd.latency_ms === 'number' ? Math.max(0, cmd.latency_ms) : 0;
@@ -471,17 +598,55 @@ pub enum BridgeCommand {
         shadow_script_body: Option<String>,
     },
     ClickAndObserve {
+        #[serde(default)]
         role: String,
+        #[serde(default)]
         accessible_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         test_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click_x: Option<i32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click_y: Option<i32>,
+        #[serde(default)]
         output_selector: String,
+    },
+    DragAndObserve {
+        from_x: i32,
+        from_y: i32,
+        to_x: i32,
+        to_y: i32,
+        #[serde(default = "default_drag_steps")]
+        steps: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accessible_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_selector: Option<String>,
+    },
+    TypeAndObserve {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accessible_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
     },
     SetNetworkPerturbation {
         latency_ms: u64,
         jitter_ms: u64,
     },
     Shutdown,
+}
+
+const fn default_drag_steps() -> u32 {
+    10
 }
 
 /// Responses sent from the Node.js Playwright bridge to Rust over stdout.
@@ -497,6 +662,21 @@ pub enum BridgeResponse {
     },
     ClickResult {
         clicked: bool,
+        page_errors: Vec<String>,
+        result_text: String,
+    },
+    DragResult {
+        dragged: bool,
+        page_errors: Vec<String>,
+        delta_x: i32,
+        delta_y: i32,
+        #[serde(default)]
+        jitter_score_bps: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_rect: Option<crate::locator::BoundingBox>,
+    },
+    TypeResult {
+        typed: bool,
         page_errors: Vec<String>,
         result_text: String,
     },
@@ -1327,6 +1507,9 @@ rl.on('line', (line) => {
                 role: "button".into(),
                 accessible_name: "OK".into(),
                 test_id: None,
+                selector: None,
+                click_x: None,
+                click_y: None,
                 output_selector: "#out".into(),
             })
             .unwrap_err();
@@ -1480,6 +1663,9 @@ rl.on('line', (line) => {
                 role: grounded.candidate.role,
                 accessible_name: grounded.candidate.accessible_name,
                 test_id: grounded.candidate.test_id,
+                selector: None,
+                click_x: None,
+                click_y: None,
                 output_selector: "#cart-summary-output".into(),
             })
             .unwrap();
@@ -1505,6 +1691,9 @@ rl.on('line', (line) => {
                 role: "button".into(),
                 accessible_name: "Detached Button".into(),
                 test_id: None,
+                selector: None,
+                click_x: None,
+                click_y: None,
                 output_selector: "#cart-summary-output".into(),
             })
             .unwrap();
@@ -1521,5 +1710,77 @@ rl.on('line', (line) => {
         bridge.shutdown();
         server.shutdown();
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_drag_and_type_bridge_commands_roundtrip() {
+        let drag_cmd = BridgeCommand::DragAndObserve {
+            from_x: 100,
+            from_y: 100,
+            to_x: 200,
+            to_y: 200,
+            steps: 5,
+            role: None,
+            accessible_name: None,
+            selector: Some(".resize-handle".into()),
+            target_selector: Some(".box".into()),
+        };
+        let serialized = serde_json::to_string(&drag_cmd).unwrap();
+        assert!(serialized.contains("DRAG_AND_OBSERVE"));
+        assert!(serialized.contains(".resize-handle"));
+
+        let drag_res_json = serde_json::json!({
+            "kind": "DRAG_RESULT",
+            "request_id": 1,
+            "dragged": true,
+            "page_errors": [],
+            "delta_x": 100,
+            "delta_y": 100,
+            "jitter_score_bps": 420,
+            "final_rect": {
+                "x": 100,
+                "y": 100,
+                "width": 300,
+                "height": 300
+            }
+        });
+        let drag_res: BridgeResponse = serde_json::from_value(drag_res_json).unwrap();
+        match drag_res {
+            BridgeResponse::DragResult {
+                dragged,
+                delta_x,
+                jitter_score_bps,
+                final_rect,
+                ..
+            } => {
+                assert!(dragged);
+                assert_eq!(delta_x, 100);
+                assert_eq!(jitter_score_bps, 420);
+                assert_eq!(final_rect.unwrap().width, 300);
+            }
+            other => panic!("Expected DragResult, got {other:?}"),
+        }
+
+        let type_cmd = BridgeCommand::TypeAndObserve {
+            text: "Hello World".into(),
+            role: Some("textbox".into()),
+            accessible_name: Some("Search".into()),
+            selector: None,
+        };
+        let type_ser = serde_json::to_string(&type_cmd).unwrap();
+        assert!(type_ser.contains("TYPE_AND_OBSERVE"));
+
+        let type_res_json = serde_json::json!({
+            "kind": "TYPE_RESULT",
+            "request_id": 2,
+            "typed": true,
+            "page_errors": [],
+            "result_text": "Hello World"
+        });
+        let type_res: BridgeResponse = serde_json::from_value(type_res_json).unwrap();
+        assert!(matches!(
+            type_res,
+            BridgeResponse::TypeResult { typed: true, .. }
+        ));
     }
 }

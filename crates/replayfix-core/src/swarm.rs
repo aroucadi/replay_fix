@@ -496,6 +496,7 @@ impl SwarmCoordinator {
             deliberation: None,
             merkle_root: None,
             attestation: None,
+            stage_classification: None,
             created_at: timestamp_now(),
         };
 

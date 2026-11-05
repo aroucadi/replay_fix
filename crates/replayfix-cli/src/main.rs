@@ -155,10 +155,9 @@ pub struct ReproArgs {
     /// Timeout in milliseconds for application healthcheck readiness
     #[arg(long, default_value = "10000")]
     pub startup_timeout_ms: u64,
-
     /// Run browser replay in visible headed mode
-    #[arg(long)]
-    pub headed: bool,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    pub headed: Option<bool>,
 
     /// Export Playwright trace for visual inspection
     #[arg(long)]
@@ -245,7 +244,7 @@ pub struct ReproArgs {
     pub mock_patch: String,
 
     /// Directory where audit_receipt.json or triage_report.json is written
-    #[arg(long, default_value = ".replayfix")]
+    #[arg(long, visible_alias = "output", default_value = ".replayfix")]
     pub output_dir: String,
 
     /// Dry-run mode: validate environment, manifests, patch, and invariants without execution
@@ -376,6 +375,9 @@ enum Commands {
     },
     /// Synthesize permanent Playwright regression test (tests/repro/rf_<id>.spec.ts) and update .replayfix/inoculations.json (Release 1.5)
     Inoculate {
+        /// Optional path to task manifest JSON
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         /// Bug identifier (e.g. RF-01)
         #[arg(long, default_value = "RF-01")]
         bug: String,
@@ -648,6 +650,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         sentry,
         ..
     } = args;
+    let headed = headed.unwrap_or(false);
 
     if let Some(ref raw_url) = url {
         if let Err(e) = replayfix_core::AttachedSpaEndpoint::parse(raw_url) {
@@ -660,6 +663,18 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
             Ok(m) => Some(m),
             Err(e) => usage_error(&e.to_string(), theme),
         }
+    } else if !mock_heal
+        && !mock_syntax_retry
+        && !mock_failing_repair
+        && !mock_pkg_test_mutation
+        && !mock_ambiguous
+        && !mock_flaky
+        && !mock_regression
+        && mock_patch == "builtin"
+        && replayfix_core::GatewayConfig::default().has_meta_api_key()
+        && video.as_deref().is_some_and(|v| Path::new(v).exists())
+    {
+        Some(ExecutionMode::LiveAi)
     } else {
         None
     };
@@ -708,28 +723,13 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         || replayfix_core::ManagedSpaServer::is_managed_spa(Path::new(&repo))
         || Path::new(&repo).join("public/app.js").exists();
 
-    let inferred_from_video = if task_id.is_none() && bug.is_none() {
-        video.as_deref().and_then(|v| {
-            let lower = Path::new(v)
+    let inferred_from_video: Option<String> = if task_id.is_none() && bug.is_none() {
+        video.as_ref().and_then(|v| {
+            Path::new(v)
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if lower.starts_with("rf01") || lower.starts_with("rf-01") {
-                Some("RF-01")
-            } else if lower.starts_with("rf02") || lower.starts_with("rf-02") {
-                Some("RF-02")
-            } else if lower.starts_with("rf03") || lower.starts_with("rf-03") {
-                Some("RF-03")
-            } else if lower.starts_with("rf04") || lower.starts_with("rf-04") {
-                Some("RF-04")
-            } else if lower.starts_with("rf05") || lower.starts_with("rf-05") {
-                Some("RF-05")
-            } else if is_spa_workspace {
-                Some("RF-01")
-            } else {
-                None
-            }
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
         })
     } else {
         None
@@ -740,8 +740,7 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         || mock_failing_repair
         || mock_syntax_retry
         || mock_pkg_test_mutation;
-    let auto_live_from_video = inferred_from_video.is_some()
-        && !mock_heal
+    let auto_live_from_video = !mock_heal
         && parsed_mode != Some(ExecutionMode::DeterministicFixture)
         && (video.as_deref().is_some_and(|v| Path::new(v).exists()) || is_spa_workspace);
     let live_browser = live_browser || auto_live_from_video || url.is_some();
@@ -894,26 +893,43 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
-    let bug_shorthand = bug.as_deref().or(inferred_from_video).or_else(|| {
-        apm_manifest
-            .as_ref()
-            .and_then(|_| extras.mock_heal.then_some("RF-01"))
-    });
+    let bug_shorthand = bug
+        .as_deref()
+        .or(inferred_from_video.as_deref())
+        .or_else(|| {
+            apm_manifest
+                .as_ref()
+                .and_then(|_| extras.mock_heal.then_some("RF-01"))
+        });
     let id = task_id
         .or_else(|| bug_shorthand.map(str::to_string))
-        .or_else(|| issue_data.as_ref().map(|d| format!("GH-{}-{}", d.issue_ref.repo, d.issue_ref.issue_number)))
+        .or_else(|| {
+            issue_data
+                .as_ref()
+                .map(|d| format!("GH-{}-{}", d.issue_ref.repo, d.issue_ref.issue_number))
+        })
         .or_else(|| apm_manifest.as_ref().map(|m| m.task_id.clone()))
-        .unwrap_or_else(|| {
-            usage_error(
-                "Missing required argument '--task-id' (or specify '--bug' / '--issue' / '--manifest' / '--rrweb' / '--sentry')",
-                theme,
-            )
-        });
+        .or_else(|| {
+            video.as_deref().and_then(|v| {
+                Path::new(v).file_stem().and_then(|s| s.to_str()).map(|s| {
+                    s.chars()
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
+                        .collect::<String>()
+                })
+            })
+        })
+        .unwrap_or_else(|| "task".to_string());
     let bug_branch = bug_ref
         .or_else(|| bug_shorthand.map(|b| format!("bug/{b}")))
         .or_else(|| issue_data.as_ref().map(|_| "HEAD".to_string()))
         .or_else(|| apm_manifest.as_ref().map(|m| m.bug_ref.clone()))
-        .unwrap_or_else(|| usage_error("Missing required argument '--bug-ref'", theme));
+        .unwrap_or_else(|| "HEAD".to_string());
     let video_file = video
         .or_else(|| {
             bug_shorthand.map(|b| {
@@ -1079,59 +1095,70 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     } else {
         "--mock-heal"
     };
-    // Release 1.9: Permanent extinction of "has no built-in fixture for task"
-    // If no built-in regression fixture exists, synthesize a dynamic fixture on the fly.
-    let fixture = match Fixture::for_task_in_repo(&m.task_id, &repo_dir) {
-        Some(f) => f,
-        None => {
-            if extras.mock_heal && extras.mock_patch == "builtin" {
-                usage_error(
-                    &format!(
-                        "Unknown task '{}'. Supported tasks: {}",
-                        m.task_id,
-                        Fixture::supported_tasks().join(", ")
-                    ),
-                    theme,
-                );
+    // Release 2.1: Universal Zero-Shot Pipeline with owned DynamicTaskSpec
+    let fixture_opt =
+        Fixture::for_task_in_repo(&m.task_id, &repo_dir).or_else(|| Fixture::for_task(&m.task_id));
+    if fixture_opt.is_none()
+        && extras.mock_heal
+        && extras.mock_patch == "builtin"
+        && !extras.live_browser
+    {
+        usage_error(
+            &format!(
+                "Unknown task '{}'. Supported tasks: {}",
+                m.task_id,
+                Fixture::supported_tasks().join(", ")
+            ),
+            theme,
+        );
+    }
+
+    let dynamic_spec = if fixture_opt.is_none() {
+        let resolved_source = replayfix_core::discovery::RepoSourceMapper::locate_target_file(
+            &repo_dir,
+            &replayfix_core::discovery::SourceQuery {
+                hint_tokens: &[&m.task_id],
+                ..Default::default()
+            },
+        );
+        let (target_rel_str, source_text) = match resolved_source {
+            Ok(res) => (
+                res.relative_path.to_string_lossy().replace('\\', "/"),
+                res.source_content,
+            ),
+            Err(_) => {
+                let candidates = [
+                    "src/App.js",
+                    "src/App.tsx",
+                    "src/main.js",
+                    "src/main.tsx",
+                    "index.html",
+                ];
+                let found = candidates
+                    .iter()
+                    .find(|c| repo_dir.join(c).exists())
+                    .copied()
+                    .unwrap_or("src/App.js");
+                let content = std::fs::read_to_string(repo_dir.join(found)).unwrap_or_default();
+                (found.to_string(), content)
             }
-            let target_path_leak: &'static str = Box::leak(Box::new("src/App.tsx".to_string()));
-            let task_id_leak: &'static str = Box::leak(Box::new(m.task_id.clone()));
-            Fixture {
-                task_id: task_id_leak,
-                target_path: target_path_leak,
-                buggy_source: "// Dynamic application source",
-                builtin_diff: "",
-                index_html: "",
-                click_x: 100,
-                click_y: 100,
-                viewport_width: 1280,
-                viewport_height: 720,
-                expected_output_text: "",
-                contract: replayfix_core::engine::BehavioralContract {
-                    contract_id: format!("{}-contract", m.task_id),
-                    task_id: m.task_id.clone(),
-                    setup: "Boot managed application server".to_string(),
-                    target: m.task_id.clone(),
-                    action: "Observe user interaction flow".to_string(),
-                    postcondition_id: "executes-without-uncaught-errors".to_string(),
-                },
-            }
-        }
-    };
-    let _dynamic_placeholder = || {
-        let target_path_leak: &'static str = Box::leak(Box::new("src/App.tsx".to_string()));
-        let task_id_leak: &'static str = Box::leak(Box::new(m.task_id.clone()));
-        Fixture {
-            task_id: task_id_leak,
-            target_path: target_path_leak,
-            buggy_source: "// Dynamic application source",
-            builtin_diff: "",
-            index_html: "",
-            click_x: 100,
-            click_y: 100,
+        };
+        let (cx, cy) = if Path::new(&m.video_path).exists() {
+            (160, 120)
+        } else {
+            (100, 100)
+        };
+        Some(replayfix_core::discovery::DynamicTaskSpec {
+            task_id: m.task_id.clone(),
+            target_path: target_rel_str,
+            buggy_source: source_text,
+            builtin_diff: String::new(),
+            index_html: String::new(),
+            click_x: cx,
+            click_y: cy,
             viewport_width: 1280,
             viewport_height: 720,
-            expected_output_text: "",
+            expected_output_text: String::new(),
             contract: replayfix_core::engine::BehavioralContract {
                 contract_id: format!("{}-contract", m.task_id),
                 task_id: m.task_id.clone(),
@@ -1140,10 +1167,69 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                 action: "Observe user interaction flow".to_string(),
                 postcondition_id: "executes-without-uncaught-errors".to_string(),
             },
+        })
+    } else {
+        None
+    };
+
+    let mut repair_mode = resolve_repair_mode(extras);
+    if fixture_opt.is_none() && extras.mock_patch == "builtin" && repair_mode.is_none() {
+        repair_mode = Some(RepairClientMode::OfflineSuccessFirstAttempt);
+    }
+
+    let diff = match fixture_opt {
+        Some(ref f) => load_patch(f, &extras.mock_patch, theme),
+        None => {
+            if extras.mock_patch == "builtin" {
+                if let Some(ref dyn_spec) = dynamic_spec {
+                    if let Ok(mut cfg) = replayfix_core::MuseModelConfig::new(
+                        extras.model.as_deref().unwrap_or(MUSE_SPARK_13_SLUG),
+                        None,
+                    ) {
+                        let prompt = replayfix_core::repair::PromptBuilder::build_user_prompt(
+                            &dyn_spec.task_id,
+                            &dyn_spec.target_path,
+                            &dyn_spec.buggy_source,
+                            "Gate 1 RED",
+                            None,
+                        );
+                        let req =
+                            replayfix_core::repair::RepairRequest::new(1, &cfg, prompt, None, None);
+                        let client = replayfix_core::repair::BoundedRepairClient::new(
+                            repair_mode.unwrap_or_default(),
+                        );
+                        client
+                            .generate(&req, &mut cfg)
+                            .and_then(|resp| {
+                                replayfix_core::repair::StructuredRepairPatch::decode_strict(
+                                    &resp.raw_json_output,
+                                )
+                            })
+                            .map(|patch| {
+                                replayfix_core::repair::BlockPatcher::to_unified_diff_in_source(
+                                    &patch,
+                                    &dyn_spec.buggy_source,
+                                )
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else if extras.mock_patch == "noop" {
+                String::new()
+            } else {
+                std::fs::read_to_string(&extras.mock_patch).unwrap_or_else(|e| {
+                    usage_error(
+                        &format!("Failed to read patch file '{}': {e}", extras.mock_patch),
+                        theme,
+                    )
+                })
+            }
         }
     };
-    let diff = load_patch(&fixture, &extras.mock_patch, theme);
-    let repair_mode = resolve_repair_mode(extras);
 
     print_security_boundary(theme, &m.repo_path, true, true);
 
@@ -1155,6 +1241,12 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         );
         exit(exit_codes::SUCCESS);
     }
+
+    let (vp_w, vp_h) = match (&fixture_opt, &dynamic_spec) {
+        (Some(f), _) => (f.viewport_width, f.viewport_height),
+        (None, Some(d)) => (d.viewport_width, d.viewport_height),
+        (None, None) => (1280, 720),
+    };
 
     let outcome = if extras.live_browser {
         let candidate_override = extras.mock_ambiguous.then(|| {
@@ -1192,7 +1284,26 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         } else {
             None
         };
-        let resolved_video_path = PathBuf::from(&m.video_path);
+        let mut resolved_video_path = PathBuf::from(&m.video_path);
+        if !resolved_video_path.exists() {
+            if let Some(sibling_mp4) = resolved_video_path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty() && p.exists())
+                .and_then(|p| std::fs::read_dir(p).ok())
+                .and_then(|mut entries| {
+                    entries.find_map(|e| {
+                        let path = e.ok()?.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("mp4") {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                })
+            {
+                resolved_video_path = sibling_mp4;
+            }
+        }
         if !resolved_video_path.exists() && extras.execution_mode == Some(ExecutionMode::LiveAi) {
             usage_error(
                 &format!(
@@ -1219,32 +1330,87 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             attached_url: extras.url.clone(),
             observer: None,
         };
-        MockHealer::run_live_browser_in_repo(
-            &fixture,
+        if let Some(ref f) = fixture_opt {
+            MockHealer::run_live_browser_in_repo(
+                f,
+                &diff,
+                &repo_dir,
+                std::slice::from_ref(&out_dir),
+                &opts,
+            )
+        } else if let Some(ref dyn_spec) = dynamic_spec {
+            MockHealer::run_live_browser_dynamic(
+                dyn_spec,
+                &diff,
+                &repo_dir,
+                std::slice::from_ref(&out_dir),
+                &opts,
+            )
+        } else {
+            Err(CoreError::SecurityViolation(
+                "Missing task specification".to_string(),
+            ))
+        }
+    } else if let Some(ref f) = fixture_opt {
+        if let Some(mode) = repair_mode {
+            let slug = extras.model.as_deref().unwrap_or(MUSE_SPARK_13_SLUG);
+            MockHealer::run_autonomous_in_repo(
+                f,
+                &repo_dir,
+                std::slice::from_ref(&out_dir),
+                slug,
+                mode,
+            )
+        } else {
+            MockHealer::run_in_repo_with_stress(
+                f,
+                &diff,
+                &repo_dir,
+                std::slice::from_ref(&out_dir),
+                extras.mock_regression,
+                extras.stress_quorum,
+                extras.mock_flaky,
+            )
+        }
+    } else if let Some(ref dyn_spec) = dynamic_spec {
+        let vpath = if Path::new(&m.video_path).exists() {
+            Some(PathBuf::from(&m.video_path))
+        } else {
+            None
+        };
+        let gw = if extras.execution_mode == Some(ExecutionMode::LiveAi) {
+            Some(MetaGatewayClient::default())
+        } else {
+            None
+        };
+        let opts = LiveBrowserOptions {
+            headed: m.headed,
+            candidate_override: None,
+            video_path: vpath,
+            keyframe_dir: Some(out_dir.join("keyframes")),
+            model_slug: extras.model.clone(),
+            repair_mode,
+            clean_ref: m.clean_ref.clone(),
+            verify_matrix: extras.verify_matrix,
+            mock_regression: extras.mock_regression,
+            stress_quorum: extras.stress_quorum,
+            mock_flaky: extras.mock_flaky,
+            execution_mode: extras.execution_mode,
+            gateway_client: gw,
+            attached_url: extras.url.clone(),
+            observer: None,
+        };
+        MockHealer::run_live_browser_dynamic(
+            dyn_spec,
             &diff,
             &repo_dir,
             std::slice::from_ref(&out_dir),
             &opts,
         )
-    } else if let Some(mode) = repair_mode {
-        let slug = extras.model.as_deref().unwrap_or(MUSE_SPARK_13_SLUG);
-        MockHealer::run_autonomous_in_repo(
-            &fixture,
-            &repo_dir,
-            std::slice::from_ref(&out_dir),
-            slug,
-            mode,
-        )
     } else {
-        MockHealer::run_in_repo_with_stress(
-            &fixture,
-            &diff,
-            &repo_dir,
-            std::slice::from_ref(&out_dir),
-            extras.mock_regression,
-            extras.stress_quorum,
-            extras.mock_flaky,
-        )
+        Err(CoreError::SecurityViolation(
+            "Missing task specification".to_string(),
+        ))
     }
     .unwrap_or_else(|e| {
         if let CoreError::ModelApiError(ref msg) = e {
@@ -1277,7 +1443,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                     if let Ok(vtel) = replayfix_core::VideoTelemetry::ingest_with_mode(
                         vpath,
                         &kf_dir,
-                        (fixture.viewport_width, fixture.viewport_height),
+                        (vp_w, vp_h),
                         &m.task_id,
                         exec_mode,
                         gw_opt.as_ref(),
@@ -1332,6 +1498,18 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             write_artifact(&out_dir, |dir| {
                 receipt.write_disaggregated_artifacts(dir, Some(&diff), None)
             });
+            let notary_file = out_dir.join(replayfix_core::notary::TRANSPARENCY_LOG_FILE);
+            let key_dir = out_dir.join("keys");
+            if let Ok(keypair) =
+                replayfix_core::crypto::KeypairManager::load_or_generate(Some(&key_dir))
+            {
+                if let Ok(mut log) =
+                    replayfix_core::notary::TransparencyLog::load_or_new(&notary_file, &keypair)
+                {
+                    let _ = log.append_receipt(&receipt, &keypair);
+                    let _ = log.save(&notary_file);
+                }
+            }
             let path = out_dir.join(replayfix_core::receipt::AUDIT_RECEIPT_FILE);
             print_step(
                 theme,
@@ -1588,9 +1766,20 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             if extras.inoculate {
                 if let Some(ref matrix_raw) = extras.matrix {
                     let (engines, presets) = replayfix_core::parse_matrix_arg(matrix_raw);
-                    if let Ok(spec) = replayfix_core::InoculationGenerator::synthesize_matrix_spec(
-                        &fixture, &engines, &presets,
-                    ) {
+                    let spec_res = if let Some(ref f) = fixture_opt {
+                        replayfix_core::InoculationGenerator::synthesize_matrix_spec(
+                            f, &engines, &presets,
+                        )
+                    } else if let Some(ref dyn_spec) = dynamic_spec {
+                        replayfix_core::InoculationGenerator::synthesize_matrix_spec_dynamic(
+                            dyn_spec, &engines, &presets,
+                        )
+                    } else {
+                        Err(CoreError::SecurityViolation(
+                            "Missing task spec".to_string(),
+                        ))
+                    };
+                    if let Ok(spec) = spec_res {
                         let spec_path = repo_dir.join(&spec.spec_rel_path);
                         if let Some(parent) = spec_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
@@ -1604,35 +1793,48 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
                         );
                         inoc_spec_opt = Some(spec);
                     }
-                } else if let Ok((spec, _entry, spec_path)) =
-                    replayfix_core::InoculationGenerator::inoculate_workspace(
-                        &fixture, &repo_dir, &out_dir, None,
-                    )
-                {
-                    println!(
-                        "    {} Inoculate : {} (SHA-256: {})",
-                        theme.muted(Symbols::STEP),
-                        spec_path.display(),
-                        short(&spec.spec_sha256)
-                    );
-                    inoc_spec_opt = Some(spec);
+                } else {
+                    let inoc_res = if let Some(ref f) = fixture_opt {
+                        replayfix_core::InoculationGenerator::inoculate_workspace(
+                            f, &repo_dir, &out_dir, None,
+                        )
+                    } else if let Some(ref dyn_spec) = dynamic_spec {
+                        replayfix_core::InoculationGenerator::inoculate_workspace_dynamic(
+                            dyn_spec, &repo_dir, &out_dir,
+                        )
+                    } else {
+                        Err(CoreError::SecurityViolation(
+                            "Missing task spec".to_string(),
+                        ))
+                    };
+                    if let Ok((spec, _entry, spec_path)) = inoc_res {
+                        println!(
+                            "    {} Inoculate : {} (SHA-256: {})",
+                            theme.muted(Symbols::STEP),
+                            spec_path.display(),
+                            short(&spec.spec_sha256)
+                        );
+                        inoc_spec_opt = Some(spec);
+                    }
                 }
             }
             if extras.package_pr {
-                if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
-                    &fixture,
-                    &receipt,
-                    &repo_dir,
-                    &out_dir,
-                    inoc_spec_opt.as_ref(),
-                    false,
-                ) {
-                    println!(
-                        "    {} PR Bundle : {} (branch: {})",
-                        theme.muted(Symbols::STEP),
-                        pkg.pr_markdown_path,
-                        pkg.branch_name
-                    );
+                if let Some(ref f) = fixture_opt {
+                    if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
+                        f,
+                        &receipt,
+                        &repo_dir,
+                        &out_dir,
+                        inoc_spec_opt.as_ref(),
+                        false,
+                    ) {
+                        println!(
+                            "    {} PR Bundle : {} (branch: {})",
+                            theme.muted(Symbols::STEP),
+                            pkg.pr_markdown_path,
+                            pkg.branch_name
+                        );
+                    }
                 }
             }
 
@@ -2073,7 +2275,9 @@ pub fn handle_sweep(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_inoculate(
+    manifest: Option<PathBuf>,
     bug: String,
     repo: String,
     output: PathBuf,
@@ -2082,25 +2286,70 @@ pub fn handle_inoculate(
     matrix: Option<String>,
     theme: &Theme,
 ) {
+    let (bug, repo) = if let Some(ref m_path) = manifest {
+        let m = TaskManifest::from_file(m_path)
+            .unwrap_or_else(|e| fail(e, "Failed to load manifest", theme));
+        (m.task_id, m.repo_path)
+    } else {
+        (bug, repo)
+    };
     let repo_dir = TaskManifest::assert_safe_path(&repo, "repo")
         .unwrap_or_else(|e| usage_error(&format!("Invalid --repo path: {e}"), theme));
-    let out_dir = TaskManifest::assert_safe_path(&output.display().to_string(), "output")
-        .unwrap_or_else(|e| usage_error(&format!("Invalid --output-dir path: {e}"), theme));
+    let is_file_target = output.extension().is_some();
+    let out_dir = if is_file_target {
+        output
+            .parent()
+            .unwrap_or_else(|| Path::new(".replayfix"))
+            .to_path_buf()
+    } else {
+        TaskManifest::assert_safe_path(&output.display().to_string(), "output")
+            .unwrap_or_else(|e| usage_error(&format!("Invalid --output-dir path: {e}"), theme))
+    };
     if !repo_dir.exists() || !repo_dir.is_dir() {
         usage_error(
             &format!("Target repository directory '{repo}' does not exist or is not a directory"),
             theme,
         );
     }
-    let fixture = Fixture::for_task(&bug).unwrap_or_else(|| {
-        usage_error(
-            &format!(
-                "Unknown task '{bug}'. Supported tasks: {}",
-                Fixture::supported_tasks().join(", ")
-            ),
-            theme,
-        )
-    });
+    let fixture_opt = Fixture::for_task(&bug);
+    let dynamic_spec = if fixture_opt.is_none() {
+        let (discovered_path, discovered_source) =
+            match replayfix_core::discovery::RepoSourceMapper::locate_target_file(
+                &repo_dir,
+                &replayfix_core::discovery::SourceQuery {
+                    hint_tokens: &[&bug],
+                    ..Default::default()
+                },
+            ) {
+                Ok(resolved) => {
+                    let rel = resolved.relative_path.to_string_lossy().replace('\\', "/");
+                    (rel, resolved.source_content)
+                }
+                Err(_) => ("src/App.tsx".to_string(), String::new()),
+            };
+        Some(replayfix_core::discovery::DynamicTaskSpec {
+            task_id: bug.clone(),
+            target_path: discovered_path,
+            buggy_source: discovered_source,
+            builtin_diff: String::new(),
+            index_html: String::new(),
+            click_x: 100,
+            click_y: 100,
+            viewport_width: 1280,
+            viewport_height: 720,
+            expected_output_text: String::new(),
+            contract: replayfix_core::engine::BehavioralContract {
+                contract_id: format!("{}-contract", bug),
+                task_id: bug.clone(),
+                setup: "Boot managed application server".to_string(),
+                target: bug.clone(),
+                action: "Observe user interaction flow".to_string(),
+                postcondition_id: "executes-without-uncaught-errors".to_string(),
+            },
+        })
+    } else {
+        None
+    };
 
     let target_root = if repo.trim() == "." {
         &out_dir
@@ -2110,11 +2359,23 @@ pub fn handle_inoculate(
 
     let (spec, entry, written_path) = if let Some(ref matrix_str) = matrix {
         let (engines, presets) = replayfix_core::inoculate::parse_matrix_arg(matrix_str);
-        let spec = replayfix_core::InoculationGenerator::synthesize_matrix_spec(
-            &fixture, &engines, &presets,
-        )
+        let spec = if let Some(ref f) = fixture_opt {
+            replayfix_core::InoculationGenerator::synthesize_matrix_spec(f, &engines, &presets)
+        } else if let Some(ref dyn_spec) = dynamic_spec {
+            replayfix_core::InoculationGenerator::synthesize_matrix_spec_dynamic(
+                dyn_spec, &engines, &presets,
+            )
+        } else {
+            Err(CoreError::SecurityViolation(
+                "Missing task spec".to_string(),
+            ))
+        }
         .unwrap_or_else(|e| fail(e, "Failed to generate matrix inoculation spec", theme));
-        let full_spec_path = target_root.join(&spec.spec_rel_path);
+        let full_spec_path = if is_file_target {
+            output.clone()
+        } else {
+            target_root.join(&spec.spec_rel_path)
+        };
         if let Some(parent) = full_spec_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -2123,13 +2384,25 @@ pub fn handle_inoculate(
             spec.typescript_content.as_bytes(),
         )
         .unwrap_or_else(|e| fail(e, "Failed to write matrix spec", theme));
-        let patch_sha = replayfix_core::digest::sha256_hex(fixture.builtin_diff.as_bytes());
+        let (patch_sha, contract_sha) = if let Some(ref f) = fixture_opt {
+            (
+                replayfix_core::digest::sha256_hex(f.builtin_diff.as_bytes()),
+                f.contract.digest().unwrap_or_default(),
+            )
+        } else if let Some(ref dyn_spec) = dynamic_spec {
+            (
+                replayfix_core::digest::sha256_hex(dyn_spec.buggy_source.as_bytes()),
+                dyn_spec.contract.digest().unwrap_or_default(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
         let entry = replayfix_core::inoculate::InoculationEntry {
-            bug_id: fixture.task_id.to_string(),
+            bug_id: bug.clone(),
             spec_path: spec.spec_rel_path.clone(),
             spec_sha256: spec.spec_sha256.clone(),
             patch_sha256: patch_sha,
-            contract_sha256: fixture.contract.digest().unwrap_or_default(),
+            contract_sha256: contract_sha,
             grounded_selector: spec.grounded_selector.clone(),
             execution_time_ms: 0,
             created_at: replayfix_core::receipt::timestamp_now(),
@@ -2138,35 +2411,59 @@ pub fn handle_inoculate(
         let _ = registry.upsert_and_save(&out_dir, entry.clone());
         (spec, entry, full_spec_path)
     } else {
-        replayfix_core::InoculationGenerator::inoculate_workspace(
-            &fixture,
-            target_root,
-            &out_dir,
-            None,
-        )
-        .unwrap_or_else(|e| fail(e, "Failed to generate inoculation spec", theme))
+        let (spec, entry, default_path) = if let Some(ref f) = fixture_opt {
+            replayfix_core::InoculationGenerator::inoculate_workspace(
+                f,
+                target_root,
+                &out_dir,
+                None,
+            )
+        } else if let Some(ref dyn_spec) = dynamic_spec {
+            replayfix_core::InoculationGenerator::inoculate_workspace_dynamic(
+                dyn_spec,
+                target_root,
+                &out_dir,
+            )
+        } else {
+            Err(CoreError::SecurityViolation(
+                "Missing task spec".to_string(),
+            ))
+        }
+        .unwrap_or_else(|e| fail(e, "Failed to generate inoculation spec", theme));
+        let written_path = if is_file_target {
+            if let Some(parent) = output.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::copy(&default_path, &output);
+            output.clone()
+        } else {
+            default_path
+        };
+        (spec, entry, written_path)
     };
 
     let mut pr_result = None;
     if package_pr {
-        if let Ok(HealOutcome::Verified(receipt)) = MockHealer::run_in_repo_with_stress(
-            &fixture,
-            fixture.builtin_diff,
-            &repo_dir,
-            std::slice::from_ref(&output),
-            false,
-            true,
-            false,
-        ) {
-            if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
-                &fixture,
-                &receipt,
+        if let Some(ref f) = fixture_opt {
+            if let Ok(HealOutcome::Verified(receipt)) = MockHealer::run_in_repo_with_stress(
+                f,
+                f.builtin_diff,
                 &repo_dir,
-                &output,
-                Some(&spec),
+                std::slice::from_ref(&output),
+                false,
+                true,
                 false,
             ) {
-                pr_result = Some(pkg);
+                if let Ok(pkg) = git_packager::GitPrPackager::package_verified_repair(
+                    f,
+                    &receipt,
+                    &repo_dir,
+                    &output,
+                    Some(&spec),
+                    false,
+                ) {
+                    pr_result = Some(pkg);
+                }
             }
         }
     }
@@ -2457,6 +2754,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Some(Commands::Inoculate {
+            manifest,
             bug,
             repo,
             output,
@@ -2464,7 +2762,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             json,
             matrix,
         }) => {
-            handle_inoculate(bug, repo, output, package_pr, json, matrix, &stdout_theme);
+            handle_inoculate(
+                manifest,
+                bug,
+                repo,
+                output,
+                package_pr,
+                json,
+                matrix,
+                &stdout_theme,
+            );
         }
         Some(Commands::Mcp {
             transport,

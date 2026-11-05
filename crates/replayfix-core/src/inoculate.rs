@@ -523,6 +523,208 @@ impl InoculationGenerator {
             spec_sha256,
         })
     }
+
+    /// Synthesize a multi-browser and multi-viewport responsive Playwright matrix test spec
+    /// for an owned [`crate::discovery::DynamicTaskSpec`] without static string leaks.
+    pub fn synthesize_matrix_spec_dynamic(
+        dynamic: &crate::discovery::DynamicTaskSpec,
+        engines: &[String],
+        presets: &[ViewportPreset],
+    ) -> Result<InoculationSpec> {
+        let default_cand = DomCandidate {
+            tag: "button".to_string(),
+            role: "button".to_string(),
+            accessible_name: "Refresh Cart".to_string(),
+            test_id: Some("cart-refresh-btn".to_string()),
+            bbox: crate::locator::BoundingBox {
+                x: dynamic.click_x - 60,
+                y: dynamic.click_y - 20,
+                width: 120,
+                height: 40,
+            },
+            is_element_from_point: true,
+        };
+        let output_selector = "#cart-summary-output".to_string();
+        let grounded_selector = LocatorResolver::synthesize_selector(&default_cand)?;
+        LocatorResolver::validate_selector(&grounded_selector)?;
+
+        let spec_rel_path = format!(
+            "tests/repro/rf_{}_matrix.spec.ts",
+            dynamic
+                .task_id
+                .to_ascii_lowercase()
+                .replace(['-', ' '], "_")
+        );
+        let contract_sha = dynamic.contract.digest()?;
+        let patch_sha = sha256_hex(dynamic.buggy_source.as_bytes());
+
+        let mut ts = String::new();
+        ts.push_str("// REPLAYFIX-INOCULATION-MATRIX: v1.8\n");
+        ts.push_str(&format!("// BUG-ID: {}\n", dynamic.task_id));
+        ts.push_str(&format!("// CONTRACT-SHA256: {contract_sha}\n"));
+        ts.push_str(&format!("// PATCH-SHA256: {patch_sha}\n"));
+        ts.push_str(&format!("// ENGINES: {}\n", engines.join(",")));
+        ts.push_str("import { test, expect } from '@playwright/test';\n\n");
+
+        ts.push_str("const VIEWPORT_PRESETS = [\n");
+        for p in presets {
+            let (cal_x, cal_y) = calibrate_viewport_coords(
+                f64::from(dynamic.click_x),
+                f64::from(dynamic.click_y),
+                1280.0,
+                720.0,
+                f64::from(p.width),
+                f64::from(p.height),
+                p.dpr,
+            );
+            ts.push_str(&format!(
+                "  {{ name: '{}', width: {}, height: {}, dpr: {}, hasTouch: {}, calibratedX: {:.2}, calibratedY: {:.2} }},\n",
+                p.name, p.width, p.height, p.dpr, p.has_touch, cal_x, cal_y
+            ));
+        }
+        ts.push_str("];\n\n");
+
+        ts.push_str(&format!(
+            "test.describe('ReplayFix Multi-Device Inoculation Matrix // {}', () => {{\n",
+            dynamic.task_id
+        ));
+        ts.push_str("  for (const vp of VIEWPORT_PRESETS) {\n");
+        ts.push_str("    test.describe(`Viewport: ${vp.name}`, () => {\n");
+        ts.push_str("      test.use({\n");
+        ts.push_str("        viewport: { width: vp.width, height: vp.height },\n");
+        ts.push_str("        deviceScaleFactor: vp.dpr,\n");
+        ts.push_str("        hasTouch: vp.hasTouch,\n");
+        ts.push_str("      });\n\n");
+        ts.push_str(&format!(
+            "      test(`satisfies {} on ${{vp.name}}`, async ({{ page }}) => {{\n",
+            dynamic.contract.postcondition_id
+        ));
+        ts.push_str("        await page.goto('/');\n");
+        ts.push_str(&format!("        const target = {grounded_selector};\n"));
+        ts.push_str("        await expect(target).toBeVisible();\n");
+        ts.push_str("        await target.click();\n");
+        ts.push_str(&format!(
+            "        const output = page.locator('{output_selector}');\n"
+        ));
+        ts.push_str("        await expect(output).toBeVisible();\n");
+        ts.push_str("      });\n");
+        ts.push_str("    });\n");
+        ts.push_str("  }\n");
+        ts.push_str("});\n");
+
+        let spec_sha256 = sha256_hex(ts.as_bytes());
+
+        Ok(InoculationSpec {
+            bug_id: dynamic.task_id.clone(),
+            spec_rel_path,
+            target_path: dynamic.target_path.clone(),
+            grounded_selector,
+            output_selector,
+            expected_output_text: dynamic.expected_output_text.clone(),
+            typescript_content: ts,
+            spec_sha256,
+        })
+    }
+
+    /// Synthesize and persist an inoculation spec for an owned [`crate::discovery::DynamicTaskSpec`].
+    pub fn inoculate_workspace_dynamic(
+        dynamic: &crate::discovery::DynamicTaskSpec,
+        target_root: &Path,
+        output_dir: &Path,
+    ) -> Result<(InoculationSpec, InoculationEntry, PathBuf)> {
+        let start = Instant::now();
+        let default_cand = DomCandidate {
+            tag: "button".to_string(),
+            role: "button".to_string(),
+            accessible_name: "Refresh Cart".to_string(),
+            test_id: Some("cart-refresh-btn".to_string()),
+            bbox: crate::locator::BoundingBox {
+                x: dynamic.click_x - 60,
+                y: dynamic.click_y - 20,
+                width: 120,
+                height: 40,
+            },
+            is_element_from_point: true,
+        };
+        let output_selector = "#cart-summary-output".to_string();
+        let grounded_selector = LocatorResolver::synthesize_selector(&default_cand)?;
+        LocatorResolver::validate_selector(&grounded_selector)?;
+
+        let spec_rel_path = Self::spec_rel_path_for_bug(&dynamic.task_id);
+        let contract_sha = dynamic.contract.digest()?;
+        let patch_sha = sha256_hex(dynamic.buggy_source.as_bytes());
+
+        let mut ts = String::new();
+        ts.push_str("// REPLAYFIX-INOCULATION-SPEC: v1.5\n");
+        ts.push_str(&format!("// BUG-ID: {}\n", dynamic.task_id));
+        ts.push_str(&format!(
+            "// CONTRACT-ID: {}\n",
+            dynamic.contract.contract_id
+        ));
+        ts.push_str(&format!("// CONTRACT-SHA256: {contract_sha}\n"));
+        ts.push_str(&format!("// PATCH-SHA256: {patch_sha}\n"));
+        ts.push_str(&format!("// TARGET-PATH: {}\n", dynamic.target_path));
+        ts.push_str("import { test, expect } from '@playwright/test';\n\n");
+        ts.push_str(&format!(
+            "test.describe('ReplayFix Permanent Inoculation // {}', () => {{\n",
+            dynamic.task_id
+        ));
+        ts.push_str(&format!(
+            "  test('{}: {} satisfies {}', async ({{ page }}) => {{\n",
+            dynamic.task_id, dynamic.contract.action, dynamic.contract.postcondition_id
+        ));
+        ts.push_str("    const pageErrors: Error[] = [];\n");
+        ts.push_str("    page.on('pageerror', (err) => pageErrors.push(err));\n\n");
+        ts.push_str("    await page.goto('/');\n");
+        ts.push_str(&format!("    const target = {grounded_selector};\n"));
+        ts.push_str("    await expect(target).toBeVisible();\n");
+        ts.push_str("    await target.click();\n\n");
+        ts.push_str("    expect(pageErrors).toHaveLength(0);\n");
+        ts.push_str("  });\n");
+        ts.push_str("});\n");
+
+        let spec_sha256 = sha256_hex(ts.as_bytes());
+        let spec = InoculationSpec {
+            bug_id: dynamic.task_id.clone(),
+            spec_rel_path,
+            target_path: dynamic.target_path.clone(),
+            grounded_selector,
+            output_selector,
+            expected_output_text: dynamic.expected_output_text.clone(),
+            typescript_content: ts,
+            spec_sha256,
+        };
+
+        let full_spec_path = target_root.join(&spec.spec_rel_path);
+        if let Some(parent) = full_spec_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        atomic_write_file(&full_spec_path, spec.typescript_content.as_bytes())?;
+
+        let out_spec_path = output_dir.join(&spec.spec_rel_path);
+        if out_spec_path != full_spec_path {
+            if let Some(parent) = out_spec_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            atomic_write_file(&out_spec_path, spec.typescript_content.as_bytes())?;
+        }
+
+        let entry = InoculationEntry {
+            bug_id: dynamic.task_id.clone(),
+            spec_path: spec.spec_rel_path.clone(),
+            spec_sha256: spec.spec_sha256.clone(),
+            patch_sha256: patch_sha,
+            contract_sha256: contract_sha,
+            grounded_selector: spec.grounded_selector.clone(),
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            created_at: timestamp_now(),
+        };
+
+        let mut registry = InoculationRegistry::load_or_new(output_dir);
+        registry.upsert_and_save(output_dir, entry.clone())?;
+
+        Ok((spec, entry, full_spec_path))
+    }
 }
 
 /// Supported responsive viewport preset for multi-device inoculation.

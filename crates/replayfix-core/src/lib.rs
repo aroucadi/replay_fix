@@ -19,6 +19,7 @@ pub mod dashboard;
 pub mod deliberation;
 pub mod diffguard;
 pub mod digest;
+pub mod discovery;
 pub mod doctor;
 pub mod engine;
 pub mod environment;
@@ -75,6 +76,7 @@ pub use deliberation::{
 };
 pub use diffguard::DiffGuard;
 pub use digest::{canonical_json, sha256_hex};
+pub use discovery::{RepoSourceMapper, ResolvedTargetSource, SourceQuery};
 pub use doctor::{DependencyCheck, DependencyStatus, Doctor, DoctorReport};
 pub use engine::{
     BehavioralContract, GateVerdict, HealOutcome, LiveBrowserOptions, MockHealer, OracleEvent,

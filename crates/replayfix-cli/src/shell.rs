@@ -155,6 +155,7 @@ impl AgentShell {
                 }
                 AgentIntent::InoculateTask { task_id } => {
                     crate::handle_inoculate(
+                        None,
                         task_id,
                         self.repo_path.display().to_string(),
                         self.output_dir.clone(),

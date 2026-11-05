@@ -35,6 +35,10 @@ pub enum NotaryActions {
     },
     /// Verify the cryptographic integrity and Ed25519 attestation of the transparency log
     VerifyLog {
+        /// Optional positional path to transparency_log.json
+        #[arg(index = 1)]
+        path: Option<PathBuf>,
+
         /// Path to transparency_log.json (default: .replayfix/transparency_log.json)
         #[arg(long)]
         log: Option<PathBuf>,
@@ -114,12 +118,14 @@ pub fn run_notary_cmd(args: NotaryArgs) -> Result<i32> {
             Ok(0)
         }
         NotaryActions::VerifyLog {
+            path,
             log,
             trusted_key,
             json,
         } => {
-            let log_path =
-                log.unwrap_or_else(|| PathBuf::from(".replayfix").join(TRANSPARENCY_LOG_FILE));
+            let log_path = path
+                .or(log)
+                .unwrap_or_else(|| PathBuf::from(".replayfix").join(TRANSPARENCY_LOG_FILE));
             if !log_path.exists() {
                 return Err(CoreError::Notary(format!(
                     "Transparency log does not exist at {}",

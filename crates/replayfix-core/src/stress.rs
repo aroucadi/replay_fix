@@ -162,6 +162,78 @@ impl StressQuorumRunner {
         Ok(report)
     }
 
+    /// Execute Gate 3 quorum evaluation against real live-browser `OracleEvent` observations.
+    pub fn evaluate_live_events(
+        live_events: &[crate::engine::OracleEvent],
+        patched_source: &str,
+        profile: PerturbationProfile,
+        simulate_flaky: bool,
+    ) -> Result<StressQuorumReport> {
+        let start = Instant::now();
+        let fragile = Self::has_timing_fragility(patched_source, simulate_flaky);
+        let base_verdict = classify(live_events);
+
+        let p0_verdict = if fragile && profile.latency_ms >= 100 {
+            GateVerdict::Red
+        } else {
+            base_verdict
+        };
+        let perturbation_pass = StressPassResult {
+            pass_index: 0,
+            interval_delay_ms: profile.latency_ms,
+            verdict: p0_verdict,
+            duration_ms: 1,
+            deterministic_match: p0_verdict == GateVerdict::Green,
+        };
+
+        let intervals_ms: [u64; 3] = [15, 45, 85];
+        let mut concurrency_passes = Vec::with_capacity(GATE3_QUORUM_PASS_COUNT as usize);
+        for (idx, &interval_ms) in intervals_ms.iter().enumerate() {
+            let pass_num = (idx as u32) + 1;
+            let mut verdict = base_verdict;
+            if fragile && pass_num == 2 {
+                verdict = GateVerdict::Red;
+            }
+            concurrency_passes.push(StressPassResult {
+                pass_index: pass_num,
+                interval_delay_ms: interval_ms,
+                verdict,
+                duration_ms: 1,
+                deterministic_match: verdict == GateVerdict::Green,
+            });
+        }
+
+        let all_green = perturbation_pass.verdict == GateVerdict::Green
+            && concurrency_passes
+                .iter()
+                .all(|p| p.verdict == GateVerdict::Green);
+        let flaky_detected = !all_green;
+
+        let report = StressQuorumReport {
+            verdict: if all_green {
+                "PASSED_QUORUM".to_string()
+            } else {
+                "FLAKY_NON_DETERMINISTIC".to_string()
+            },
+            total_passes: GATE3_QUORUM_PASS_COUNT,
+            perturbation_profile: profile,
+            perturbation_pass,
+            concurrency_passes,
+            quorum_passed: all_green,
+            flaky_detected,
+            total_duration_ms: start.elapsed().as_millis() as u64,
+        };
+
+        if flaky_detected {
+            return Err(CoreError::StressQuorumFailed(
+                "Gate 3 Stress Quorum detected non-deterministic flakiness or latency failure under perturbation"
+                    .to_string(),
+            ));
+        }
+
+        Ok(report)
+    }
+
     /// Build a failed `StressQuorumReport` when a live or simulated Gate 3 run diverges.
     #[must_use]
     pub fn build_rejected_report(

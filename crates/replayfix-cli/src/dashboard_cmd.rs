@@ -33,12 +33,28 @@ pub struct DashboardArgs {
     /// Emit machine-readable JSON output
     #[arg(long)]
     pub json: bool,
+
+    /// Check server startup in headless mode and exit immediately with status 0
+    #[arg(long)]
+    pub headless_check: bool,
 }
 
 pub fn run_dashboard_cmd(args: DashboardArgs) -> Result<i32> {
     let mut handle = DashboardServerHandle::start(args.port, args.artifacts)?;
     let base_url = handle.base_url();
 
+    if args.headless_check {
+        handle.shutdown();
+        if args.json {
+            println!(r#"{{"status":"HEALTHY","port":{}}}"#, handle.port());
+        } else {
+            println!(
+                "Dashboard service initialized successfully on port {}",
+                handle.port()
+            );
+        }
+        return Ok(0);
+    }
     if args.open && !replayfix_core::trace::is_ci_environment() {
         #[cfg(target_os = "windows")]
         {

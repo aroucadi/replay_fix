@@ -11,11 +11,13 @@ use replayfix_core::deliberation::{
     SOVEREIGN_SPARK_SLUG,
 };
 use replayfix_core::digest::sha256_hex;
-use replayfix_core::engine::{run_oracle, GateVerdict};
+use replayfix_core::engine::{BehavioralContract, GateVerdict};
 use replayfix_core::error::{CoreError, Result};
 use replayfix_core::fixtures::Fixture;
 use replayfix_core::fsm::Phase;
-use replayfix_core::inoculate::InoculationGenerator;
+use replayfix_core::inoculate::{
+    InoculationEntry, InoculationGenerator, InoculationRegistry, InoculationSpec,
+};
 use replayfix_core::manifest::TaskManifest;
 use replayfix_core::patch::UnifiedPatcher;
 use replayfix_core::perception::VideoTelemetry;
@@ -24,7 +26,7 @@ use replayfix_core::receipt::{
     timestamp_now, write_triage_report, AuditReceipt, GateRecord, PatchRecord, TriageReport,
     TriageStatus, SCHEMA_VERSION, SUBSTRATE,
 };
-use replayfix_core::repair::{MuseModelSlug, RepairClientMode, TokenAccounting};
+use replayfix_core::repair::RepairClientMode;
 use replayfix_core::stress::{PerturbationProfile, StressQuorumRunner};
 use replayfix_core::worktree::{ScratchSandbox, WorktreeManifest};
 use replayfix_core::MetaGatewayClient;
@@ -52,8 +54,8 @@ pub struct HealArgs {
     #[arg(long)]
     pub bug: Option<String>,
 
-    /// Execution mode: mock, deterministic-fixture, live-ai, live-browser, syntax-retry, flaky-retry, exhausted
-    #[arg(long, default_value = "mock")]
+    /// Execution mode: live-ai, mock, deterministic-fixture, live-browser, syntax-retry, flaky-retry, exhausted
+    #[arg(long, default_value = "live-ai")]
     pub mode: String,
 
     /// Deterministic offline simulation mode
@@ -117,28 +119,19 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let bug_id = if let Some(ref b) = args.bug {
         b.to_uppercase()
     } else if let Some(ref v) = args.video {
-        let v_str = v.to_string_lossy().to_ascii_uppercase();
-        if v_str.contains("RF-02") || v_str.contains("RF02") {
-            "RF-02".to_string()
-        } else if v_str.contains("RF-03") || v_str.contains("RF03") {
-            "RF-03".to_string()
-        } else if v_str.contains("RF-04") || v_str.contains("RF04") {
-            "RF-04".to_string()
-        } else if v_str.contains("RF-05") || v_str.contains("RF05") {
-            "RF-05".to_string()
-        } else {
-            "RF-01".to_string()
-        }
+        v.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("TASK-01")
+            .to_string()
     } else {
-        "RF-01".to_string()
+        "TASK-01".to_string()
     };
 
-    let fixture = Fixture::for_task(&bug_id).ok_or_else(|| {
-        CoreError::MacroExecution(format!(
-            "No built-in fixture for task '{bug_id}'. Supported: {}",
-            Fixture::supported_tasks().join(", ")
-        ))
-    })?;
+    let fixture_opt = if args.mode == "live-ai" {
+        None
+    } else {
+        Fixture::for_task_in_repo(&bug_id, &repo_dir)
+    };
 
     if !args.json {
         print_heal_banner(theme, &bug_id, &args.repo);
@@ -157,6 +150,22 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let video_path = if let Some(ref v) = args.video {
         if v.exists() {
             Some(v.to_string_lossy().to_string())
+        } else if let Some(sibling_mp4) = v
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty() && p.exists())
+            .and_then(|p| fs::read_dir(p).ok())
+            .and_then(|mut entries| {
+                entries.find_map(|e| {
+                    let path = e.ok()?.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("mp4") {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+            })
+        {
+            Some(sibling_mp4.to_string_lossy().to_string())
         } else {
             return Err(CoreError::MacroExecution(format!(
                 "Video file '{}' does not exist",
@@ -173,13 +182,18 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     };
 
     // Phase 1: Video Ingestion & Perception Telemetry
+    let (viewport_width, viewport_height) = fixture_opt
+        .as_ref()
+        .map(|f| (f.viewport_width, f.viewport_height))
+        .unwrap_or((1280, 720));
+
     let video_telemetry = if let Some(ref vp) = video_path {
         let p = Path::new(vp);
         if p.exists() {
             VideoTelemetry::ingest(
                 p,
                 &keyframes_dir,
-                (fixture.viewport_width, fixture.viewport_height),
+                (viewport_width, viewport_height),
                 &bug_id,
             )
             .ok()
@@ -201,17 +215,25 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let ephemeral_port = EphemeralPort::allocate()?.get();
 
     let mut sandbox = ScratchSandbox::create_with_excludes(&repo_dir, &bug_id, &extra_excludes)?;
-    sandbox.write_file(fixture.target_path, fixture.buggy_source)?;
+    if let Some(ref fix) = fixture_opt {
+        sandbox.write_file(fix.target_path, fix.buggy_source)?;
+    }
 
     // Phase 3: Deliberation Engine Multi-Turn Muse Spark Agent Loop
+    let is_live_ai = args.mode == "live-ai";
+    let auto_live_ai = is_live_ai
+        && (std::env::var_os("REPLAYFIX_FORCE_LIVE_AI").is_some()
+            || (std::env::var_os("CARGO_TARGET_TMPDIR").is_none()
+                && replayfix_core::GatewayConfig::default().has_meta_api_key()));
+
     let client_mode = match args.mode.as_str() {
-        "live-ai" => RepairClientMode::LiveEndpoint,
+        "live-ai" if auto_live_ai => RepairClientMode::LiveEndpoint,
         "syntax-retry" => RepairClientMode::OfflineSyntaxRetryThenSuccess,
         "exhausted" => RepairClientMode::OfflineFailAllAttempts,
         _ => RepairClientMode::OfflineSuccessFirstAttempt,
     };
 
-    let gateway_client = if args.mode == "live-ai" {
+    let gateway_client = if client_mode == RepairClientMode::LiveEndpoint {
         Some(Arc::new(MetaGatewayClient::default()))
     } else {
         None
@@ -248,32 +270,84 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     }
 
     // Apply verified repair inside the isolated ScratchSandbox and capture sandbox tree SHA-256
-    let patched_outcome = UnifiedPatcher::apply_diff(fixture.buggy_source, fixture.builtin_diff)?;
-    sandbox.write_file(fixture.target_path, &patched_outcome.patched)?;
+    let (target_file_str, patched_content_str, insertions, deletions, files_changed) =
+        if let Some(ref patch) = outcome.verified_patch {
+            let orig = sandbox.read_file(&patch.target_file).unwrap_or_default();
+            let orig_norm = orig.replace("\r\n", "\n");
+            let search_norm = patch.search_block.replace("\r\n", "\n");
+            let replace_norm = patch.replace_block.replace("\r\n", "\n");
+            let patched = if !search_norm.is_empty() && orig_norm.contains(&search_norm) {
+                let p = orig_norm.replacen(&search_norm, &replace_norm, 1);
+                if orig.contains("\r\n") {
+                    p.replace('\n', "\r\n")
+                } else {
+                    p
+                }
+            } else if let Some(ref fix) = fixture_opt {
+                UnifiedPatcher::apply_diff(fix.buggy_source, fix.builtin_diff)?.patched
+            } else {
+                orig.clone()
+            };
+            sandbox.write_file(&patch.target_file, &patched)?;
+            (patch.target_file.clone(), patched, 1, 1, 1)
+        } else if let Some(ref fix) = fixture_opt {
+            let patched_outcome = UnifiedPatcher::apply_diff(fix.buggy_source, fix.builtin_diff)?;
+            sandbox.write_file(fix.target_path, &patched_outcome.patched)?;
+            (
+                fix.target_path.to_string(),
+                patched_outcome.patched,
+                patched_outcome.insertions,
+                patched_outcome.deletions,
+                patched_outcome.files_changed,
+            )
+        } else {
+            let _ = sandbox.teardown();
+            return Err(CoreError::Deliberation(
+                "No verified patch produced during deliberation".to_string(),
+            ));
+        };
+
     let sandbox_manifest = WorktreeManifest::capture(sandbox.root())?;
     let sandbox_tree_sha256 = sandbox_manifest.tree_sha256;
 
+    let default_contract = BehavioralContract {
+        contract_id: format!("contract_{}", bug_id.to_lowercase().replace('-', "_")),
+        task_id: bug_id.clone(),
+        setup: "Boot managed application".to_string(),
+        target: bug_id.clone(),
+        action: "interact".to_string(),
+        postcondition_id: "STATE_STABLE".to_string(),
+    };
+    let contract_ref = fixture_opt
+        .as_ref()
+        .map(|f| &f.contract)
+        .unwrap_or(&default_contract);
+
     // Gate 3 Stress Quorum Verification
-    let stress_report = match StressQuorumRunner::evaluate_simulated_quorum(
-        &fixture.contract,
-        &patched_outcome.patched,
-        PerturbationProfile::default(),
-        args.mock_flaky,
-    ) {
-        Ok(report) => Some(report),
-        Err(e) => {
-            let _ = sandbox.teardown();
-            write_heal_triage(
-                &output_dir,
-                &bug_id,
-                TriageStatus::FlakyNonDeterministic,
-                &e.to_string(),
-            )?;
-            eprintln!(
-                "  {} Gate 3 Stress Quorum failed: {e}",
-                theme.error(Symbols::CROSS)
-            );
-            exit(21);
+    let stress_report = if !args.mock_flaky && outcome.stress_report.is_some() {
+        outcome.stress_report.clone()
+    } else {
+        match StressQuorumRunner::evaluate_live_events(
+            &outcome.gate2_events,
+            &patched_content_str,
+            PerturbationProfile::default(),
+            args.mock_flaky,
+        ) {
+            Ok(report) => Some(report),
+            Err(e) => {
+                let _ = sandbox.teardown();
+                write_heal_triage(
+                    &output_dir,
+                    &bug_id,
+                    TriageStatus::FlakyNonDeterministic,
+                    &e.to_string(),
+                )?;
+                eprintln!(
+                    "  {} Gate 3 Stress Quorum failed: {e}",
+                    theme.error(Symbols::CROSS)
+                );
+                exit(21);
+            }
         }
     };
 
@@ -298,70 +372,122 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     sandbox.teardown()?;
 
     // Phase 4: Permanent Inoculation ("Dreaming")
-    // Write into output_dir always, and also into repo_dir when --inoculate is set or repo_dir is an isolated target app
-    let (candidate, _) = InoculationGenerator::default_candidate_for_fixture(&fixture);
-    let inoc_target_root = if args.inoculate || !repo_dir.join("Cargo.toml").exists() {
-        &repo_dir
-    } else {
-        &output_dir
-    };
-    let inoc_res = InoculationGenerator::inoculate_workspace(
-        &fixture,
-        inoc_target_root,
-        &output_dir,
-        Some(&candidate),
-    )
-    .ok();
-
-    let inoculation_entry = inoc_res.as_ref().map(|(_, entry, _)| entry.clone());
-    let inoc_spec = inoc_res.as_ref().map(|(spec, _, _)| spec);
-
-    // Phase 5: Assemble Terminal Audit Receipt & RFC 6962 Merkle Attestation
     let effective_diff = outcome
         .verified_patch
         .as_ref()
         .map(|p| {
             format!(
-                "--- a/{}
-+++ b/{}
-@@ -1,1 +1,1 @@
--{}
-+{}
-",
+                "--- a/{}\n+++ b/{}\n@@ -1,1 +1,1 @@\n-{}\n+{}\n",
                 p.target_file, p.target_file, p.search_block, p.replace_block
             )
         })
-        .unwrap_or_else(|| fixture.builtin_diff.to_string());
+        .unwrap_or_else(|| {
+            fixture_opt
+                .as_ref()
+                .map(|f| f.builtin_diff.to_string())
+                .unwrap_or_default()
+        });
 
-    let patch_record = PatchRecord {
-        target_path: outcome
-            .verified_patch
-            .as_ref()
-            .map(|p| p.target_file.clone())
-            .unwrap_or_else(|| fixture.contract.target.clone()),
-        sha256: sha256_hex(effective_diff.as_bytes()),
-        insertions: patched_outcome.insertions,
-        deletions: patched_outcome.deletions,
-        files_changed: patched_outcome.files_changed,
+    let contract_sha256 = contract_ref.digest()?;
+
+    let (inoculation_entry, inoc_spec) = if let Some(ref fix) = fixture_opt {
+        let (candidate, _) = InoculationGenerator::default_candidate_for_fixture(fix);
+        let inoc_target_root = if args.inoculate
+            || (!repo_dir.join(".git").exists() && !repo_dir.join("Cargo.toml").exists())
+        {
+            &repo_dir
+        } else {
+            &output_dir
+        };
+        let inoc_res = InoculationGenerator::inoculate_workspace(
+            fix,
+            inoc_target_root,
+            &output_dir,
+            Some(&candidate),
+        )
+        .ok();
+        (
+            inoc_res.as_ref().map(|(_, entry, _)| entry.clone()),
+            inoc_res.as_ref().map(|(spec, _, _)| spec.clone()),
+        )
+    } else {
+        let spec_rel_path = outcome
+            .inoculation_path
+            .clone()
+            .unwrap_or_else(|| InoculationGenerator::spec_rel_path_for_bug(&bug_id));
+        let grounded_locator = outcome
+            .session
+            .turns
+            .last()
+            .and_then(|t| t.tool_call.as_ref())
+            .and_then(|c| c.arguments.get("locator"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("button")
+            .to_string();
+        let ts_content = format!(
+            "import {{ test, expect }} from '@playwright/test';\n\ntest('Regression inoculation for {} ({})', async ({{ page }}) => {{\n  const pageErrors: string[] = [];\n  page.on('pageerror', (err) => pageErrors.push(err.message));\n  await page.goto('/');\n  const target = page.locator({:?}).first();\n  await expect(target).toBeVisible();\n  const box = await target.boundingBox();\n  if (box) {{\n    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);\n    await page.mouse.down();\n    await page.mouse.move(box.x - 40, box.y - 40, {{ steps: 8 }});\n    await page.mouse.up();\n  }}\n  expect(pageErrors).toEqual([]);\n}});\n",
+            bug_id, target_file_str, grounded_locator
+        );
+        let spec_sha = sha256_hex(ts_content.as_bytes());
+        let spec_dest = output_dir.join(&spec_rel_path);
+        if let Some(parent) = spec_dest.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&spec_dest, ts_content.as_bytes());
+        let entry = InoculationEntry {
+            bug_id: bug_id.clone(),
+            spec_path: spec_rel_path.clone(),
+            spec_sha256: spec_sha.clone(),
+            patch_sha256: sha256_hex(effective_diff.as_bytes()),
+            contract_sha256: contract_sha256.clone(),
+            grounded_selector: grounded_locator.clone(),
+            execution_time_ms: outcome.session.total_wall_clock_ms,
+            created_at: timestamp_now(),
+        };
+        let mut reg = InoculationRegistry::load_or_new(&output_dir);
+        let _ = reg.upsert_and_save(&output_dir, entry.clone());
+        let spec = InoculationSpec {
+            bug_id: bug_id.clone(),
+            spec_rel_path,
+            target_path: target_file_str.clone(),
+            grounded_selector: grounded_locator,
+            output_selector: String::new(),
+            expected_output_text: String::new(),
+            typescript_content: ts_content,
+            spec_sha256: spec_sha,
+        };
+        (Some(entry), Some(spec))
     };
 
-    let contract_sha256 = fixture.contract.digest()?;
-    let gate1_events = run_oracle(&fixture.contract, fixture.buggy_source);
-    let gate2_events = run_oracle(&fixture.contract, &patched_outcome.patched);
+    // Phase 5: Assemble Terminal Audit Receipt & RFC 6962 Merkle Attestation
+    let patch_record = PatchRecord {
+        target_path: target_file_str.clone(),
+        sha256: sha256_hex(effective_diff.as_bytes()),
+        insertions,
+        deletions,
+        files_changed,
+    };
 
     let gate1_record = GateRecord {
         observed_at: timestamp_now(),
         verdict: GateVerdict::Red,
         contract_sha256: contract_sha256.clone(),
-        events: gate1_events,
+        events: outcome.gate1_events.clone(),
     };
 
     let gate2_record = GateRecord {
         observed_at: timestamp_now(),
         verdict: GateVerdict::Green,
         contract_sha256: contract_sha256.clone(),
-        events: gate2_events,
+        events: outcome.gate2_events.clone(),
     };
+
+    let has_video = video_telemetry.is_some();
+    let sam_is_live = video_telemetry
+        .as_ref()
+        .map(|vt| vt.sam_snap.model == "sam-3.1")
+        .unwrap_or(false);
+    let has_stress = stress_report.is_some();
 
     let mut audit_receipt = AuditReceipt {
         schema_version: SCHEMA_VERSION.to_string(),
@@ -370,9 +496,16 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         substrate: SUBSTRATE.to_string(),
         disclaimer: "Deterministic Sovereign Healer: Gates verified with Muse Spark multi-turn loop and Wonder AST block patch."
             .to_string(),
-        provenance: Some("sovereign-spark-agent".to_string()),
+        provenance: Some(
+            if client_mode == RepairClientMode::LiveEndpoint {
+                "live-provider"
+            } else {
+                "deterministic-fixture"
+            }
+            .to_string(),
+        ),
         model_provenance: None,
-        contract_id: fixture.contract.contract_id.clone(),
+        contract_id: contract_ref.contract_id.clone(),
         contract_sha256,
         gate1: gate1_record,
         patch: patch_record,
@@ -390,14 +523,7 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         grounding_telemetry: None,
         video_telemetry,
         repair_telemetry: None,
-        token_accounting: Some(TokenAccounting::from_usage(
-            MuseModelSlug::MuseSpark13,
-            420,
-            120,
-            280,
-            150,
-            480,
-        )),
+        token_accounting: outcome.token_accounting.clone(),
         differential_diagnosis: None,
         regression_parity: None,
         stress_quorum: stress_report,
@@ -405,6 +531,18 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         deliberation: Some(outcome.session.clone()),
         merkle_root: None,
         attestation: None,
+        stage_classification: Some(if client_mode == RepairClientMode::LiveEndpoint {
+            replayfix_core::receipt::StageExecutionMatrix::live_ai_repaired(
+                has_video,
+                sam_is_live,
+                has_stress,
+                true,
+            )
+        } else {
+            replayfix_core::receipt::StageExecutionMatrix::deterministic_mock(
+                has_video,
+            )
+        }),
         created_at: timestamp_now(),
     };
 
@@ -420,14 +558,17 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
 
     // Optional Phase 6: Git PR Packaging
     if args.package_pr {
-        let _ = GitPrPackager::package_verified_repair(
-            &fixture,
-            &audit_receipt,
-            &repo_dir,
-            &output_dir,
-            inoc_spec,
-            false,
-        );
+        let default_fix = Fixture::for_task("RF-01");
+        if let Some(fix_ref) = fixture_opt.as_ref().or(default_fix.as_ref()) {
+            let _ = GitPrPackager::package_verified_repair(
+                fix_ref,
+                &audit_receipt,
+                &repo_dir,
+                &output_dir,
+                inoc_spec.as_ref(),
+                false,
+            );
+        }
         if !args.json {
             println!(
                 "  {} [PR Package] Evidence Matrix generated in {}/pr_description.md",
@@ -455,6 +596,9 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&json_output)?);
     } else {
+        if let Some(ref matrix) = audit_receipt.stage_classification {
+            crate::ui::print_stage_classification(theme, matrix);
+        }
         print_heal_summary(theme, &audit_receipt, elapsed_secs, is_sub_60s);
     }
 

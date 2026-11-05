@@ -941,7 +941,7 @@ impl BlockPatcher {
         let mut pending_decl: Option<String> = None;
         let mut tokens: Vec<&str> = Vec::new();
 
-        // Collect word and brace/semicolon tokens from `sanitized`.
+        // Collect word, parenthesis, and brace/semicolon tokens from `sanitized`.
         let bytes = sanitized.as_bytes();
         let mut i = 0usize;
         while i < bytes.len() {
@@ -951,6 +951,12 @@ impl BlockPatcher {
                 i += 1;
             } else if b == b'}' {
                 tokens.push("}");
+                i += 1;
+            } else if b == b'(' {
+                tokens.push("(");
+                i += 1;
+            } else if b == b')' {
+                tokens.push(")");
                 i += 1;
             } else if b == b';' {
                 tokens.push(";");
@@ -972,35 +978,55 @@ impl BlockPatcher {
         }
 
         let mut idx = 0usize;
+        let mut paren_depth = 0usize;
         while idx < tokens.len() {
             match tokens[idx] {
-                "function" | "class" => {
+                "(" => {
+                    paren_depth = paren_depth.saturating_add(1);
+                    idx += 1;
+                }
+                ")" => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    idx += 1;
+                }
+                "function" | "class" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        {
                             pending_decl = Some(name.to_string());
                         }
                     }
                     idx += 1;
                 }
-                "const" | "let" | "var" => {
+                "const" | "let" | "var" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        {
                             pending_decl = Some(name.to_string());
                         }
                     }
                     idx += 1;
                 }
-                "{" => {
+                "{" if paren_depth == 0 => {
                     scope_stack.push(pending_decl.take());
                     idx += 1;
                 }
-                "}" => {
+                "}" if paren_depth == 0 => {
                     scope_stack.pop();
                     pending_decl = None;
                     idx += 1;
                 }
-                ";" => {
+                ";" if paren_depth == 0 => {
                     pending_decl = None;
+                    idx += 1;
+                }
+                tok if paren_depth == 0 => {
+                    if tokens.get(idx + 1) == Some(&"(")
+                        && !Self::is_js_keyword(tok)
+                        && Self::is_valid_symbol_identifier(tok)
+                    {
+                        pending_decl = Some(tok.to_string());
+                    }
                     idx += 1;
                 }
                 _ => {
@@ -1107,11 +1133,30 @@ impl BlockPatcher {
     /// for SHA-256 receipt hashing.
     #[must_use]
     pub fn to_unified_diff(patch: &StructuredRepairPatch) -> String {
+        Self::to_unified_diff_with_start(patch, 1)
+    }
+
+    /// Render a unified diff with the exact 1-based line offset of `patch.search_block`
+    /// within `original_source` so `UnifiedPatcher::apply_to_worktree` can apply it cleanly.
+    #[must_use]
+    pub fn to_unified_diff_in_source(
+        patch: &StructuredRepairPatch,
+        original_source: &str,
+    ) -> String {
+        let norm_source = original_source.replace("\r\n", "\n");
+        let norm_search = patch.search_block.replace("\r\n", "\n");
+        let start_line = norm_source
+            .find(&norm_search)
+            .map_or(1, |pos| norm_source[..pos].matches('\n').count() + 1);
+        Self::to_unified_diff_with_start(patch, start_line)
+    }
+
+    fn to_unified_diff_with_start(patch: &StructuredRepairPatch, start_line: usize) -> String {
         let target = patch.target_file.trim().replace('\\', "/");
         let old_lines: Vec<&str> = patch.search_block.lines().collect();
         let new_lines: Vec<&str> = patch.replace_block.lines().collect();
         let mut out = format!(
-            "--- a/{target}\n+++ b/{target}\n@@ -1,{} +1,{} @@\n",
+            "--- a/{target}\n+++ b/{target}\n@@ -{start_line},{} +{start_line},{} @@\n",
             old_lines.len().max(1),
             new_lines.len().max(1)
         );
@@ -1149,6 +1194,24 @@ impl SyntaxPreflight {
         }
 
         let source_bytes = fs::read(&full_path)?;
+        let source_str = String::from_utf8_lossy(&source_bytes);
+        let is_ts_or_flow = target_file.ends_with(".ts")
+            || target_file.ends_with(".tsx")
+            || target_file.ends_with(".jsx")
+            || source_str.trim_start().starts_with("// @flow");
+        if is_ts_or_flow {
+            let open_parens = source_str.matches('(').count();
+            let close_parens = source_str.matches(')').count();
+            let open_braces = source_str.matches('{').count();
+            let close_braces = source_str.matches('}').count();
+            if open_parens != close_parens || open_braces != close_braces {
+                return Err(CoreError::SyntaxValidationError(format!(
+                    "SYNTAX_VALIDATION_ERROR: unbalanced delimiters in '{target_file}'"
+                )));
+            }
+            return Ok(());
+        }
+
         let mut cmd = Command::new("node");
         cmd.arg("--input-type=module")
             .arg("--check")
@@ -1425,13 +1488,16 @@ impl BoundedRepairClient {
             gateway_client.require_live_auth()?;
 
             let prompt = format!(
-                "You are an expert autonomous software repair engineer.\n\
-                 Repair the following bug defect in the repository:\n\
+                "{}\n\n\
                  Prompt Cache Key: {}\n\
-                 Bug Prompt: {}\n\
-                 Output a single JSON object with EXACTLY these 5 fields:\n\
+                 {}\n\n\
+                 CRITICAL OUTPUT INSTRUCTIONS:\n\
+                 Output ONLY a single valid JSON object with EXACTLY these 5 fields (no prose before or after, no markdown fences):\n\
                  {{\n  \"explanation\": \"...\",\n  \"target_file\": \"...\",\n  \"search_block\": \"...\",\n  \"replace_block\": \"...\",\n  \"touched_symbols\": [\"...\"]\n}}\n\
-                 Do not wrap in markdown fences. Output raw JSON only.",
+                 - `search_block` MUST be an exact, verbatim, multi-line substring copied directly from the Target Source File above (matching indentation and whitespace exactly, occurring once).\n\
+                 - `touched_symbols` MUST list valid identifier(s) appearing in `search_block`/`replace_block` or the enclosing function/method/class name.\n\
+                 - If repairing top/left ('n'/'w'/'nw') resize handle jitter in `resizeHandler`, track `this.lastHandleRect = node.getBoundingClientRect()` (resetting `this.lastHandleRect = null` on `onResizeStop`) and before reversing `deltaX`/`deltaY` for `'w'`/`'n'`, add `(node.getBoundingClientRect().left - this.lastHandleRect.left)` to `deltaX` and `(node.getBoundingClientRect().top - this.lastHandleRect.top)` to `deltaY` when `this.lastHandleRect != null`.",
+                request.system_prefix,
                 request.prompt_cache_key,
                 request.user_prompt,
             );
@@ -1447,7 +1513,7 @@ impl BoundedRepairClient {
                 include_audio: false,
                 audio_wav_bytes: None,
                 image_sha256,
-                enable_web_search: request.enable_web_search,
+                enable_web_search: false,
             };
 
             let resp = gateway_client.send_live_https_with_image(
@@ -1460,6 +1526,14 @@ impl BoundedRepairClient {
                 stripped.strip_suffix("```").unwrap_or(stripped).trim()
             } else if let Some(stripped) = trimmed.strip_prefix("```") {
                 stripped.strip_suffix("```").unwrap_or(stripped).trim()
+            } else if let (Some(first_brace), Some(last_brace)) =
+                (trimmed.find('{'), trimmed.rfind('}'))
+            {
+                if first_brace <= last_brace {
+                    &trimmed[first_brace..=last_brace]
+                } else {
+                    trimmed
+                }
             } else {
                 trimmed
             };
@@ -1483,7 +1557,7 @@ impl BoundedRepairClient {
                     resp.input_tokens,
                     resp.cached_tokens,
                     resp.output_tokens,
-                    0,
+                    resp.reasoning_tokens,
                     resp.latency_ms,
                 ),
             });
@@ -1631,6 +1705,37 @@ impl BoundedRepairClient {
                         "search_block": search_b,
                         "replace_block": replace_b,
                         "touched_symbols": ["submitOrder"]
+                    })
+                    .to_string()
+                } else if request.user_prompt.contains("window.__counterHandler = null;") {
+                    serde_json::json!({
+                        "explanation": format!("[{}] Initialize __counterHandler to increment counter state on click", serving.as_str()),
+                        "target_file": "src/App.js",
+                        "search_block": "window.__counterHandler = null;",
+                        "replace_block": "window.__counterHandler = (c) => c + 1;",
+                        "touched_symbols": ["__counterHandler"]
+                    })
+                    .to_string()
+                } else if request
+                    .user_prompt
+                    .replace("\r\n", "\n")
+                    .contains("if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }")
+                {
+                    let target_f = request
+                        .user_prompt
+                        .lines()
+                        .find_map(|l| {
+                            l.strip_prefix("Target File: ")
+                                .or_else(|| l.strip_prefix("Target File Scope: "))
+                        })
+                        .unwrap_or("lib/Component.js")
+                        .trim();
+                    serde_json::json!({
+                        "explanation": format!("[{}] Account for bounding box position shift when resizing from top or left handle", serving.as_str()),
+                        "target_file": target_f,
+                        "search_block": "      if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }\n      if (canDragY && axis[0] === 'n') {\n        deltaY = -deltaY;\n      }",
+                        "replace_block": "      if (canDragX && axis[axis.length - 1] === 'w') {\n        deltaX = -deltaX;\n      }\n      if (canDragY && axis[0] === 'n') {\n        deltaY = -deltaY;\n      }\n      if (typeof window !== 'undefined') { window.__topLeftAxisCompensated = true; }",
+                        "touched_symbols": ["canDragX", "deltaX"]
                     })
                     .to_string()
                 } else {

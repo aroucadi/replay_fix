@@ -651,6 +651,58 @@ pub fn print_security_boundary(theme: &Theme, repo: &str, is_read_only: bool, is
     println!();
 }
 
+/// Print stage execution authenticity forensic classification table.
+pub fn print_stage_classification(
+    theme: &Theme,
+    matrix: &replayfix_core::receipt::StageExecutionMatrix,
+) {
+    if theme.mode == OutputMode::Quiet || theme.mode == OutputMode::Machine {
+        return;
+    }
+    println!();
+    println!(
+        "  {} {}",
+        theme.brand("◆"),
+        theme.bold("Execution Authenticity & Forensic Matrix")
+    );
+    let render_badge = |status: replayfix_core::receipt::StageExecutionStatus| match status {
+        replayfix_core::receipt::StageExecutionStatus::Real => theme.pill_success("  REAL  "),
+        replayfix_core::receipt::StageExecutionStatus::Heuristic => theme.pill_warning("HEURISTIC"),
+        replayfix_core::receipt::StageExecutionStatus::Mocked => theme.pill_muted(" MOCKED "),
+        replayfix_core::receipt::StageExecutionStatus::Hardcoded => theme.pill_error("HARDCODED"),
+        replayfix_core::receipt::StageExecutionStatus::Skipped => theme.pill_muted(" SKIPPED "),
+        replayfix_core::receipt::StageExecutionStatus::Failed => theme.pill_error(" FAILED "),
+        replayfix_core::receipt::StageExecutionStatus::Unverified => {
+            theme.pill_warning("UNVERIFIED")
+        }
+    };
+
+    let stages = [
+        ("Video Ingestion", matrix.video_ingestion),
+        ("SAM Spatial Grounding", matrix.sam_spatial_grounding),
+        ("Interaction Trajectory", matrix.interaction_trajectory),
+        ("Deliberation Loop", matrix.deliberation_agent_loop),
+        ("Code Patch Synthesis", matrix.code_patch_synthesis),
+        ("Gate 1 Baseline (RED)", matrix.gate1_baseline),
+        ("Gate 2 Stability (GREEN)", matrix.gate2_stability),
+        ("Gate 3 Stress Quorum", matrix.gate3_stress_quorum),
+        (
+            "Cryptographic Attestation",
+            matrix.cryptographic_attestation,
+        ),
+    ];
+
+    for (name, status) in stages {
+        println!(
+            "    {} {: <28} {}",
+            render_badge(status),
+            theme.bold(name),
+            theme.muted(status.as_str_desc())
+        );
+    }
+    println!();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
