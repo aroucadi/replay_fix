@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2026-11-05
+
+**Spec 300 — Universal Zero-Shot Video-to-Code Repair Pipeline**: Delivers repository-agnostic, zero-shot video-driven debugging and repair powered by live Meta AI models (`muse-spark-1.3`, `muse-wonder-1.0`, `sam-3.1`) and genuine Playwright Chromium CDP browser execution. Full notes: [docs/release-notes/v3.0.0.md](docs/release-notes/v3.0.0.md).
+
+### Added
+- **Universal Zero-Shot Component Mount Harness (`discovery.rs`)**:
+  - In-browser Babel Standalone transpilation configured with `['env', 'flow', 'react']` presets and recursive CommonJS `dynamicRequire` module loading for raw Flow/TypeScript/JSX component libraries (`react-resizable`, etc.).
+  - `html_assets_exist` static bundle verification to skip unbuilt demo HTML templates.
+  - `SelfContainedDraggableCore` with `offsetParent`-relative pointer coordinates and axis-specific ARIA slider labels (`Resize Handle NW`, `Resize Handle SE`) to faithfully reproduce DOM layout oscillation and drag-jitter defects in Chromium.
+- **Multi-Frame Optical-Flow Trajectory & Physical Jitter Oracle (`perception.rs`, `browser.rs`)**:
+  - Added `RoiDiffer::pair_change` frame-pair displacement calculation for multi-step drag vectors (`top_level_drag_end`) and graceful fallback from `sam-3.1` empty responses to `segment_from_frame_pair` (`local_diff_heuristic`).
+  - Extended Playwright `PROBE_PAGE` and `DRAG_AND_OBSERVE` to measure step-by-step physical bounding-box acceleration and direction reversals (`jitter_score_bps`).
+- **Execution Authenticity & Forensic Provenance Matrix (`receipt.rs`, `ui.rs`, `main.rs`)**:
+  - Added 9-stage `StageExecutionMatrix` (`REAL`, `HEURISTIC`, `MOCKED`, `HARDCODED`, `SKIPPED`, `FAILED`, `UNVERIFIED`) to both CLI output and `audit_receipt.json`.
+- **Flow/ES6 Method Scope Resolution & Live Wire Protocol (`repair.rs`, `gateway.rs`)**:
+  - Updated `BlockPatcher::open_enclosing_declarations` to track parenthesis depth (`paren_depth`) and ES6/Flow class method declarations (`resizeHandler(...)`).
+  - Fixed `"error": null` check on `https://api.meta.ai/v1/responses` and added `reasoning_tokens` extraction.
+
+---
+
 ## [2.0.0] - 2026-11-03
 
 **Spec 200 — Sovereign Enterprise Final MMP Release: Distributed Multi-Agent Swarm, Live Streaming Dashboard, APM & OpenTelemetry Ingestion, Cross-Browser Matrix & RFC 6962 Audit Ledger**: Delivers the final unified Sovereign Enterprise MMP release across all 5 architectural pillars and resolves every remaining partial-conformance item identified in the Master Specification Audit (`SPECIFICATION_AUDIT.md`, `ARCHITECTURE_AUDIT.md`, `TEST_QUALITY_AUDIT.md`, `COVERAGE_REPORT.md`, `FINAL_ASSESSMENT.md`). Full notes: [docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md).

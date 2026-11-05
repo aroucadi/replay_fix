@@ -1,267 +1,246 @@
 <div align="center">
 
-# 🎬 ReplayFix v2.0.0
+# 🎬 ReplayFix v3.0.0
 
-### Sovereign Autonomous Visual Bug Repair Harness & Verifiable Notary
+### Universal Zero-Shot Video-to-Code Repair Harness & Cryptographic Verification Notary
 
+[![Version](https://img.shields.io/badge/Release-v3.0.0%20Universal%20Zero--Shot-00E5FF)](docs/release-notes/v3.0.0.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
-[![Rust](https://img.shields.io/badge/Rust-1.85%2B%20(Pure%20Safe)-orange?logo=rust)](https://www.rust-lang.org)
-[![Meta AI Models](https://img.shields.io/badge/Meta%20AI-Muse%20%26%20SAM%203.1-0081FB?logo=meta)](https://ai.meta.com)
-[![SWE-bench Causal](https://img.shields.io/badge/Verification-Dual--Gate%20Causal-success)](#-the-two-gate-causal-verification-oracle)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B%20(%23!%5Bforbid(unsafe_code)%5D)-orange?logo=rust)](https://www.rust-lang.org)
+[![Meta AI Models](https://img.shields.io/badge/Meta%20AI-Muse%20Spark%201.3%20%7C%20Muse%20Wonder%201.0%20%7C%20SAM%203.1-0081FB?logo=meta)](https://ai.meta.com)
+[![Verification](https://img.shields.io/badge/Oracle-Two--Gate%20Live%20Playwright%20CDP-success)](#-the-two-gate-causal-verification-oracle)
 [![Security Invariant](https://img.shields.io/badge/%CE%94repo%20%3D%200-Strictly%20Isolated-blueviolet)](#-the-inviolable-engineering-invariants)
 [![Merkle Proof](https://img.shields.io/badge/RFC%206962-Ed25519%20Signed-teal)](#-cryptographic-notary--merkle-audit-receipts)
-[![MCP Native](https://img.shields.io/badge/MCP-Native%20Server-7B2CBF)](https://modelcontextprotocol.io)
 
 <p align="center">
-  <b>Give it a video. Give it a repo. Get a verified, cryptographically signed fix in under 60 seconds.</b>
+  <b>Point ReplayFix at any bug screen recording (<code>.mp4</code>) and any target repository.<br/>
+  It reproduces the bug in a live browser (Gate 1 RED), synthesizes a surgical AST patch via Meta Muse, proves the fix across consecutive browser runs (Gate 2 GREEN), and seals an Ed25519-signed RFC 6962 Merkle receipt — with zero base-repo mutations (<code>Δrepo = 0</code>).</b>
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=cPDIFQmVn9I"><b>Watch 4K Demo Video</b></a> •
-  <a href="#-quickstart--cli-reference"><b>Quickstart</b></a> •
-  <a href="#-core-architecture--the-meta-ai-trio"><b>Meta AI Architecture</b></a> •
-  <a href="#-the-two-gate-causal-verification-oracle"><b>Two-Gate Oracle</b></a> •
-  <a href="#-live-streaming-dashboard--swarm"><b>Live Dashboard & Swarm</b></a> •
-  <a href="proof_viewer.html"><b>Judge Proof Portal</b></a>
+  <a href="https://www.youtube.com/watch?v=cPDIFQmVn9I"><b>🎥 Watch 4K Demo Video</b></a> •
+  <a href="#-60-second-jury-evaluation-guide"><b>⚡ 60-Second Jury Guide</b></a> •
+  <a href="#-the-two-gate-causal-verification-oracle"><b>🔬 Two-Gate Oracle</b></a> •
+  <a href="#-universal-zero-shot-architecture-v300"><b>🧠 Zero-Shot Architecture</b></a> •
+  <a href="docs/README.md"><b>📚 Full Documentation Hub</b></a> •
+  <a href="proof_viewer.html"><b>🛡️ Judge Proof Portal</b></a>
 </p>
 
 </div>
 
 ---
 
-## 💡 Why ReplayFix?
+## ⚡ 60-Second Jury Evaluation Guide
 
-When users encounter software defects, they capture a screen recording, drop a video in Slack, or submit an issue ticket. Senior software engineers burn **30% to 40% of their sprints** trying to manually reproduce what broke: guessing interaction steps, setting up local ports, and wrestling with timing flakes.
+Judges can verify **ReplayFix v3.0.0** in three copy-paste commands — watching a real Chromium browser reproduce and repair an open-source drag-jitter bug (`react-resizable` Issue #136) zero-shot from an `.mp4` video:
 
-Generic AI coding assistants fail at visual bugs because:
-1. **Blind to pixels & layouts**: They cannot perceive screen resolutions, device pixel ratios (DPR), or dynamic viewport letterboxing.
-2. **Hallucinate UI selectors**: They guess fragile selectors that drift from the live DOM.
-3. **Reward hacking & test tampering**: They soften test assertions or edit test suites to fake a green pass.
-4. **No causal attribution**: They guess patches without proving the bug actually failed first.
+### Step 1: Build & Verify Environment (`10s`)
+```bash
+cargo build --quiet
+./target/debug/replayfix doctor
+```
 
-**ReplayFix solves this with systems-grade rigor.** Built in 100% deterministic, zero-panic Rust (`#![forbid(unsafe_code)]`), ReplayFix turns raw screen recordings (`.mp4`/`.webm`) and APM session logs into verified, regression-free source patches certified by an **RFC 6962 Merkle tree receipt** signed with **RFC 8032 Ed25519**.
+### Step 2: Run Live Zero-Shot Reproduction & Repair in a Visible Browser (`40s`)
+Ensure `META_API_KEY` is set in `.env` or your environment, then run:
+```bash
+./target/debug/replayfix repro 
+  --video benchmarks/react-resizable/DEMO_react-resizable_issue-136.mp4 
+  --repo benchmarks/react-resizable/repo 
+  --live-browser 
+  --headed
+```
+
+#### What You Will See Live on Screen:
+```text
+  ✔ Isolation      PASS  Scratch workspace initialized (ephemeral port :56581, base tree 3292f8c92bc3)
+  ✔ Video Probe    PASS  Probed recording & extracted ROI keyframes (1280x720, 10080ms)
+  ✔ SAM 3.1 Snap   PASS  Snapped hotspot to contour centroid -> CSS (610, 358)
+  ✔ Trajectory     PASS  Aggregated multi-step interaction trajectory (7 actions sequenced)
+  ✔ CDP Grounding  PASS  page.getByRole('slider', { name: 'Resize Handle NW', exact: true }) (score: 0.95)
+  ✔ Gate 1 (RED)   PASS  Defect reproduced causal baseline (bounding-box drag jitter > 500 bps)
+  ✔ Test Freeze    PASS  Anti-cheating SHA-256 test freeze verified (f860e50e7d45)
+  ✔ Muse Repair    PASS  model: muse-spark-1.3 (effort: xhigh, attempt 1/3), cache: 2531/2607 tokens cached
+  ✔ Syntax Check   PASS  Preflight validation passed in sandbox (target: lib/Resizable.js)
+  ✔ Repair         PASS  Patch applied in scratch sandbox: lib/Resizable.js (+23 -14)
+  ✔ Gate 2 (GREEN) PASS  Behavior verified across 2 consecutive headed Chromium runs
+
+  ◆ Execution Authenticity & Forensic Matrix
+       REAL    Video Ingestion               Live provider / browser verified
+     HEURISTIC SAM Spatial Grounding         Derived via heuristic / optical flow
+       REAL    Interaction Trajectory        Live provider / browser verified
+       REAL    Deliberation Loop             Live provider / browser verified
+       REAL    Code Patch Synthesis          Live provider / browser verified
+       REAL    Gate 1 Baseline (RED)         Live provider / browser verified
+       REAL    Gate 2 Stability (GREEN)      Live provider / browser verified
+      SKIPPED  Gate 3 Stress Quorum          Not required for this invocation
+       REAL    Cryptographic Attestation     Live provider / browser verified
+
+  → Next: headed Chromium replay verified — inspect audit receipt at .replayfix/audit_receipt.json or pass --apply to apply patch.
+```
+
+### Step 3: Verify the Cryptographic Receipt (`5s`)
+```bash
+./target/debug/replayfix verify-receipt .replayfix/audit_receipt.json
+```
+Or open **`proof_viewer.html`** in any browser and drag-and-drop `.replayfix/audit_receipt.json` to inspect the 4-layer RFC 6962 Merkle inclusion proof and RFC 8032 Ed25519 signature completely offline.
+
+---
+
+## 💡 Why ReplayFix? (The Problem & Breakthrough)
+
+When users encounter visual or interaction bugs, they record their screen and drop an `.mp4` into an issue ticket. Engineers spend **30–40% of their debugging time** manually translating video pixels into DOM selectors, local server setups, and reproduction steps.
+
+Existing AI coding agents fail on video-reported UI bugs because they:
+1. **Cannot map video pixels to live DOM nodes**: They guess selectors without calibrating viewport dimensions, Device Pixel Ratio (DPR), or ARIA trees.
+2. **Fail on raw UI component libraries**: Repositories like `react-resizable` or `react-date-picker` export raw ES6/Flow/TypeScript components without a standalone dev server.
+3. **Hallucinate fixes without causal proof**: They propose patches without proving the bug failed before the patch (Gate 1 RED) or stabilized after the patch (Gate 2 GREEN).
+4. **Tamper with tests to fake passes**: Without cryptographic test-freeze guards, agents weaken assertions to turn red tests green.
+
+### What Makes ReplayFix v3.0.0 Different
+| Capability | Typical Coding Agent | ReplayFix v3.0.0 (Universal Zero-Shot) |
+| :--- | :--- | :--- |
+| **Input Modality** | Text prompt / stack trace | Raw `.mp4`/`.webm` screen recording + RRWeb/Sentry logs |
+| **Target Repo Support** | Requires pre-configured app server | **Universal**: Full-stack apps **and** raw Flow/TS/JSX component libraries |
+| **DOM Grounding** | Guesses CSS selectors from source | Live Playwright CDP `elementFromPoint(x, y)` + `ariaSnapshot` margin scoring |
+| **Drag & Physics Bugs** | Blind to layout oscillation/jitter | Step-by-step physical bounding-box acceleration telemetry (`jitter_score_bps`) |
+| **Verification Authority** | LLM self-assessment | Counterfactual Two-Gate FSM (Gate 1 RED $	o$ Patch $	o$ Gate 2 GREEN $	imes 2$) |
+| **Stage Honesty** | Opaque fallbacks | Explicit 9-stage **Forensic Provenance Matrix** (`REAL` / `HEURISTIC` / `MOCKED` / `SKIPPED`) |
+| **Audit Trail** | Unverified diff | **RFC 6962 Merkle Tree** + **RFC 8032 Ed25519** digital signature |
 
 ---
 
 ## 🔬 The Two-Gate Causal Verification Oracle
 
-ReplayFix enforces counterfactual causality: **no code is touched until the defect is mathematically isolated and reproduced.**
+ReplayFix enforces strict counterfactual causality: **no candidate patch is ever accepted unless the harness first proves the defect reproduces on the unpatched repository.**
 
 ```text
                ┌────────────────────────────────────────────────────────┐
-               │    Raw User Video (.mp4) / APM Session Replay (.json)  │
+               │    Raw Bug Video (.mp4) + Target Git Repository        │
                └───────────────────────────┬────────────────────────────┘
                                            │
                                            ▼
                ┌────────────────────────────────────────────────────────┐
-               │  Meta SAM 3.1 & CDP Spatial-Semantic Element Snapping  │
+               │  1. Perception & Trajectory Extraction                 │
+               │  • FFmpeg keyframe + inter-frame optical-flow ROI      │
+               │  • SAM 3.1 / Frame-Pair Centroid & Drag Displacement   │
                └───────────────────────────┬────────────────────────────┘
                                            │
                                            ▼
                ┌────────────────────────────────────────────────────────┐
-               │   Gate 1: Counterfactual Reproduction Test Synthesis   │
-               └───────────────────────────┬────────────────────────────┘
-                                           │
-                      ┌────────────────────┴────────────────────┐
-                      ▼                                         ▼
-          [Ephemeral Scratch Worktree]                  [Host Repository]
-          Dynamic Ephemeral Port :0                     STRICTLY READ-ONLY
-          Must FAIL (RED) with AssertionError           Δrepo = 0 Invariant
-                      │                                         │
-                      └────────────────────┬────────────────────┘
-                                           │
-                                           ▼
-               ┌────────────────────────────────────────────────────────┐
-               │  Meta Muse Wonder: AST-Bounded Search/Replace Patch    │
+               │  2. Ephemeral Scratch Sandbox & Universal Harness      │
+               │  • Isolated temp worktree on kernel port :0 (Δrepo = 0)│
+               │  • Auto-synthesizes Babel [env, flow, react] harness   │
                └───────────────────────────┬────────────────────────────┘
                                            │
                                            ▼
                ┌────────────────────────────────────────────────────────┐
-               │    Gate 2: 2-Run Stability Pass & Regression Parity    │
-               │    Must PASS (GREEN x2) with Zero Suite Regressions    │
+               │  3. Gate 1 (Counterfactual RED) in Live Chromium       │
+               │  • Grounds (x, y) via CDP elementFromPoint + ARIA tree │
+               │  • Replays click/drag; MUST fail (error or jitter>500) │
                └───────────────────────────┬────────────────────────────┘
                                            │
                                            ▼
                ┌────────────────────────────────────────────────────────┐
-               │  RFC 6962 Merkle Tree Audit Receipt + Ed25519 Seal     │
+               │  4. Meta Muse Bounded AST Repair (Max 3 Attempts)      │
+               │  • SHA-256 TestFreezeGuard prevents test tampering     │
+               │  • Exact single-match search/replace + symbol check    │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+                                           ▼
+               ┌────────────────────────────────────────────────────────┐
+               │  5. Gate 2 (2x Consecutive GREEN) + Cryptographic Seal │
+               │  • Re-verifies in live Chromium twice consecutively    │
+               │  • Emits RFC 6962 Merkle Receipt + Ed25519 Signature   │
                └────────────────────────────────────────────────────────┘
 ```
 
-1. **Gate 1 (Counterfactual RED)**: ReplayFix synthesizes a Playwright test and executes it against the unpatched codebase. It MUST fail with a verified `AssertionError`.
-2. **Gate 2 (2-Run Stability GREEN)**: Once Meta Muse Wonder generates an AST search/replace block patch, the test must pass **two consecutive stability runs** and survive Gate 3 latency perturbations.
-3. **Regression Parity Guarantee**: The full pre-existing test suite must pass with 100% parity ($\mathcal{F}_{\text{patched}} \setminus \mathcal{F}_{\text{baseline}} = \emptyset$).
-4. **Anti-Cheat Test Freeze**: Synthesized tests are hashed via SHA-256 before repair; patches that touch test files or relax assertions are rejected with exit code `11` (`SECURITY_VIOLATION`).
-
 ---
 
-## 🧠 Core Architecture & The Meta AI Trio
+## 🧠 Universal Zero-Shot Architecture (`v3.0.0`)
 
-ReplayFix orchestrates Meta's state-of-the-art open model ecosystem as a unified neural verification engine:
+ReplayFix v3.0.0 introduces four key architectural subsystems in `crates/replayfix-core`:
 
-```text
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        REPLAYFIX v2.0.0 SOVEREIGN NEURAL PIPELINE                      │
-│                                                                                        │
-│   ┌───────────────────────────────────┐    ┌───────────────────────────────────────┐   │
-│   │   1. SPATIAL PERCEPTION           │    │   2. CAUSAL REASONING                 │   │
-│   │   Meta SAM 3.1                    │    │   Meta Muse Spark 1.3                 │   │
-│   │   • Video keyframe extraction     │───▶│   • 305+ tok/s deliberation stream    │   │
-│   │   • Coordinate & DPR calibration  │    │   • Action trajectory reconstruction  │   │
-│   │   • Sub-pixel centroid snapping   │    │   • Gate 1 RED test synthesis         │   │
-│   └───────────────────────────────────┘    └───────────────────┬───────────────────┘   │
-│                                                                │                       │
-│                                                                ▼                       │
-│   ┌───────────────────────────────────┐    ┌───────────────────────────────────────┐   │
-│   │   4. SOVEREIGN VERIFICATION       │    │   3. DETERMINISTIC REPAIR             │   │
-│   │   Rust Verification Harness       │    │   Meta Muse Wonder 1.0                │   │
-│   │   • Ephemeral ScratchSandbox      │◀───│   • AST search/replace block patching │   │
-│   │   • Gate 2 GREEN stability pass   │    │   • Zero hallucination, zero style    │   │
-│   │   • RFC 6962 Merkle proof notary  │    │     drift                             │   │
-│   └───────────────────────────────────┘    └───────────────────────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+### 1. Universal Zero-Shot Component Mount Harness (`discovery.rs`)
+When a target repository is a UI library (such as `react-resizable`) without a runnable application server or bundled demo HTML:
+- **Static Asset Verification**: Inspects candidate HTML files (`examples/*.html`, `public/index.html`) and rejects broken templates that reference unbuilt webpack bundles.
+- **In-Browser Babel Transpilation (`['env', 'flow', 'react']`)**: Synthesizes a zero-config HTML harness with a recursive CommonJS `dynamicRequire` loader that strips Flow annotations (`// @flow`, `import type`, `export type`) and transpiles ES6/Flow/JSX modules on the fly.
+- **Physical Offset-Parent Drag Surface (`SelfContainedDraggableCore`)**: Computes drag deltas relative to `node.offsetParent.getBoundingClientRect()` and assigns axis-specific ARIA slider labels (`Resize Handle NW`, `Resize Handle SE`), faithfully reproducing real DOM layout oscillation bugs on unpatched code.
 
-* **Meta SAM 3.1 (Segment Anything Model)**: Ingests video frames from FFmpeg, isolates optical flow regions of interest (ROI), and snaps imprecise human clicks to exact semantic DOM bounding boxes and ARIA accessibility trees.
-* **Meta Muse Spark**: High-velocity multimodal agent brain streaming reasoning at over 300 tokens/sec. Reconstructs user intent, flags missing state validations, and outputs executable Playwright reproduction specs.
-* **Meta Muse Wonder**: Surgical AST search/replace block patch generator. It repairs the root cause directly inside the target code without rewriting unrelated files.
+### 2. Multi-Frame Optical-Flow Trajectory & SAM 3.1 Perception (`perception.rs`, `video.rs`)
+- **Frame-Pair Displacement (`RoiDiffer::pair_change`)**: Computes motion vectors across dense 100ms video frames to extract both the initial interaction hotspot `(click_x, click_y)` and drag terminal coordinates `(drag_end_x, drag_end_y)`.
+- **Transparent Fallback Provenance**: Queries live `sam-3.1` on `https://api.meta.ai/v1/responses` and automatically falls back to deterministic local frame-pair segmentation (`local_diff_heuristic`) if upstream returns empty tokens, recording `HEURISTIC` in the receipt's `StageExecutionMatrix`.
+
+### 3. Live Playwright CDP Grounding & Physical Jitter Oracle (`browser.rs`)
+- **Zero-Positional-Index Grounding**: Resolves `(x, y)` coordinates using `document.elementFromPoint(x, y)` cross-referenced against Playwright's `ariaSnapshot`. Positional `.first()` or `.nth()` selectors are strictly forbidden; ambiguous ties (`margin < 0.25`) fail closed with `AMBIGUOUS_GROUNDING` (exit code `22`).
+- **Step-by-Step Bounding-Box Jitter Telemetry (`DRAG_AND_OBSERVE`)**: Executes 10-step mouse drag trajectories while sampling `targetLocator.boundingBox()` after every frame. Direction reversals and acceleration spikes (`|curDx - prevDx| > 2px`) are quantified in basis points (`jitter_score_bps`), failing Gate 1 when `jitter_score_bps > 500` and passing Gate 2 when `jitter_score_bps <= 500`.
+
+### 4. Meta Muse 1.3 / 1.0 Bounded AST Repair (`repair.rs`, `gateway.rs`)
+- **24-Hour Prefix Caching**: Separates the static security instruction prefix (`replayfix-v0.6-harness-prefix-v1`) from untrusted repository context wrapped in `<UNTRUSTED_CONTEXT>` fences, achieving **>95% prompt cache hits** on retry/verification turns.
+- **Lexical Scope & Symbol Verification (`BlockPatcher`)**: Tracks parenthesis depth and ES6/Flow class method declarations (`resizeHandler(...)`) to guarantee every patch matches uniquely (`count == 1`) and touches only declared symbols.
 
 ---
 
 ## 🛡️ The Inviolable Engineering Invariants
 
-| Invariant | Standard | Enforcement Mechanism |
+| Law | Invariant | Enforcement Mechanism |
+| :---: | :--- | :--- |
+| **Law I** | **Substrate Primacy** | The deterministic Rust state machine (`HealEngine`) is the sole authority—never unverified model text. |
+| **Law II** | **Fail-Closed Verification** | Ambiguous DOM grounding, syntax errors, or non-RED Gate 1 baselines abort immediately with typed exit codes. |
+| **Law IV** | **Base Repo Immutability ($\Delta	ext{repo} = 0$)** | All builds, servers, and patches execute inside an ephemeral OS temp worktree (`ScratchSandbox`). Base repo tree SHA-256 is verified before and after. |
+| **Law V** | **Anti-Cheating Test Freeze** | `TestFreezeGuard` hashes all test files and `package.json` test scripts via SHA-256 prior to repair; any mutation aborts with exit code `11`. |
+| **Law VII** | **Bounded Repair Budget** | Hard ceiling of **3 attempts** and **180 seconds** wall-clock budget per defect run. |
+| **Law X** | **Zero-Panic Safe Rust** | Workspace-wide `#![forbid(unsafe_code)]` and zero non-test `.unwrap()`/`.expect()`/`panic!()`. |
+
+---
+
+## 🛠️ Complete CLI Command Reference
+
+| Command | Purpose | Example |
 | :--- | :--- | :--- |
-| **Substrate Primacy** | Law I | Deterministic Rust harness is the sole verification authority—never unverified LLM text. |
-| **Fail-Closed Verification** | Law II | Unhandled errors, timeouts, or ambiguous DOM matches fail closed. |
-| **Base Repo Immutability** | Law IV | $\Delta\text{repo} = 0$. All runs occur in isolated, ephemeral temp clones on dynamic ports (`:0`). |
-| **Anti-Cheating Test Freeze** | Law V | Reproduction tests are frozen via SHA-256 before repair; patches modifying tests fail closed. |
-| **Regression Parity** | Law VI | Pre-existing test suite must maintain 100% pass parity. Zero regressions tolerated. |
-| **Zero-Panic Systems Baseline** | Law X | Strictly `#![forbid(unsafe_code)]` with 0 non-test panics (`check-panics.ps1`). |
-
----
-
-## ⚡ Live Streaming Dashboard & Distributed Swarm
-
-ReplayFix includes an enterprise-grade distributed triage cluster and real-time observability server:
-
-```bash
-# Launch multi-worker work-stealing triage swarm across isolated worktrees:
-replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04 --output .replayfix
-
-# Boot live streaming WebSocket & SSE observability dashboard:
-replayfix dashboard --port 3848 --artifacts .replayfix
-```
-
-* **Live CDP Screencast Broadcaster**: Streams real-time Chromium viewport screencasts (JPEG/WebP over WebSocket) as the bug is reproduced and repaired.
-* **Muse Spark Deliberation Feed**: Streams turn-by-turn agent reasoning tokens and tool executions live to connected maintainer browsers.
-* **Side-by-Side Proof Diff**: Interactive UI displaying before/after DOM `ariaSnapshot` trees, bounding boxes, optical flow vectors, and Merkle tree inclusion paths.
-
----
-
-## 🔐 Cryptographic Notary & Merkle Audit Receipts
-
-Every verified repair produces an **RFC 6962 Merkle Tree Audit Receipt** signed with an **RFC 8032 Ed25519** keypair:
-
-```bash
-# Verify a repair receipt through all 4 cryptographic layers:
-replayfix verify-receipt .replayfix/audit_receipt.json --trusted-key <HEX_PUBKEY>
-
-# Append receipt and verify consistency proofs on the append-only transparency ledger:
-replayfix notary append --receipt .replayfix/audit_receipt.json
-replayfix notary verify-log --log .replayfix/transparency_log.json
-```
-
-Inspect receipts offline without a server using **`proof_viewer.html`**—an air-gapped single-file verification portal with client-side WebCrypto Ed25519 signature checks (`default-src 'none'`).
-
----
-
-## 🚀 Quickstart & CLI Reference
-
-### 1. Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/aroucadi/replay_fix.git
-cd replay_fix
-
-# Build release binary (Pure Rust, Zero Unsafe)
-cargo build --release --workspace
-
-# Run self-diagnostic environment check
-./target/release/replayfix doctor
-```
-
-### 2. Autonomous Reproduction & Repair (`replayfix repro`)
-
-```bash
-# Provide a video of the bug and access to the repository:
-replayfix repro \
-  --video tests/fixtures/videos/repro_demo.mp4 \
-  --repo ./target-app \
-  --output-dir .replayfix/
-```
-
-### 3. Production APM & RRWeb Telemetry Ingestion (`replayfix ingest`)
-
-```bash
-# Transform RRWeb session streams and Sentry crash dumps into reproducible manifests:
-replayfix ingest --rrweb session_events.json --sentry crash_dump.json --output .replayfix/manifest.json
-```
-
-### 4. Cross-Browser & Multi-Device Inoculation (`replayfix inoculate`)
-
-```bash
-# Synthesize permanent Playwright regression tests calibrated for desktop & mobile DPR:
-replayfix inoculate --manifest .replayfix/manifest.json --matrix chromium,firefox,webkit,mobile
-```
-
-### 5. Automated GitHub Issue Triage Bot (`replayfix bot`)
-
-```bash
-# Run continuous GitHub issue ingestion, reproduction, and PR dispatch:
-replayfix bot --repo owner/target-repo --poll-interval 60 --auto-pr
-```
+| **`replayfix repro`** | Zero-shot video-to-code reproduction, repair & 2-gate browser verification | `replayfix repro --video bug.mp4 --repo ./app --live-browser --headed` |
+| **`replayfix heal`** | Autonomous multi-turn `muse-spark-1.3` deliberation & `muse-wonder-1.0` repair | `replayfix heal --video bug.mp4 --repo ./app --mode live-ai` |
+| **`replayfix doctor`** | Audit local environment (`git`, `node`, `playwright`, `ffmpeg`, loopback) | `replayfix doctor` |
+| **`replayfix verify-receipt`** | Verify 4-layer RFC 6962 Merkle proofs & Ed25519 signatures | `replayfix verify-receipt .replayfix/audit_receipt.json` |
+| **`replayfix notary`** | Append receipts & verify RFC 6962 consistency proofs on transparency log | `replayfix notary verify-log --log .replayfix/transparency_log.json` |
+| **`replayfix swarm`** | Multi-worker work-stealing triage cluster across isolated sandboxes | `replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04` |
+| **`replayfix dashboard`** | Live WebSocket/SSE observability deck streaming browser frames & tokens | `replayfix dashboard --port 3848 --artifacts .replayfix` |
+| **`replayfix inoculate`** | Generate permanent cross-browser/mobile Playwright regression specs | `replayfix inoculate --manifest manifest.json --matrix chromium,mobile` |
+| **`replayfix ingest`** | Convert RRWeb session replays & Sentry crash dumps into task manifests | `replayfix ingest --rrweb events.json --sentry crash.json` |
 
 ---
 
 ## 📊 Deterministic Exit Code Taxonomy
 
-| Exit Code | Verdict | Meaning |
+| Exit Code | Verdict Constant | Meaning |
 | :---: | :--- | :--- |
-| **`0`** | `VERIFIED_REPAIRED` | Defect reproduced (Gate 1 RED), repaired, verified (Gate 2 GREEN x2), and receipt signed. |
+| **`0`** | `VERIFIED_REPAIRED` | Defect reproduced (Gate 1 RED), repaired, verified (Gate 2 GREEN $	imes 2$), and receipt signed. |
 | **`1`** | `DOCTOR_ERROR` | Missing system dependency (`ffmpeg`, `git`, `playwright`, or `node`). |
-| **`2`** | `USAGE_ERROR` | Invalid CLI arguments, malformed manifest, or unrecognized model slug. |
+| **`2`** | `USAGE_ERROR` | Invalid CLI arguments, malformed manifest, or disallowed model slug. |
 | **`10`** | `GATE1_NOT_RED` | Defect did not reproduce on Gate 1 (counterfactual baseline failed). |
-| **`11`** | `SECURITY_VIOLATION` | Path traversal, base repo mutation detected, or anti-cheat test freeze violated. |
-| **`21`** | `QUARANTINE_FAILED` | Repair budget exhausted or non-deterministic flaky failure. |
+| **`11`** | `SECURITY_VIOLATION` | Path traversal, base repo mutation ($\Delta	ext{repo} 
+eq 0$), or anti-cheat test freeze violation. |
+| **`20`** | `BRIDGE_EXECUTION_FAILED` | Playwright CDP bridge timeout or browser crash. |
+| **`21`** | `QUARANTINE_REPAIR_FAILED` | Bounded 3-attempt repair budget exhausted or flaky Gate 3 stress quorum failure. |
+| **`22`** | `AMBIGUOUS_GROUNDING` | Multiple DOM elements tied within `< 0.25` score margin at target coordinates. |
+| **`30`** | `GATE2_NOT_GREEN` | Candidate patch failed to apply, failed syntax preflight, or failed Gate 2 verification. |
 | **`31`** | `REGRESSION_DETECTED` | Candidate patch broke pre-existing regression test suite. |
 | **`40`** | `RECEIPT_INVALID` | Artifact tampering, Merkle inclusion mismatch, or invalid Ed25519 signature. |
 
 ---
 
-## 🏆 Benchmark & Qualification Sweep
+## 📚 Documentation Hub
 
-ReplayFix includes the **MetaPulse 20-Bug Benchmark Suite** (`RF-01` through `RF-20`), testing real-world visual regressions across responsive web apps:
+Explore the complete engineering documentation in [`docs/`](docs/README.md):
 
-```bash
-# Run the complete benchmark sweep:
-replayfix sweep --suite metapulse --concurrency 4 --output-dir target/sweep-results/
-```
-
-- **326+ Automated Tests**: 100% pass rate with zero ignored tests.
-- **Zero-Panic Quality**: Strictly 0 non-test panics (`check-panics.ps1`).
-- **Clippy Clean**: Compiles under `cargo clippy --workspace --all-targets -- -D warnings` with 0 warnings.
+- [**Architecture & Two-Gate Verification Substrate**](docs/architecture.md) — Deep dive into the FSM, zero-shot Babel component harness, optical-flow drag trajectory, and physical jitter telemetry.
+- [**CLI & Operator Reference**](docs/cli-reference.md) — Exhaustive flag tables, environment variables, and workflow recipes.
+- [**Trust & Cryptographic Architecture**](docs/trust-architecture.md) — RFC 6962 Merkle tree specification, Ed25519 signing payload format, and 4-layer verification.
+- [**Agent Deliberation State Machine**](docs/agent-state.md) — Multi-turn `muse-spark-1.3` deliberation loop, prefix caching, and encrypted reasoning continuity.
+- [**Rust Engineering Principles**](docs/engineering-principles-rust.md) — `#![forbid(unsafe_code)]`, zero-panic enforcement, and deterministic integer accounting.
+- [**Release Notes (`v0.0.0` – `v3.0.0`)**](docs/release-notes/v3.0.0.md) — Full evolutionary history of ReplayFix.
 
 ---
 
-## 📄 License & Trust Model
+## 📄 License
 
 Distributed under the **MIT License**. See [LICENSE.md](LICENSE.md) for details.
-
-- **Security Architecture**: [docs/trust-architecture.md](docs/trust-architecture.md)
-- **Windows Authenticode Signing**: [docs/windows-code-signing.md](docs/windows-code-signing.md)
-- **Changelog & Milestones**: [CHANGELOG.md](CHANGELOG.md)
-
-<div align="center">
-  <sub>Built for the <b>Meta Global AI Developer Hackathon 2026</b> • Powered by Meta Muse Spark, Muse Wonder & SAM 3.1</sub>
-</div>

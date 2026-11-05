@@ -1,137 +1,132 @@
-# ReplayFix CLI & Operator Reference
+# ReplayFix v3.0.0 CLI & Operator Reference
 
-This document provides a comprehensive command-line reference for the `replayfix` binary.
+This document provides an exhaustive command-line reference for the `replayfix` binary (`v3.0.0`).
 
 ---
 
-## Global CLI Flags & Environment
+## 1. Environment Variables & Credentials
 
-| Flag | Environment Variable | Description | Default |
+ReplayFix automatically loads `.env` from the working directory at startup.
+
+| Variable | Required For | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `--verbose` | `REPLAYFIX_LOG=debug` | Enable verbose debug logging to stderr. | `false` |
-| `--json` | `REPLAYFIX_JSON=1` | Output machine-readable structured JSON. | `false` |
-| `--output-dir <DIR>` | `REPLAYFIX_OUTPUT_DIR` | Target directory for receipts, logs, and artifacts. | `.replayfix/` |
-| `--meta-api-key <KEY>` | `META_API_KEY` | Bearer token for Meta AI model endpoints. | None |
+| `META_API_KEY` | Live AI (`repro`, `heal`) | Bearer token for `https://api.meta.ai/v1/responses` (`muse-spark-1.3`, `muse-wonder-1.0`, `sam-3.1`). | — |
+| `META_BASE_URL` | Optional override | Override Meta AI Responses API endpoint URL. | `https://api.meta.ai/v1/responses` |
+| `BASETEN_API_KEY` | Optional fallback | Bearer token for open-weights fallback endpoint on HTTP 429/5xx. | — |
+| `REPLAYFIX_OUTPUT_DIR` | Optional override | Default output directory for receipts and artifacts. | `.replayfix` |
 
 ---
 
-## Core Subcommands
+## 2. Primary Subcommands
 
-### 1. `replayfix doctor`
-Performs an offline environment health audit, verifying all mandatory platform dependencies:
+### `replayfix repro` (Alias: `replayfix run`)
+Runs the complete Two-Gate visual reproduction, bounded autonomous repair, and cryptographic receipt pipeline.
+
+```bash
+# Live zero-shot reproduction & repair in a visible Chromium browser:
+replayfix repro 
+  --video benchmarks/react-resizable/DEMO_react-resizable_issue-136.mp4 
+  --repo benchmarks/react-resizable/repo 
+  --live-browser 
+  --headed
+```
+
+#### Key Options for `repro`:
+| Flag | Description | Default |
+| :--- | :--- | :--- |
+| `--video <PATH>` | Path to the bug screen recording (`.mp4` or `.webm`). | Required (or via `--bug`) |
+| `--repo <DIR>` | Path to the target Git repository (strictly read-only unless `--apply` is passed). | `.` |
+| `--live-browser` | Execute Gate 1 and Gate 2 in a real Chromium browser via Playwright CDP. | Auto-enabled when `--video` is provided without `--mock-heal` |
+| `--headed [<BOOL>]` | Launch Chromium in visible headed mode so operators/judges can watch the replay live. | `false` |
+| `--mode <MODE>` | Execution mode: `live-ai` (real HTTPS calls via `META_API_KEY`) or `deterministic-fixture`. | Auto-detected (`live-ai` when `META_API_KEY` is set) |
+| `--model <SLUG>` | Meta Muse model slug (`muse-spark-1.3`, `muse-wonder-1.0`, `muse-spark-1.3-contributor`). | `muse-spark-1.3` |
+| `--reasoning-effort <EFFORT>` | Reasoning effort level (`high` or `xhigh`; `max` is prohibited by Law VII). | Model default (`xhigh` for Spark 1.3) |
+| `--stress-quorum` | Run Gate 3 concurrency perturbation (3G network / 500ms latency, 3-run quorum). | `false` |
+| `--inoculate` | Synthesize a permanent Playwright regression spec (`tests/repro/rf_<id>.spec.ts`). | `false` |
+| `--apply` | Apply the verified patch to the base repository after passing the human confirmation gate. | `false` |
+| `-y, --yes` | Confirm `--apply` non-interactively. | `false` |
+| `--output-dir <DIR>` | Directory where `audit_receipt.json`, `merkle_receipt.json`, and `artifacts/` are written. | `.replayfix` |
+
+---
+
+### `replayfix heal`
+Executes the multi-turn `SparkDeliberationEngine` (`muse-spark-1.3` perception/grounding followed by `muse-wonder-1.0` surgical AST patching) and prints the turn-by-turn deliberation timeline and `Execution Authenticity & Forensic Matrix`.
+
+```bash
+replayfix heal 
+  --video benchmarks/react-resizable/DEMO_react-resizable_issue-136.mp4 
+  --repo benchmarks/react-resizable/repo 
+  --mode live-ai 
+  --headed
+```
+
+---
+
+### `replayfix verify-receipt`
+Performs 4-Layer Zero-Trust verification on an `audit_receipt.json`, `merkle_receipt.json`, or `sweep_receipt.json`:
+1. **Layer 1 (Disk Integrity)**: Verifies every referenced artifact in `artifacts/` exists, matches `size_bytes`, and hashes to `content_sha256`.
+2. **Layer 2 (RFC 6962 Inclusion Proofs)**: Recomputes and verifies Merkle inclusion paths against `merkle_root`.
+3. **Layer 3 (RFC 8032 Ed25519 Signature)**: Verifies the Ed25519 signature over `REPLAYFIX-ATTESTATION:v0.9:...`.
+4. **Layer 4 (Trust Policy)**: Evaluates the signer public key against `--trusted-key` or `.replayfix/trusted_keys.json`.
+
+```bash
+replayfix verify-receipt .replayfix/audit_receipt.json
+```
+
+---
+
+### `replayfix notary`
+Manages the append-only RFC 6962 cryptographic transparency log (`transparency_log.json`):
+
+```bash
+# Verify log integrity and consistency proofs:
+replayfix notary verify .replayfix/transparency_log.json
+
+# Export a standalone proof bundle:
+replayfix notary export-proof .replayfix/audit_receipt.json --output proof_bundle.json
+```
+
+---
+
+### `replayfix doctor`
+Audits local host readiness (`git`, `node`, `playwright`, `ffmpeg`, `ffprobe`, and loopback socket binding):
+
 ```bash
 replayfix doctor
 ```
-Checks:
-- `git` version (`>= 2.30`)
-- `node` & `npm` version (`>= 18.0`)
-- `playwright` CLI availability & browser binaries
-- `ffmpeg` & `ffprobe` binaries (`>= 4.4`)
-- Loopback networking permissions (`127.0.0.1`)
 
 ---
 
-### 2. `replayfix repro`
-Autonomous end-to-end visual reproduction and repair pipeline from a video artifact:
-```bash
-replayfix repro \
-  --video <PATH_TO_VIDEO.mp4> \
-  --repo <PATH_TO_CODEBASE> \
-  [--headed <true|false>] \
-  [--max-attempts <N>] \
-  [--output-dir <DIR>]
-```
-**Options**:
-- `--video <FILE>`: Path to input screen recording (`.mp4` or `.webm`).
-- `--repo <DIR>`: Path to target web codebase.
-- `--headed`: Run browser in headed mode for visual observation (default: `false`).
-- `--max-attempts`: Bounded repair iterations (default: `3`).
+### `replayfix swarm` & `replayfix dashboard`
+Run multi-worker parallel triage and stream real-time telemetry over WebSocket/SSE:
 
----
-
-### 3. `replayfix ingest`
-Ingests production telemetry (RRWeb session recordings, Sentry crash breadcrumbs, or OpenTelemetry spans) and converts them into normalized `TaskManifest` reproductions:
 ```bash
-replayfix ingest \
-  --rrweb <PATH_TO_RRWEB.json> \
-  --sentry <PATH_TO_SENTRY.json> \
-  --output <PATH_TO_MANIFEST.json>
+# Run 4 isolated worker sandboxes in parallel:
+replayfix swarm --workers 4 --bugs RF-01,RF-02,RF-03,RF-04 --output-dir .replayfix
+
+# Launch the Cybernetic Command Deck on port 3848:
+replayfix dashboard --port 3848 --output-dir .replayfix
 ```
 
 ---
 
-### 4. `replayfix swarm`
-Executes high-concurrency distributed bug triage across multi-core workers with work-stealing job orchestration:
-```bash
-replayfix swarm \
-  --workers <N> \
-  --bugs <ID1,ID2,ID3...> \
-  --output <DIR> \
-  [--mock-heal]
-```
-**Options**:
-- `--workers <N>`: Number of concurrent worker threads.
-- `--bugs <LIST>`: Comma-separated list of bug identifiers or manifest paths.
-- `--mock-heal`: Offline deterministic qualification mode with pre-baked AST fixtures.
+## 3. Complete Exit Code Reference
 
----
-
-### 5. `replayfix dashboard`
-Boots an embedded async Tokio/Axum HTTP & WebSocket telemetry server streaming live browser screencasts and Muse Spark reasoning tokens:
-```bash
-replayfix dashboard \
-  --port <PORT> \
-  --artifacts <DIR> \
-  [--headless-check]
-```
-- Open `http://127.0.0.1:<PORT>` to access the responsive web dashboard (`dashboard.html`).
-- `--headless-check`: Verifies server startup, socket binding, and cleanly terminates with code `0`.
-
----
-
-### 6. `replayfix inoculate`
-Synthesizes permanent, multi-engine Playwright regression test matrices calibrated across desktop and mobile device pixel ratios:
-```bash
-replayfix inoculate \
-  --manifest <MANIFEST_PATH> \
-  --matrix chromium,firefox,webkit,mobile \
-  --output <TEST_FILE_PATH>
-```
-
----
-
-### 7. `replayfix verify-receipt`
-Independently verifies an RFC 6962 Merkle tree audit receipt through all 4 cryptographic trust layers:
-```bash
-replayfix verify-receipt <RECEIPT_PATH> [--trusted-key <64_HEX_PUBKEY>] [--json]
-```
-
----
-
-### 8. `replayfix notary`
-Interacts with the append-only cryptographic transparency ledger (`transparency_log.json`):
-```bash
-# Append receipt to transparency log:
-replayfix notary append --receipt <RECEIPT_PATH> [--log <LOG_PATH>]
-
-# Verify entire ledger integrity:
-replayfix notary verify-log --log <LOG_PATH>
-
-# Compute RFC 6962 consistency proof between tree sizes:
-replayfix notary consistency-proof --first <N> --second <M> --log <LOG_PATH>
-```
-
----
-
-## Deterministic Exit Codes
-
-| Exit Code | Constant | Meaning |
+| Exit Code | Constant | Triage Status / Condition |
 | :---: | :--- | :--- |
-| `0` | `SUCCESS` | Pipeline succeeded and repair verified. |
-| `1` | `DOCTOR_ERROR` | Missing platform dependencies. |
-| `2` | `USAGE_ERROR` | Invalid CLI flags or malformed inputs. |
-| `10` | `GATE1_NOT_RED` | Bug failed to reproduce counterfactually on baseline. |
-| `11` | `SECURITY_VIOLATION` | Base repo mutation, path traversal, or anti-cheat violation. |
-| `21` | `QUARANTINE_FAILED` | Repair attempt budget exhausted. |
-| `31` | `REGRESSION_DETECTED` | Candidate patch broke pre-existing regression tests. |
-| `40` | `RECEIPT_INVALID` | Invalid Merkle proof or unverified Ed25519 signature. |
+| **`0`** | `SUCCESS` | `VERIFIED_REPAIRED`: Gate 1 RED reproduced, patch applied, Gate 2 GREEN $	imes 2$ verified, receipt signed. |
+| **`1`** | `INTERNAL_OR_SYSTEM_ERROR` | Environment check failure (`doctor`) or unexpected I/O error. |
+| **`2`** | `CLI_USAGE_ERROR` | Invalid CLI arguments, missing required flags, or disallowed model/effort configuration. |
+| **`10`** | `GATE1_NOT_RED` | `GATE1_NOT_RED` / `CONTRACT_MISMATCH`: Defect did not reproduce on Gate 1 baseline. |
+| **`11`** | `SECURITY_VIOLATION` | `SECURITY_VIOLATION` / `BASE_REPO_DIRTY_MUTATION_DETECTED`: Test freeze violation, path traversal, or $\Delta	ext{repo} 
+eq 0$. |
+| **`12`** | `NON_INTERACTIVE_REFUSAL` | `--apply` requested in a non-interactive terminal without `--yes`. |
+| **`13`** | `USER_REJECTED_PATCH` | Operator declined patch application at the interactive confirmation prompt. |
+| **`20`** | `BRIDGE_EXECUTION_FAILED` | Playwright CDP bridge process timeout or browser crash. |
+| **`21`** | `QUARANTINE_REPAIR_FAILED` | Exhausted all 3 bounded repair attempts or failed Gate 3 stress stability quorum. |
+| **`22`** | `AMBIGUOUS_GROUNDING` | Top DOM candidates at `(click_x, click_y)` tied within `< 0.25` score margin. |
+| **`25`** | `ENVIRONMENT_SETUP_FAILED` | Ephemeral application server failed healthcheck readiness within timeout. |
+| **`30`** | `REPAIR_VERIFICATION_FAILED` | `REPAIR_NOOP_REJECTED`, `PATCH_APPLY_FAILED`, or `GATE2_NOT_GREEN`. |
+| **`31`** | `REGRESSION_DETECTED` | Candidate patch introduced new failures into the pre-existing test suite. |
+| **`32`** | `QUARANTINE_INVERTED_BASELINE` | Clean reference branch failed while buggy branch passed. |
+| **`40`** | `CRYPTO_VERIFICATION_FAILED` | Merkle inclusion proof mismatch, artifact tampering, or invalid Ed25519 signature. |
