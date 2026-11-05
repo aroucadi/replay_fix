@@ -656,7 +656,20 @@ impl MockHealer {
             .as_ref()
             .and_then(|vt| vt.keyframe_paths.first())
             .and_then(|p| std::fs::read(p).ok());
-        let gate1_diagnostic_msg = if let Some((to_x, to_y)) = drag_target_coords {
+        let is_drag_target = gate1_grounded.candidate.role == "slider"
+            || gate1_grounded
+                .candidate
+                .accessible_name
+                .to_ascii_lowercase()
+                .contains("resize")
+            || gate1_grounded
+                .candidate
+                .accessible_name
+                .to_ascii_lowercase()
+                .contains("handle");
+        let gate1_diagnostic_msg = if let Some((to_x, to_y)) =
+            drag_target_coords.filter(|_| is_drag_target)
+        {
             format!(
                 "Gate 1 RED on contract '{}': dragging target '{}' from ({}, {}) to ({}, {}) exhibited severe bounding-box position jitter (jitter_score_bps > 500) because resizeHandler does not compensate deltaX/deltaY when the handle's bounding box shifts in the viewport during top/left ('n'/'w'/'nw') resizing",
                 fixture.contract.contract_id,
@@ -1573,8 +1586,20 @@ impl MockHealer {
             (String::new(), String::new())
         };
 
+        let is_drag_target = grounded.candidate.role == "slider"
+            || grounded
+                .candidate
+                .accessible_name
+                .to_ascii_lowercase()
+                .contains("resize")
+            || grounded
+                .candidate
+                .accessible_name
+                .to_ascii_lowercase()
+                .contains("handle");
+
         let (clicked, click_errors, result_text, jitter_score_bps) =
-            if let Some((to_x, to_y)) = drag_target_coords {
+            if let Some((to_x, to_y)) = drag_target_coords.filter(|_| is_drag_target) {
                 let drag_resp = bridge.send_command(&BridgeCommand::DragAndObserve {
                     from_x: click_x,
                     from_y: click_y,
