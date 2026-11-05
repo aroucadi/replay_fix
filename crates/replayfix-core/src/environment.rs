@@ -365,8 +365,13 @@ impl ManagedSpaServer {
             let nm = base.join("node_modules");
             if nm.is_dir() {
                 if let Ok(canon_nm) = fs::canonicalize(&nm) {
-                    cmd.env("NODE_PATH", &canon_nm);
-                    let bin_dir = canon_nm.join(".bin");
+                    let clean_nm_str = canon_nm
+                        .to_string_lossy()
+                        .trim_start_matches(r"\\?\")
+                        .to_string();
+                    let clean_nm = Path::new(&clean_nm_str);
+                    cmd.env("NODE_PATH", &clean_nm_str);
+                    let bin_dir = clean_nm.join(".bin");
                     if bin_dir.is_dir() {
                         let sep = if cfg!(windows) { ";" } else { ":" };
                         let current_path = std::env::var("PATH").unwrap_or_default();
