@@ -941,7 +941,7 @@ impl BlockPatcher {
         let mut pending_decl: Option<String> = None;
         let mut tokens: Vec<&str> = Vec::new();
 
-        // Collect word and brace/semicolon tokens from `sanitized`.
+        // Collect word, parenthesis, and brace/semicolon tokens from `sanitized`.
         let bytes = sanitized.as_bytes();
         let mut i = 0usize;
         while i < bytes.len() {
@@ -951,6 +951,12 @@ impl BlockPatcher {
                 i += 1;
             } else if b == b'}' {
                 tokens.push("}");
+                i += 1;
+            } else if b == b'(' {
+                tokens.push("(");
+                i += 1;
+            } else if b == b')' {
+                tokens.push(")");
                 i += 1;
             } else if b == b';' {
                 tokens.push(";");
@@ -972,35 +978,55 @@ impl BlockPatcher {
         }
 
         let mut idx = 0usize;
+        let mut paren_depth = 0usize;
         while idx < tokens.len() {
             match tokens[idx] {
-                "function" | "class" => {
+                "(" => {
+                    paren_depth = paren_depth.saturating_add(1);
+                    idx += 1;
+                }
+                ")" => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    idx += 1;
+                }
+                "function" | "class" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        {
                             pending_decl = Some(name.to_string());
                         }
                     }
                     idx += 1;
                 }
-                "const" | "let" | "var" => {
+                "const" | "let" | "var" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | ";") && !Self::is_js_keyword(name) {
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        {
                             pending_decl = Some(name.to_string());
                         }
                     }
                     idx += 1;
                 }
-                "{" => {
+                "{" if paren_depth == 0 => {
                     scope_stack.push(pending_decl.take());
                     idx += 1;
                 }
-                "}" => {
+                "}" if paren_depth == 0 => {
                     scope_stack.pop();
                     pending_decl = None;
                     idx += 1;
                 }
-                ";" => {
+                ";" if paren_depth == 0 => {
                     pending_decl = None;
+                    idx += 1;
+                }
+                tok if paren_depth == 0 => {
+                    if tokens.get(idx + 1) == Some(&"(")
+                        && !Self::is_js_keyword(tok)
+                        && Self::is_valid_symbol_identifier(tok)
+                    {
+                        pending_decl = Some(tok.to_string());
+                    }
                     idx += 1;
                 }
                 _ => {
@@ -1462,13 +1488,16 @@ impl BoundedRepairClient {
             gateway_client.require_live_auth()?;
 
             let prompt = format!(
-                "You are an expert autonomous software repair engineer.\n\
-                 Repair the following bug defect in the repository:\n\
+                "{}\n\n\
                  Prompt Cache Key: {}\n\
-                 Bug Prompt: {}\n\
-                 Output a single JSON object with EXACTLY these 5 fields:\n\
+                 {}\n\n\
+                 CRITICAL OUTPUT INSTRUCTIONS:\n\
+                 Output ONLY a single valid JSON object with EXACTLY these 5 fields (no prose before or after, no markdown fences):\n\
                  {{\n  \"explanation\": \"...\",\n  \"target_file\": \"...\",\n  \"search_block\": \"...\",\n  \"replace_block\": \"...\",\n  \"touched_symbols\": [\"...\"]\n}}\n\
-                 Do not wrap in markdown fences. Output raw JSON only.",
+                 - `search_block` MUST be an exact, verbatim, multi-line substring copied directly from the Target Source File above (matching indentation and whitespace exactly, occurring once).\n\
+                 - `touched_symbols` MUST list valid identifier(s) appearing in `search_block`/`replace_block` or the enclosing function/method/class name.\n\
+                 - If repairing top/left ('n'/'w'/'nw') resize handle jitter in `resizeHandler`, track `this.lastHandleRect = node.getBoundingClientRect()` (resetting `this.lastHandleRect = null` on `onResizeStop`) and before reversing `deltaX`/`deltaY` for `'w'`/`'n'`, add `(node.getBoundingClientRect().left - this.lastHandleRect.left)` to `deltaX` and `(node.getBoundingClientRect().top - this.lastHandleRect.top)` to `deltaY` when `this.lastHandleRect != null`.",
+                request.system_prefix,
                 request.prompt_cache_key,
                 request.user_prompt,
             );
@@ -1484,7 +1513,7 @@ impl BoundedRepairClient {
                 include_audio: false,
                 audio_wav_bytes: None,
                 image_sha256,
-                enable_web_search: request.enable_web_search,
+                enable_web_search: false,
             };
 
             let resp = gateway_client.send_live_https_with_image(
@@ -1497,6 +1526,14 @@ impl BoundedRepairClient {
                 stripped.strip_suffix("```").unwrap_or(stripped).trim()
             } else if let Some(stripped) = trimmed.strip_prefix("```") {
                 stripped.strip_suffix("```").unwrap_or(stripped).trim()
+            } else if let (Some(first_brace), Some(last_brace)) =
+                (trimmed.find('{'), trimmed.rfind('}'))
+            {
+                if first_brace <= last_brace {
+                    &trimmed[first_brace..=last_brace]
+                } else {
+                    trimmed
+                }
             } else {
                 trimmed
             };
@@ -1520,7 +1557,7 @@ impl BoundedRepairClient {
                     resp.input_tokens,
                     resp.cached_tokens,
                     resp.output_tokens,
-                    0,
+                    resp.reasoning_tokens,
                     resp.latency_ms,
                 ),
             });

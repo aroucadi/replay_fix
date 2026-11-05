@@ -59,6 +59,131 @@ pub struct ModelProvenanceRecord {
     pub model_repair: String,
 }
 
+/// Classification of execution authenticity for each verification and repair stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StageExecutionStatus {
+    Real,
+    Heuristic,
+    Mocked,
+    Hardcoded,
+    Skipped,
+    Failed,
+    Unverified,
+}
+
+impl StageExecutionStatus {
+    #[must_use]
+    pub fn as_str_desc(&self) -> &'static str {
+        match self {
+            Self::Real => "Live provider / browser verified",
+            Self::Heuristic => "Derived via heuristic / optical flow",
+            Self::Mocked => "Simulated deterministic mock fixture",
+            Self::Hardcoded => "Synthetic hardcoded test constant",
+            Self::Skipped => "Not required for this invocation",
+            Self::Failed => "Execution failed or rejected",
+            Self::Unverified => "Unverified stage execution",
+        }
+    }
+}
+
+impl std::fmt::Display for StageExecutionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Real => write!(f, "REAL"),
+            Self::Heuristic => write!(f, "HEURISTIC"),
+            Self::Mocked => write!(f, "MOCKED"),
+            Self::Hardcoded => write!(f, "HARDCODED"),
+            Self::Skipped => write!(f, "SKIPPED"),
+            Self::Failed => write!(f, "FAILED"),
+            Self::Unverified => write!(f, "UNVERIFIED"),
+        }
+    }
+}
+
+/// Explicit forensic matrix of execution authenticity across all pipeline stages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StageExecutionMatrix {
+    pub video_ingestion: StageExecutionStatus,
+    pub sam_spatial_grounding: StageExecutionStatus,
+    pub interaction_trajectory: StageExecutionStatus,
+    pub deliberation_agent_loop: StageExecutionStatus,
+    pub code_patch_synthesis: StageExecutionStatus,
+    pub gate1_baseline: StageExecutionStatus,
+    pub gate2_stability: StageExecutionStatus,
+    pub gate3_stress_quorum: StageExecutionStatus,
+    pub cryptographic_attestation: StageExecutionStatus,
+}
+
+impl StageExecutionMatrix {
+    pub fn live_ai_repaired(
+        has_video: bool,
+        sam_is_live: bool,
+        has_stress: bool,
+        has_attestation: bool,
+    ) -> Self {
+        Self {
+            video_ingestion: if has_video {
+                StageExecutionStatus::Real
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            sam_spatial_grounding: if !has_video {
+                StageExecutionStatus::Skipped
+            } else if sam_is_live {
+                StageExecutionStatus::Real
+            } else {
+                StageExecutionStatus::Heuristic
+            },
+            interaction_trajectory: if has_video {
+                StageExecutionStatus::Real
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            deliberation_agent_loop: StageExecutionStatus::Real,
+            code_patch_synthesis: StageExecutionStatus::Real,
+            gate1_baseline: StageExecutionStatus::Real,
+            gate2_stability: StageExecutionStatus::Real,
+            gate3_stress_quorum: if has_stress {
+                StageExecutionStatus::Real
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            cryptographic_attestation: if has_attestation {
+                StageExecutionStatus::Real
+            } else {
+                StageExecutionStatus::Skipped
+            },
+        }
+    }
+
+    pub fn deterministic_mock(has_video: bool) -> Self {
+        Self {
+            video_ingestion: if has_video {
+                StageExecutionStatus::Heuristic
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            sam_spatial_grounding: if has_video {
+                StageExecutionStatus::Mocked
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            interaction_trajectory: if has_video {
+                StageExecutionStatus::Mocked
+            } else {
+                StageExecutionStatus::Skipped
+            },
+            deliberation_agent_loop: StageExecutionStatus::Mocked,
+            code_patch_synthesis: StageExecutionStatus::Mocked,
+            gate1_baseline: StageExecutionStatus::Mocked,
+            gate2_stability: StageExecutionStatus::Mocked,
+            gate3_stress_quorum: StageExecutionStatus::Skipped,
+            cryptographic_attestation: StageExecutionStatus::Mocked,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditReceipt {
     pub schema_version: String,
@@ -102,6 +227,8 @@ pub struct AuditReceipt {
     pub merkle_root: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation: Option<AttestationRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_classification: Option<StageExecutionMatrix>,
     pub created_at: String,
 }
 
@@ -1013,6 +1140,7 @@ mod tests {
             deliberation: None,
             merkle_root: None,
             attestation: None,
+            stage_classification: None,
             created_at: timestamp_now(),
         };
 
@@ -1072,5 +1200,30 @@ mod tests {
         .is_err());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_stage_execution_matrix_classification_and_display() {
+        let live = StageExecutionMatrix::live_ai_repaired(true, true, true, true);
+        assert_eq!(live.video_ingestion, StageExecutionStatus::Real);
+        assert_eq!(live.sam_spatial_grounding, StageExecutionStatus::Real);
+        assert_eq!(live.deliberation_agent_loop, StageExecutionStatus::Real);
+        assert_eq!(live.code_patch_synthesis, StageExecutionStatus::Real);
+        assert_eq!(live.gate1_baseline, StageExecutionStatus::Real);
+        assert_eq!(live.gate2_stability, StageExecutionStatus::Real);
+        assert_eq!(live.gate3_stress_quorum, StageExecutionStatus::Real);
+        assert_eq!(live.cryptographic_attestation, StageExecutionStatus::Real);
+        assert_eq!(live.gate1_baseline.to_string(), "REAL");
+
+        let mock = StageExecutionMatrix::deterministic_mock(false);
+        assert_eq!(mock.video_ingestion, StageExecutionStatus::Skipped);
+        assert_eq!(mock.sam_spatial_grounding, StageExecutionStatus::Skipped);
+        assert_eq!(mock.deliberation_agent_loop, StageExecutionStatus::Mocked);
+        assert_eq!(mock.deliberation_agent_loop.to_string(), "MOCKED");
+
+        let json = serde_json::to_string(&live).unwrap();
+        assert!(json.contains("\"gate1_baseline\":\"REAL\""));
+        let parsed: StageExecutionMatrix = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, live);
     }
 }

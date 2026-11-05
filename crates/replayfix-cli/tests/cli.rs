@@ -370,6 +370,7 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
             "assets/fixtures/rf01_demo.mp4",
             "--repo",
             ".",
+            "--mock-heal",
         ])
         .output()
         .unwrap();
@@ -1127,6 +1128,8 @@ fn test_live_ai_auth_guard_and_deterministic_fixture_metapulse_videos() {
             &dir,
             &[
                 "run",
+                "--bug",
+                bug_id,
                 "--video",
                 &video_abs,
                 "--repo",

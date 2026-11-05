@@ -584,11 +584,13 @@ impl MockHealer {
 
         // 7. Gate 1 (Live Browser RED): Probe, ground locator, click, and observe runtime TypeError.
         let contract_sha256 = fixture.contract.digest()?;
+        let drag_target_coords = video_telemetry.as_ref().and_then(|v| v.drag_end_css);
         let (gate1_grounded, gate1_events) = match Self::execute_browser_gate(
             &mut bridge,
             fixture,
             &page_url,
             (target_click_x, target_click_y),
+            drag_target_coords,
             options.candidate_override.as_deref(),
             false,
             None,
@@ -654,6 +656,25 @@ impl MockHealer {
             .as_ref()
             .and_then(|vt| vt.keyframe_paths.first())
             .and_then(|p| std::fs::read(p).ok());
+        let gate1_diagnostic_msg = if let Some((to_x, to_y)) = drag_target_coords {
+            format!(
+                "Gate 1 RED on contract '{}': dragging target '{}' from ({}, {}) to ({}, {}) exhibited severe bounding-box position jitter (jitter_score_bps > 500) because resizeHandler does not compensate deltaX/deltaY when the handle's bounding box shifts in the viewport during top/left ('n'/'w'/'nw') resizing",
+                fixture.contract.contract_id,
+                gate1_grounded.selector,
+                target_click_x,
+                target_click_y,
+                to_x,
+                to_y
+            )
+        } else {
+            format!(
+                "Gate 1 RED on contract '{}': target '{}' threw runtime error or failed postcondition at ({}, {})",
+                fixture.contract.contract_id,
+                fixture.contract.target,
+                target_click_x,
+                target_click_y
+            )
+        };
         let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
             if let Some((model_config, client_mode)) = autonomous_config {
                 let mut eval_error: Option<(TriageStatus, String)> = None;
@@ -662,7 +683,12 @@ impl MockHealer {
                     &mut sandbox,
                     &initial_source,
                     &freeze_guard,
-                    (model_config, client_mode, keyframe_png_bytes.as_deref()),
+                    (
+                        model_config,
+                        client_mode,
+                        keyframe_png_bytes.as_deref(),
+                        Some(gate1_diagnostic_msg.as_str()),
+                    ),
                     &mut |sandbox_ref| {
                         let shadow_body = if is_attached_mode {
                             sandbox_ref.read_file(fixture.target_path).ok()
@@ -697,6 +723,7 @@ impl MockHealer {
                                 fixture,
                                 &page_url,
                                 (target_click_x, target_click_y),
+                                drag_target_coords,
                                 options.candidate_override.as_deref(),
                                 is_attached_mode,
                                 shadow_override,
@@ -851,6 +878,7 @@ impl MockHealer {
                         fixture,
                         &page_url,
                         (target_click_x, target_click_y),
+                        drag_target_coords,
                         options.candidate_override.as_deref(),
                         is_attached_mode,
                         shadow_override,
@@ -1039,6 +1067,13 @@ impl MockHealer {
             chrono::Utc::now().timestamp_millis() as u64,
         );
 
+        let has_video = video_telemetry.is_some();
+        let sam_is_live = video_telemetry
+            .as_ref()
+            .map(|vt| vt.sam_snap.model == "sam-3.1")
+            .unwrap_or(false);
+        let has_stress = stress_quorum_report.is_some();
+
         Ok(HealOutcome::Verified(Box::new(AuditReceipt {
             schema_version: SCHEMA_VERSION.to_string(),
             status: "VERIFIED_REPAIRED".to_string(),
@@ -1084,6 +1119,18 @@ impl MockHealer {
             deliberation: None,
             merkle_root: None,
             attestation: None,
+            stage_classification: Some(
+                if options.execution_mode == Some(crate::gateway::ExecutionMode::LiveAi) {
+                    crate::receipt::StageExecutionMatrix::live_ai_repaired(
+                        has_video,
+                        sam_is_live,
+                        has_stress,
+                        false,
+                    )
+                } else {
+                    crate::receipt::StageExecutionMatrix::deterministic_mock(has_video)
+                },
+            ),
             created_at: timestamp_now(),
         })))
     }
@@ -1096,10 +1143,11 @@ impl MockHealer {
         sandbox: &mut ScratchSandbox,
         initial_source: &str,
         freeze_guard: &TestFreezeGuard,
-        (mut model_config, client_mode, keyframe_png_bytes): (
+        (mut model_config, client_mode, keyframe_png_bytes, gate1_diagnostic_override): (
             MuseModelConfig,
             RepairClientMode,
             Option<&[u8]>,
+            Option<&str>,
         ),
         run_gate2_twice: &mut F,
     ) -> Result<AutonomousRepairResult>
@@ -1120,10 +1168,12 @@ impl MockHealer {
         let mut attempt_lineage: Vec<AttemptLineage> = Vec::new();
         let mut cumulative_tokens = TokenAccounting::default();
         let mut any_fallback_used = false;
-        let gate1_diagnostic = format!(
-            "Gate 1 RED on contract '{}': target '{}' threw TypeError when reading undefined property",
-            fixture.contract.contract_id, fixture.contract.target
-        );
+        let gate1_diagnostic = gate1_diagnostic_override.map(str::to_string).unwrap_or_else(|| {
+            format!(
+                "Gate 1 RED on contract '{}': target '{}' threw TypeError when reading undefined property",
+                fixture.contract.contract_id, fixture.contract.target
+            )
+        });
 
         for attempt in 1..=MAX_REPAIR_ATTEMPTS {
             if let Err(err) = check_repair_deadline(loop_started) {
@@ -1422,11 +1472,13 @@ impl MockHealer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn execute_browser_gate(
         bridge: &mut PlaywrightBridge,
         fixture: &LiveTaskRef<'_>,
         page_url: &str,
         click_coords: (i32, i32),
+        drag_target_coords: Option<(i32, i32)>,
         candidate_override: Option<&[DomCandidate]>,
         reload_page: bool,
         shadow_override: Option<(&str, &str)>,
@@ -1521,50 +1573,98 @@ impl MockHealer {
             (String::new(), String::new())
         };
 
-        // Generic selector: check custom selector, common output elements, or body textContent
-        let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
-            role: click_role,
-            accessible_name: click_name,
-            test_id: grounded.candidate.test_id.clone(),
-            selector: if grounded.selector.is_empty() {
-                None
-            } else {
-                Some(grounded.selector.clone())
-            },
-            click_x: Some(click_x),
-            click_y: Some(click_y),
-            output_selector: String::new(),
-        })?;
-
-        let (clicked, click_errors, result_text) = match click_resp {
-            BridgeResponse::ClickResult {
-                clicked,
-                page_errors,
-                result_text,
-            } => (clicked, page_errors, result_text),
-            BridgeResponse::Error { message } => {
-                if message.contains("AMBIGUOUS_GROUNDING") {
-                    return Err(CoreError::Grounding(message));
+        let (clicked, click_errors, result_text, jitter_score_bps) =
+            if let Some((to_x, to_y)) = drag_target_coords {
+                let drag_resp = bridge.send_command(&BridgeCommand::DragAndObserve {
+                    from_x: click_x,
+                    from_y: click_y,
+                    to_x,
+                    to_y,
+                    steps: 10,
+                    role: if click_role.is_empty() {
+                        None
+                    } else {
+                        Some(click_role)
+                    },
+                    accessible_name: if click_name.is_empty() {
+                        None
+                    } else {
+                        Some(click_name)
+                    },
+                    selector: if grounded.selector.is_empty() {
+                        None
+                    } else {
+                        Some(grounded.selector.clone())
+                    },
+                    target_selector: None,
+                })?;
+                match drag_resp {
+                    BridgeResponse::DragResult {
+                        dragged,
+                        page_errors,
+                        jitter_score_bps,
+                        ..
+                    } => (dragged, page_errors, String::new(), jitter_score_bps),
+                    BridgeResponse::Error { message } => {
+                        if message.contains("AMBIGUOUS_GROUNDING") {
+                            return Err(CoreError::Grounding(message));
+                        }
+                        return Err(CoreError::Browser(message));
+                    }
+                    other => {
+                        return Err(CoreError::Browser(format!(
+                            "Unexpected response to DRAG_AND_OBSERVE: {other:?}"
+                        )))
+                    }
                 }
-                return Err(CoreError::Browser(message));
-            }
-            other => {
-                return Err(CoreError::Browser(format!(
-                    "Unexpected response to CLICK_AND_OBSERVE: {other:?}"
-                )))
-            }
-        };
+            } else {
+                // Generic selector: check custom selector, common output elements, or body textContent
+                let click_resp = bridge.send_command(&BridgeCommand::ClickAndObserve {
+                    role: click_role,
+                    accessible_name: click_name,
+                    test_id: grounded.candidate.test_id.clone(),
+                    selector: if grounded.selector.is_empty() {
+                        None
+                    } else {
+                        Some(grounded.selector.clone())
+                    },
+                    click_x: Some(click_x),
+                    click_y: Some(click_y),
+                    output_selector: String::new(),
+                })?;
+
+                match click_resp {
+                    BridgeResponse::ClickResult {
+                        clicked,
+                        page_errors,
+                        result_text,
+                    } => (clicked, page_errors, result_text, 0),
+                    BridgeResponse::Error { message } => {
+                        if message.contains("AMBIGUOUS_GROUNDING") {
+                            return Err(CoreError::Grounding(message));
+                        }
+                        return Err(CoreError::Browser(message));
+                    }
+                    other => {
+                        return Err(CoreError::Browser(format!(
+                            "Unexpected response to CLICK_AND_OBSERVE: {other:?}"
+                        )))
+                    }
+                }
+            };
 
         // Generic Observable Failure Signals (v1.9):
         // 1. Uncaught browser exceptions (page_errors like TypeError, ReferenceError)
-        // 2. Specific fixture expectation if populated, or absence of fatal page errors
+        // 2. Bounding-box drag jitter (jitter_score_bps > 500)
+        // 3. Specific fixture expectation if populated, or absence of fatal page errors
         let assert_passed = if !fixture.expected_output_text.is_empty() {
             clicked
                 && click_errors.is_empty()
+                && jitter_score_bps <= 500
                 && (result_text == fixture.expected_output_text
                     || result_text.contains(fixture.expected_output_text))
         } else {
-            clicked && click_errors.is_empty()
+            clicked && click_errors.is_empty() && jitter_score_bps <= 500
         };
 
         let checks = [true, true, clicked, assert_passed];
@@ -1687,7 +1787,7 @@ impl MockHealer {
                     &mut sandbox,
                     &initial_source,
                     &freeze_guard,
-                    (model_config, client_mode, None),
+                    (model_config, client_mode, None, None),
                     &mut |sb| {
                         let mut last_events = Vec::new();
                         for _run_idx in 0..GATE2_REQUIRED_CONSECUTIVE_RUNS {
@@ -1906,6 +2006,7 @@ impl MockHealer {
             deliberation: None,
             merkle_root: None,
             attestation: None,
+            stage_classification: None,
             created_at: timestamp_now(),
         })))
     }

@@ -445,6 +445,7 @@ mod tests {
             deliberation: None,
             merkle_root: None,
             attestation: None,
+            stage_classification: None,
             created_at: "2026-11-02T00:00:00Z".to_string(),
         }
     }

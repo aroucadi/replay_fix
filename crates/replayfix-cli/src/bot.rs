@@ -361,6 +361,7 @@ impl IssueTriageRunner {
             deliberation: Some(delib_outcome.session),
             merkle_root: None,
             attestation: None,
+            stage_classification: None,
             created_at: timestamp_now(),
         };
 

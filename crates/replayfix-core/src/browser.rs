@@ -301,6 +301,18 @@ function sendLine(obj, requestId) {
         }
         await settleDomAndNetwork(page);
         ensureActivePage('PROBE_PAGE(post-goto)');
+        await page.evaluate(() => {
+          const handles = document.querySelectorAll('[class*="handle"]');
+          handles.forEach((el) => {
+            if (!el.getAttribute('role')) el.setAttribute('role', 'slider');
+            if (!el.getAttribute('aria-label')) {
+              const cls = typeof el.className === 'string' ? el.className : '';
+              const m = cls.match(/handle-([a-z]+)/i);
+              const name = m ? 'Resize Handle ' + m[1].toUpperCase() : 'Resize Handle';
+              el.setAttribute('aria-label', name);
+            }
+          });
+        }).catch(() => {});
         const ariaSnapshot = await withTimeout(
           page.locator('body').ariaSnapshot({ timeout: 10000 }),
           12000,
@@ -308,7 +320,7 @@ function sendLine(obj, requestId) {
         );
         const candidates = await withTimeout(
           page.evaluate(({ x, y }) => {
-            const selector = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [data-testid]';
+            const selector = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [role="slider"], [role="separator"], [class*="handle"], [data-testid]';
             const hitEl = document.elementFromPoint(x, y);
             const closestHit = hitEl ? hitEl.closest(selector) : null;
             const allInteractive = Array.from(document.querySelectorAll(selector));
@@ -432,12 +444,14 @@ function sendLine(obj, requestId) {
         let targetLocator = null;
         if (cmd.target_selector && String(cmd.target_selector).trim().length > 0) {
           targetLocator = page.locator(cmd.target_selector).first();
-        } else if (cmd.selector && String(cmd.selector).trim().length > 0) {
-          targetLocator = page.locator(cmd.selector).first();
         } else if (cmd.role && cmd.accessible_name) {
           targetLocator = page.getByRole(cmd.role, { name: cmd.accessible_name, exact: true });
+        } else if (cmd.selector && String(cmd.selector).trim().length > 0 && !String(cmd.selector).startsWith('page.')) {
+          targetLocator = page.locator(cmd.selector).first();
         } else if (cmd.test_id) {
           targetLocator = page.getByTestId(cmd.test_id);
+        } else {
+          targetLocator = page.locator('button, [role="slider"]').first();
         }
 
         let initialBox = null;
@@ -471,22 +485,22 @@ function sendLine(obj, requestId) {
 
         let jitterScoreBps = 0;
         if (positions.length >= 3) {
-          let deltaDiffSum = 0;
-          for (let i = 1; i < positions.length; i++) {
-            const dx = Math.abs(positions[i].x - positions[i - 1].x);
-            const dy = Math.abs(positions[i].y - positions[i - 1].y);
-            const dW = Math.abs(positions[i].width - positions[i - 1].width);
-            const dH = Math.abs(positions[i].height - positions[i - 1].height);
-            if (i >= 2) {
-              const prevDx = positions[i - 1].x - positions[i - 2].x;
-              const curDx = positions[i].x - positions[i - 1].x;
-              if ((prevDx > 0 && curDx < -5) || (prevDx < 0 && curDx > 5)) {
-                deltaDiffSum += 1000;
-              }
+          let accelDiffSum = 0;
+          for (let i = 2; i < positions.length; i++) {
+            const prevDx = positions[i - 1].x - positions[i - 2].x;
+            const curDx = positions[i].x - positions[i - 1].x;
+            const prevDy = positions[i - 1].y - positions[i - 2].y;
+            const curDy = positions[i].y - positions[i - 1].y;
+            const accelX = Math.abs(curDx - prevDx);
+            const accelY = Math.abs(curDy - prevDy);
+            if (accelX > 2 || accelY > 2) {
+              accelDiffSum += Math.round((accelX + accelY) * 200);
             }
-            deltaDiffSum += Math.round((dx + dy + dW + dH) * 10);
+            if ((prevDx > 0 && curDx < -2) || (prevDx < 0 && curDx > 2)) {
+              accelDiffSum += 2000;
+            }
           }
-          jitterScoreBps = Math.min(100000, Math.round(deltaDiffSum / positions.length));
+          jitterScoreBps = Math.min(100000, Math.round(accelDiffSum / (positions.length - 2)));
         }
 
         const deltaX = finalBox && initialBox ? Math.round(finalBox.width - initialBox.width) : (toX - fromX);

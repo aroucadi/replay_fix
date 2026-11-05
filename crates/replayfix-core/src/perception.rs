@@ -763,15 +763,29 @@ impl VideoTelemetry {
                     CoreError::Grounding("No keyframe extracted for live SAM 3.1".to_string())
                 })?;
                 let png_bytes = std::fs::read(kf_path)?;
-                let (snap, lat) = SamSegmenter::segment_live(
+                let (snap, lat) = match SamSegmenter::segment_live(
                     gw,
                     &png_bytes,
                     (interaction.x_video, interaction.y_video),
                     &calibration,
-                )?;
+                ) {
+                    Ok((s, l)) => (s, Some(l)),
+                    Err(_) => {
+                        let mut s = SamSegmenter::segment_from_frame_pair(
+                            &frames.frames[before_idx],
+                            &frames.frames[after_idx],
+                            (frames.width, frames.height),
+                            (video_metadata.width, video_metadata.height),
+                            (interaction.x_video, interaction.y_video),
+                            &calibration,
+                        )?;
+                        s.model = "local_diff_heuristic".to_string();
+                        (s, None)
+                    }
+                };
                 let imgs_processed = written_keyframes.len() as u64;
                 let vid_frames_processed = frames.frames.len() as u64;
-                (snap, Some(lat), imgs_processed, vid_frames_processed)
+                (snap, lat, imgs_processed, vid_frames_processed)
             }
             crate::gateway::ExecutionMode::DeterministicFixture => {
                 let snap = SamSegmenter::segment_from_frame_pair(
@@ -801,7 +815,7 @@ impl VideoTelemetry {
                         )
                     })?;
                     gw.require_live_auth()?;
-                    Some(AsrTranscriber::transcribe_live(gw, wav_bytes)?)
+                    AsrTranscriber::transcribe_live(gw, wav_bytes).ok()
                 } else {
                     None
                 }
@@ -812,6 +826,54 @@ impl VideoTelemetry {
         };
 
         let mut actions = Vec::new();
+        let top_level_drag_end = if raw_trajectory.len() >= 2 {
+            let start_ev = &raw_trajectory[0];
+            raw_trajectory
+                .iter()
+                .skip(1)
+                .max_by_key(|ev| {
+                    let dx = ev.x_video - start_ev.x_video;
+                    let dy = ev.y_video - start_ev.y_video;
+                    dx * dx + dy * dy
+                })
+                .and_then(|end_ev| {
+                    let dx = end_ev.x_video - start_ev.x_video;
+                    let dy = end_ev.y_video - start_ev.y_video;
+                    if dx * dx + dy * dy >= 100 {
+                        calibration.to_css(end_ev.x_video, end_ev.y_video).ok()
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            let (ix, iy) = (interaction.x_video, interaction.y_video);
+            let mut max_disp = 0i64;
+            let mut best_pt = None;
+            for i in 0..frames.frames.len().saturating_sub(1) {
+                let change = RoiDiffer::pair_change(
+                    &frames.frames[i],
+                    &frames.frames[i + 1],
+                    frames.width,
+                    10,
+                );
+                if change.changed >= 30 {
+                    let (cx, cy) = change.centroid();
+                    let vx = (u64::from(cx) * u64::from(video_metadata.width)
+                        / u64::from(frames.width.max(1))) as i32;
+                    let vy = (u64::from(cy) * u64::from(video_metadata.height)
+                        / u64::from(frames.height.max(1))) as i32;
+                    let dx = i64::from(vx - ix);
+                    let dy = i64::from(vy - iy);
+                    let dist = dx * dx + dy * dy;
+                    if dist > max_disp && dist >= 100 {
+                        max_disp = dist;
+                        best_pt = Some((vx, vy));
+                    }
+                }
+            }
+            best_pt.and_then(|(bx, by)| calibration.to_css(bx, by).ok())
+        };
+
         for (idx, ev) in raw_trajectory.into_iter().enumerate() {
             let snap = if idx == 0 {
                 sam_snap.clone()
@@ -839,7 +901,9 @@ impl VideoTelemetry {
                 }
             };
 
-            let act_type = if let Some(ref cue) = narration {
+            let act_type = if idx == 0 && top_level_drag_end.is_some() {
+                ActionType::Drag
+            } else if let Some(ref cue) = narration {
                 let lower = cue.transcript.to_ascii_lowercase();
                 if lower.contains("type")
                     || lower.contains("enter")
@@ -852,6 +916,8 @@ impl VideoTelemetry {
                     || lower.contains("open")
                 {
                     ActionType::Navigate
+                } else if lower.contains("drag") || lower.contains("resize") {
+                    ActionType::Drag
                 } else {
                     ActionType::Click
                 }
@@ -863,7 +929,7 @@ impl VideoTelemetry {
                 t_ms: ev.t_ms,
                 action_type: act_type,
                 sam_snap: snap,
-                drag_end_css: None,
+                drag_end_css: if idx == 0 { top_level_drag_end } else { None },
                 narration_cue: narration.clone(),
                 latency_ms: sam_latency_ms,
             });
@@ -875,7 +941,7 @@ impl VideoTelemetry {
             video_metadata,
             interaction,
             sam_snap,
-            drag_end_css: None,
+            drag_end_css: top_level_drag_end,
             narration,
             keyframe_paths,
             action_trajectory,
@@ -1055,5 +1121,32 @@ data: [DONE]\n";
         let parsed_boxes = SamSegmenter::parse_wire_tokens(live_sam_wire).unwrap();
         assert_eq!(parsed_boxes.len(), 2);
         assert_eq!(parsed_boxes[1].centroid(), (535, 372));
+    }
+
+    #[test]
+    fn test_ingest_react_resizable_demo() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+        let p = root.join("benchmarks").join("react-resizable").join("DEMO_react-resizable_issue-136.mp4");
+        if !p.exists() {
+            return;
+        }
+        let kf = std::env::temp_dir().join(format!("kf-test-{}", std::process::id()));
+        let res = VideoTelemetry::ingest_with_mode(
+            &p,
+            &kf,
+            (1280, 720),
+            "DEMO_react-resizable_issue-136",
+            crate::gateway::ExecutionMode::DeterministicFixture,
+            None,
+        );
+        if let Ok(tel) = res {
+            println!("TEL SAM CENTROID: ({}, {})", tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css);
+            println!("TEL INTERACTION: ({}, {})", tel.interaction.x_video, tel.interaction.y_video);
+            println!("TEL DRAG END: {:?}", tel.drag_end_css);
+            println!("TEL TRAJ: {:?}", tel.action_trajectory.as_ref().map(|t| t.actions.len()));
+        } else if let Err(e) = res {
+            println!("TEL ERROR: {e}");
+        }
+        let _ = std::fs::remove_dir_all(&kf);
     }
 }

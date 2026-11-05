@@ -745,6 +745,8 @@ pub struct GatewayResponse {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cached_tokens: u64,
+    #[serde(default)]
+    pub reasoning_tokens: u64,
     pub cost_nanos: u64,
     pub latency_ms: u64,
     pub retries_attempted: u32,
@@ -866,6 +868,7 @@ impl MultimodalGateway {
                             input_tokens,
                             output_tokens,
                             cached_tokens,
+                            reasoning_tokens: 0,
                             cost_nanos,
                             latency_ms,
                             retries_attempted,
@@ -944,6 +947,7 @@ impl MultimodalGateway {
                         input_tokens,
                         output_tokens,
                         cached_tokens,
+                        reasoning_tokens: 0,
                         cost_nanos,
                         latency_ms,
                         retries_attempted,
@@ -1248,6 +1252,29 @@ impl MetaGatewayClient {
                         }
                     }
                 }
+            } else if request.requested_model == "muse-wonder-1.0" {
+                let start = std::time::Instant::now();
+                let fb_payload = build_payload("muse-spark-1.3");
+                if let Ok(resp) = http_client
+                    .post(&self.base_url)
+                    .bearer_auth(api_key)
+                    .json(&fb_payload)
+                    .send()
+                {
+                    if resp.status().as_u16() == 200 {
+                        if let Ok(body_val) = resp.json::<serde_json::Value>() {
+                            return Self::parse_live_json_response(
+                                &body_val,
+                                request,
+                                GatewayProvider::MetaAi,
+                                true,
+                                max_attempts,
+                                start.elapsed().as_millis() as u64,
+                                fingerprint,
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -1265,7 +1292,7 @@ impl MetaGatewayClient {
         latency_ms: u64,
         fingerprint: String,
     ) -> Result<GatewayResponse> {
-        if let Some(err_val) = body_val.get("error") {
+        if let Some(err_val) = body_val.get("error").filter(|v| !v.is_null()) {
             let msg = err_val
                 .get("message")
                 .and_then(|m| m.as_str())
@@ -1385,9 +1412,24 @@ impl MetaGatewayClient {
             })
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
+        let reasoning_tokens = body_val
+            .get("usage")
+            .and_then(|u| {
+                u.get("reasoning_tokens").or_else(|| {
+                    u.get("output_tokens_details")
+                        .and_then(|d| d.get("reasoning_tokens"))
+                })
+            })
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let slug = MuseModelSlug::parse(&serving_model).unwrap_or(MuseModelSlug::MuseSpark13);
-        let cost_nanos =
-            TokenAccounting::usage_nanos(slug, input_tokens, cached_tokens, output_tokens, 0);
+        let cost_nanos = TokenAccounting::usage_nanos(
+            slug,
+            input_tokens,
+            cached_tokens,
+            output_tokens,
+            reasoning_tokens,
+        );
         let tool_calls_invoked = body_val
             .get("output")
             .and_then(|v| v.as_array())
@@ -1421,6 +1463,7 @@ impl MetaGatewayClient {
             input_tokens,
             output_tokens,
             cached_tokens,
+            reasoning_tokens,
             cost_nanos,
             latency_ms,
             retries_attempted,
@@ -1430,6 +1473,37 @@ impl MetaGatewayClient {
             images_processed,
             video_frames_processed,
         })
+    }
+
+    /// Generate a live multi-turn deliberation thought via `POST https://api.meta.ai/v1/responses`
+    /// and return `(thought_text, TokenAccounting)`.
+    pub fn generate_deliberation_thought(
+        &self,
+        model_slug: &str,
+        turn_prompt: &str,
+    ) -> Result<(String, TokenAccounting)> {
+        let req = GatewayRequest {
+            role: ModelRole::FastSynthesis,
+            requested_model: model_slug.to_string(),
+            prompt: turn_prompt.to_string(),
+            reasoning_effort: Some("high".to_string()),
+            estimated_tokens: 512,
+            include_audio: false,
+            audio_wav_bytes: None,
+            image_sha256: None,
+            enable_web_search: false,
+        };
+        let resp = self.send_live_https(&req, None)?;
+        let slug = MuseModelSlug::parse(&resp.serving_model).unwrap_or(MuseModelSlug::MuseSpark13);
+        let usage = TokenAccounting::from_usage(
+            slug,
+            resp.input_tokens,
+            resp.cached_tokens,
+            resp.output_tokens,
+            0,
+            resp.latency_ms,
+        );
+        Ok((resp.output_text.trim().to_string(), usage))
     }
 
     /// Dispatch a keyframe PNG crop around `(cand_x, cand_y)` to `POST https://api.meta.ai/v1/responses`

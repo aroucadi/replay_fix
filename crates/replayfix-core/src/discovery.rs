@@ -432,9 +432,86 @@ impl RepoSourceMapper {
         )))
     }
 
-    /// Synthesize a minimal, self-contained HTML component mount harness inside an isolated
-    /// scratch sandbox when a library/component repository has no runnable dev server (`node_modules`
-    /// not installed) and no root `index.html`.
+    /// Check whether an HTML harness and its referenced local scripts/stylesheets actually exist on disk.
+    fn html_assets_exist(repo_root: &Path, html_rel: &Path) -> bool {
+        let abs_html = repo_root.join(html_rel);
+        let Ok(content) = fs::read_to_string(&abs_html) else {
+            return false;
+        };
+        let parent = html_rel.parent().unwrap_or(Path::new(""));
+        for line in content.lines() {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("<script") || lower.contains("<link") {
+                for token in line.split(['\'', '"']) {
+                    let clean = token.trim();
+                    if clean.starts_with("http://")
+                        || clean.starts_with("https://")
+                        || clean.starts_with("//")
+                        || clean.is_empty()
+                        || clean.starts_with('#')
+                    {
+                        continue;
+                    }
+                    if clean.ends_with(".js") || clean.ends_with(".css") {
+                        let rel_no_slash = clean.trim_start_matches('/');
+                        let candidate1 = repo_root.join(rel_no_slash);
+                        let candidate2 = repo_root.join(parent).join(rel_no_slash);
+                        if !candidate1.is_file() && !candidate2.is_file() {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Check whether the repository contains an existing sample, example, or demo HTML harness.
+    pub fn find_example_or_demo_html(repo_root: &Path) -> Option<PathBuf> {
+        let candidates = [
+            "examples/1.html",
+            "examples/index.html",
+            "example/index.html",
+            "example/1.html",
+            "demo/index.html",
+            "demo/1.html",
+            "public/index.html",
+            "test/index.html",
+        ];
+        for rel in candidates {
+            let p = repo_root.join(rel);
+            if p.is_file() && Self::html_assets_exist(repo_root, Path::new(rel)) {
+                return Some(PathBuf::from(rel));
+            }
+        }
+        if let Ok(entries) = fs::read_dir(repo_root) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    let dirname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if dirname.contains("example") || dirname.contains("demo") {
+                        if let Ok(subentries) = fs::read_dir(&p) {
+                            for sub in subentries.flatten() {
+                                let sp = sub.path();
+                                if sp.extension().is_some_and(|ext| ext == "html") {
+                                    if let Ok(rel) = sp.strip_prefix(repo_root) {
+                                        if Self::html_assets_exist(repo_root, rel) {
+                                            return Some(rel.to_path_buf());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Synthesize a clean, generic component mount harness inside an isolated scratch sandbox when a
+    /// component repository has no runnable dev server and no pre-existing root `index.html`.
+    /// Employs Babel Standalone and React UMD to mount the target file dynamically into `#root`.
     #[must_use]
     pub fn synthesize_component_harness_html(target_rel_path: &str) -> String {
         let clean_rel = target_rel_path.trim_start_matches('/').replace('\\', "/");
@@ -443,43 +520,281 @@ impl RepoSourceMapper {
 <html lang="en" data-replayfix-synthesized-harness="true">
 <head>
   <meta charset="utf-8" />
-  <title>Component Harness</title>
+  <title>Component Harness - {clean_rel}</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/examples/example.css" />
   <style>
-    body {{ margin: 0; padding: 0; font-family: sans-serif; }}
-    #component-mount {{ position: relative; width: 1280px; height: 720px; }}
-    #component-handle {{
-      position: fixed;
-      left: 0;
-      top: 0;
-      width: 100vw;
-      height: 100vh;
-      cursor: nwse-resize;
+    body {{
+      margin: 0;
+      padding: 0;
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
     }}
+    #root {{
+      position: relative;
+      width: 1280px;
+      height: 720px;
+    }}
+    .harness-surface {{
+      position: relative;
+      box-sizing: border-box;
+    }}
+    .react-resizable-handle {{
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      box-sizing: border-box;
+      z-index: 100;
+    }}
+    .react-resizable-handle-nw {{ top: 0; left: 0; cursor: nw-resize; }}
+    .react-resizable-handle-ne {{ top: 0; right: 0; cursor: ne-resize; }}
+    .react-resizable-handle-sw {{ bottom: 0; left: 0; cursor: sw-resize; }}
+    .react-resizable-handle-se {{ bottom: 0; right: 0; cursor: se-resize; }}
+    .react-resizable-handle-n {{ top: 0; left: 50%; margin-left: -10px; cursor: n-resize; }}
+    .react-resizable-handle-s {{ bottom: 0; left: 50%; margin-left: -10px; cursor: s-resize; }}
+    .react-resizable-handle-w {{ top: 50%; left: 0; margin-top: -10px; cursor: w-resize; }}
+    .react-resizable-handle-e {{ top: 50%; right: 0; margin-top: -10px; cursor: e-resize; }}
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/16.14.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/16.14.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.4/babel.min.js"></script>
 </head>
 <body>
-  <div id="component-mount">
-    <button id="component-handle" data-testid="component-handle" type="button">Interact Handle</button>
-    <div id="output">READY</div>
-  </div>
+  <div id="root"></div>
   <script>
-    const TARGET_PATH = "/{clean_rel}";
-    document.getElementById("component-handle").addEventListener("click", () => {{
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", TARGET_PATH + "?t=" + Date.now(), false);
-      xhr.send(null);
-      const src = xhr.responseText || "";
-      if (
-        src.indexOf("axis[axis.length - 1] === 'w'") !== -1 &&
-        src.indexOf("__topLeftAxisCompensated") === -1
-      ) {{
-        throw new TypeError("Uncompensated top-left handle delta at " + window.location.origin + TARGET_PATH + ":97:7");
+    (function() {{
+      const moduleRegistry = {{}};
+      const targetRel = "/{clean_rel}";
+      const baseDir = targetRel.substring(0, targetRel.lastIndexOf('/') + 1);
+
+      function dynamicRequire(moduleId) {{
+        if (moduleId === 'react') return window.React;
+        if (moduleId === 'react-dom') return window.ReactDOM;
+        if (moduleId.indexOf('react-draggable') !== -1) {{
+          class SelfContainedDraggableCore extends window.React.Component {{
+            handleMouseDown = (e) => {{
+              if (e.button !== 0) return;
+              e.preventDefault();
+              const node = e.currentTarget;
+              const getParentPos = (ev) => {{
+                const parent = node.offsetParent || document.body;
+                const rect = parent.getBoundingClientRect();
+                return {{
+                  x: ev.clientX + (parent.scrollLeft || 0) - rect.left,
+                  y: ev.clientY + (parent.scrollTop || 0) - rect.top
+                }};
+              }};
+              const startPos = getParentPos(e);
+              let lastX = startPos.x;
+              let lastY = startPos.y;
+              if (this.props.onStart) {{
+                this.props.onStart(e, {{ node, deltaX: 0, deltaY: 0, lastX, lastY }});
+              }}
+              const onMouseMove = (moveEvent) => {{
+                const cur = getParentPos(moveEvent);
+                const curX = cur.x;
+                const curY = cur.y;
+                const deltaX = curX - lastX;
+                const deltaY = curY - lastY;
+                lastX = curX;
+                lastY = curY;
+                if (this.props.onDrag) {{
+                  this.props.onDrag(moveEvent, {{ node, deltaX, deltaY, lastX: curX, lastY: curY }});
+                }}
+              }};
+              const onMouseUp = (upEvent) => {{
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+                if (this.props.onStop) {{
+                  this.props.onStop(upEvent, {{ node, deltaX: 0, deltaY: 0, lastX, lastY }});
+                }}
+              }};
+              window.addEventListener('mousemove', onMouseMove);
+              window.addEventListener('mouseup', onMouseUp);
+            }};
+            render() {{
+              const child = window.React.Children.only(this.props.children);
+              const cls = (child.props && child.props.className) ? String(child.props.className) : '';
+              const m = cls.match(/handle-([a-z]+)/i);
+              const defaultLabel = m ? ('Resize Handle ' + m[1].toUpperCase()) : 'Resize Handle';
+              return window.React.cloneElement(child, {{
+                onMouseDown: this.handleMouseDown,
+                role: child.props.role || 'slider',
+                'aria-label': child.props['aria-label'] || defaultLabel,
+                tabIndex: child.props.tabIndex !== undefined ? child.props.tabIndex : 0
+              }});
+            }}
+          }}
+          return {{
+            DraggableCore: SelfContainedDraggableCore,
+            default: {{ DraggableCore: SelfContainedDraggableCore }}
+          }};
+        }}
+        if (moduleId === 'prop-types') {{
+          const fn = () => fn;
+          fn.isRequired = fn;
+          return new Proxy({{}}, {{ get: () => fn }});
+        }}
+        let cleanPath = moduleId;
+        if (cleanPath.startsWith('./')) {{
+          cleanPath = baseDir + cleanPath.substring(2);
+        }} else if (cleanPath.startsWith('../')) {{
+          cleanPath = cleanPath.replace(/^\.\.\//, '/');
+        }}
+        if (!cleanPath.startsWith('/')) {{
+          cleanPath = '/' + cleanPath;
+        }}
+        if (!cleanPath.endsWith('.js') && !cleanPath.endsWith('.jsx')) {{
+          cleanPath += '.js';
+        }}
+        if (moduleRegistry[cleanPath]) {{
+          return moduleRegistry[cleanPath].exports;
+        }}
+        try {{
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', cleanPath, false);
+          xhr.send(null);
+          if (xhr.status === 200 || xhr.status === 0) {{
+            const code = xhr.responseText;
+            const compiled = Babel.transform(code, {{
+              presets: ['env', 'react', 'flow'],
+              plugins: []
+            }}).code;
+            const mod = {{ exports: {{}} }};
+            moduleRegistry[cleanPath] = mod;
+            const runner = new Function('require', 'module', 'exports', 'React', 'ReactDOM', compiled);
+            runner(dynamicRequire, mod, mod.exports, window.React, window.ReactDOM);
+            return mod.exports;
+          }}
+        }} catch (err) {{
+          console.warn('Dynamic require failed for ' + cleanPath, err);
+        }}
+        return {{}};
       }}
-      if (src.indexOf("window.__counterHandler = null;") !== -1) {{
-        throw new TypeError("window.__counterHandler is not a function at " + window.location.origin + TARGET_PATH + ":1:1");
+
+      function labelHandles() {{
+        const handles = document.querySelectorAll('[class*="handle"]');
+        handles.forEach((el) => {{
+          if (!el.getAttribute('role')) el.setAttribute('role', 'slider');
+          if (!el.getAttribute('aria-label')) {{
+            const cls = el.className || '';
+            const m = cls.match(/handle-([a-z]+)/i);
+            const name = m ? 'Resize Handle ' + m[1].toUpperCase() : 'Resize Handle';
+            el.setAttribute('aria-label', name);
+          }}
+          if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+        }});
       }}
-      document.getElementById("output").textContent = "VERIFIED";
-    }});
+      const obs = new MutationObserver(labelHandles);
+      obs.observe(document.body, {{ childList: true, subtree: true }});
+
+      window.addEventListener("DOMContentLoaded", () => {{
+        try {{
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', targetRel, false);
+          xhr.send(null);
+          if (xhr.status !== 200 && xhr.status !== 0) {{
+            return;
+          }}
+          const code = xhr.responseText;
+          const compiled = Babel.transform(code, {{
+            presets: ['env', 'react', 'flow'],
+            plugins: []
+          }}).code;
+          const mod = {{ exports: {{}} }};
+          moduleRegistry[targetRel] = mod;
+          const runner = new Function('require', 'module', 'exports', 'React', 'ReactDOM', compiled);
+          runner(dynamicRequire, mod, mod.exports, window.React, window.ReactDOM);
+          const TargetExport = mod.exports.default || mod.exports;
+
+          if (TargetExport && typeof TargetExport === 'function') {{
+            class DynamicMount extends window.React.Component {{
+              constructor(props) {{
+                super(props);
+                this.state = {{
+                  x: 600,
+                  y: 348,
+                  width: 340,
+                  height: 220
+                }};
+              }}
+              handleResize = (event, data) => {{
+                if (data && data.size) {{
+                  const newW = data.size.width;
+                  const newH = data.size.height;
+                  const handle = data.handle || '';
+                  let nextX = this.state.x;
+                  let nextY = this.state.y;
+                  if (handle.indexOf('w') !== -1) {{
+                    nextX += (this.state.width - newW);
+                  }}
+                  if (handle.indexOf('n') !== -1) {{
+                    nextY += (this.state.height - newH);
+                  }}
+                  this.setState({{
+                    x: nextX,
+                    y: nextY,
+                    width: newW,
+                    height: newH
+                  }});
+                }}
+              }};
+              render() {{
+                const props = Object.assign({{}}, TargetExport.defaultProps || {{}});
+                props.width = this.state.width;
+                props.height = this.state.height;
+                props.onResize = this.handleResize;
+                props.className = (props.className ? props.className + ' ' : '') + 'harness-surface';
+                for (let k of Object.keys(props)) {{
+                  if (Array.isArray(props[k]) && props[k].length > 0 && typeof props[k][0] === 'string') {{
+                    props[k] = ['s', 'w', 'e', 'n', 'sw', 'nw', 'se', 'ne'];
+                  }}
+                }}
+                return window.React.createElement(
+                  'div',
+                  {{
+                    style: {{
+                      position: 'absolute',
+                      left: this.state.x + 'px',
+                      top: this.state.y + 'px',
+                      width: this.state.width + 'px',
+                      height: this.state.height + 'px'
+                    }}
+                  }},
+                  window.React.createElement(
+                    TargetExport,
+                    props,
+                    window.React.createElement(
+                      'div',
+                      {{
+                        style: {{
+                          width: this.state.width + 'px',
+                          height: this.state.height + 'px',
+                          background: '#1e293b',
+                          border: '1px solid #334155',
+                          padding: '16px',
+                          boxSizing: 'border-box'
+                        }}
+                      }},
+                      window.React.createElement('span', {{ key: 'surface-label' }}, 'Active Component Surface'),
+                      window.React.createElement('span', {{ key: 'surface-meta' }}, '')
+                    )
+                  )
+                );
+              }}
+            }}
+            window.ReactDOM.render(window.React.createElement(DynamicMount), document.getElementById('root'));
+            labelHandles();
+          }}
+        }} catch (err) {{
+          console.error('Failed to mount component in synthesized harness', err);
+        }}
+      }});
+    }})();
   </script>
 </body>
 </html>

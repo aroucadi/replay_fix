@@ -244,7 +244,7 @@ pub struct ReproArgs {
     pub mock_patch: String,
 
     /// Directory where audit_receipt.json or triage_report.json is written
-    #[arg(long, default_value = ".replayfix")]
+    #[arg(long, visible_alias = "output", default_value = ".replayfix")]
     pub output_dir: String,
 
     /// Dry-run mode: validate environment, manifests, patch, and invariants without execution
@@ -663,6 +663,18 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
             Ok(m) => Some(m),
             Err(e) => usage_error(&e.to_string(), theme),
         }
+    } else if !mock_heal
+        && !mock_syntax_retry
+        && !mock_failing_repair
+        && !mock_pkg_test_mutation
+        && !mock_ambiguous
+        && !mock_flaky
+        && !mock_regression
+        && mock_patch == "builtin"
+        && replayfix_core::GatewayConfig::default().has_meta_api_key()
+        && video.as_deref().is_some_and(|v| Path::new(v).exists())
+    {
+        Some(ExecutionMode::LiveAi)
     } else {
         None
     };
@@ -711,26 +723,13 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         || replayfix_core::ManagedSpaServer::is_managed_spa(Path::new(&repo))
         || Path::new(&repo).join("public/app.js").exists();
 
-    let inferred_from_video = if task_id.is_none() && bug.is_none() {
-        video.as_deref().and_then(|v| {
-            let lower = Path::new(v)
+    let inferred_from_video: Option<String> = if task_id.is_none() && bug.is_none() {
+        video.as_ref().and_then(|v| {
+            Path::new(v)
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if lower.starts_with("rf01") || lower.starts_with("rf-01") {
-                Some("RF-01")
-            } else if lower.starts_with("rf02") || lower.starts_with("rf-02") {
-                Some("RF-02")
-            } else if lower.starts_with("rf03") || lower.starts_with("rf-03") {
-                Some("RF-03")
-            } else if lower.starts_with("rf04") || lower.starts_with("rf-04") {
-                Some("RF-04")
-            } else if lower.starts_with("rf05") || lower.starts_with("rf-05") {
-                Some("RF-05")
-            } else {
-                None
-            }
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
         })
     } else {
         None
@@ -894,11 +893,14 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         None
     };
 
-    let bug_shorthand = bug.as_deref().or(inferred_from_video).or_else(|| {
-        apm_manifest
-            .as_ref()
-            .and_then(|_| extras.mock_heal.then_some("RF-01"))
-    });
+    let bug_shorthand = bug
+        .as_deref()
+        .or(inferred_from_video.as_deref())
+        .or_else(|| {
+            apm_manifest
+                .as_ref()
+                .and_then(|_| extras.mock_heal.then_some("RF-01"))
+        });
     let id = task_id
         .or_else(|| bug_shorthand.map(str::to_string))
         .or_else(|| {
@@ -1094,7 +1096,8 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         "--mock-heal"
     };
     // Release 2.1: Universal Zero-Shot Pipeline with owned DynamicTaskSpec
-    let fixture_opt = Fixture::for_task_in_repo(&m.task_id, &repo_dir);
+    let fixture_opt =
+        Fixture::for_task_in_repo(&m.task_id, &repo_dir).or_else(|| Fixture::for_task(&m.task_id));
     if fixture_opt.is_none()
         && extras.mock_heal
         && extras.mock_patch == "builtin"
@@ -1281,7 +1284,26 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         } else {
             None
         };
-        let resolved_video_path = PathBuf::from(&m.video_path);
+        let mut resolved_video_path = PathBuf::from(&m.video_path);
+        if !resolved_video_path.exists() {
+            if let Some(sibling_mp4) = resolved_video_path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty() && p.exists())
+                .and_then(|p| std::fs::read_dir(p).ok())
+                .and_then(|mut entries| {
+                    entries.find_map(|e| {
+                        let path = e.ok()?.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("mp4") {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                })
+            {
+                resolved_video_path = sibling_mp4;
+            }
+        }
         if !resolved_video_path.exists() && extras.execution_mode == Some(ExecutionMode::LiveAi) {
             usage_error(
                 &format!(
@@ -1351,10 +1373,20 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             )
         }
     } else if let Some(ref dyn_spec) = dynamic_spec {
+        let vpath = if Path::new(&m.video_path).exists() {
+            Some(PathBuf::from(&m.video_path))
+        } else {
+            None
+        };
+        let gw = if extras.execution_mode == Some(ExecutionMode::LiveAi) {
+            Some(MetaGatewayClient::default())
+        } else {
+            None
+        };
         let opts = LiveBrowserOptions {
             headed: m.headed,
             candidate_override: None,
-            video_path: None,
+            video_path: vpath,
             keyframe_dir: Some(out_dir.join("keyframes")),
             model_slug: extras.model.clone(),
             repair_mode,
@@ -1364,7 +1396,7 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
             stress_quorum: extras.stress_quorum,
             mock_flaky: extras.mock_flaky,
             execution_mode: extras.execution_mode,
-            gateway_client: None,
+            gateway_client: gw,
             attached_url: extras.url.clone(),
             observer: None,
         };

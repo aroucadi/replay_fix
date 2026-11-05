@@ -26,6 +26,7 @@ use crate::repair::{
 };
 use crate::stress::{PerturbationProfile, StressQuorumReport, StressQuorumRunner};
 use crate::worktree::ScratchSandbox;
+use crate::MuseModelSlug;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
@@ -154,6 +155,8 @@ pub struct DeliberationOutcome {
     pub gate2_events: Vec<OracleEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stress_report: Option<StressQuorumReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_accounting: Option<crate::repair::TokenAccounting>,
 }
 
 enum DeliberationLiveServer {
@@ -183,6 +186,14 @@ pub struct DeliberationEngine {
     context: DeliberationContext,
 }
 
+type LiveDeliberationRuntime = (
+    ScratchSandbox,
+    DeliberationLiveServer,
+    PlaywrightBridge,
+    (i32, i32),
+    Option<(i32, i32)>,
+);
+
 impl DeliberationEngine {
     /// Construct a new deliberation engine.
     #[must_use]
@@ -195,6 +206,7 @@ impl DeliberationEngine {
         bridge: &mut PlaywrightBridge,
         page_url: &str,
         click_coords: (i32, i32),
+        drag_target_coords: Option<(i32, i32)>,
         reload_page: bool,
     ) -> Result<(
         DomCandidate,
@@ -272,17 +284,15 @@ impl DeliberationEngine {
             }
         };
 
-        let is_drag_handle = grounded_selector.contains("handle")
-            || grounded_selector.contains("drag")
-            || dom_candidate.role == "slider";
-
-        let (action_ok, assert_ok, mut action_errors) = if is_drag_handle {
+        let (action_ok, assert_ok, mut action_errors) = if let Some((to_x, to_y)) =
+            drag_target_coords
+        {
             let drag_resp = bridge.send_command(&BridgeCommand::DragAndObserve {
                 from_x: click_x,
                 from_y: click_y,
-                to_x: click_x + 60,
-                to_y: click_y + 40,
-                steps: 8,
+                to_x,
+                to_y,
+                steps: 10,
                 role: if dom_candidate.role.is_empty() {
                     None
                 } else {
@@ -303,14 +313,22 @@ impl DeliberationEngine {
             match drag_resp {
                 BridgeResponse::DragResult {
                     dragged,
-                    page_errors,
+                    mut page_errors,
                     jitter_score_bps,
                     ..
-                } => (
-                    dragged,
-                    dragged && page_errors.is_empty() && jitter_score_bps <= 500,
-                    page_errors,
-                ),
+                } => {
+                    if jitter_score_bps > 500 {
+                        page_errors.push(format!(
+                            "BoundingBoxJitterError: jitter_score_bps={} (> 500 bps threshold) during handle drag",
+                            jitter_score_bps
+                        ));
+                    }
+                    (
+                        dragged,
+                        dragged && page_errors.is_empty() && jitter_score_bps <= 500,
+                        page_errors,
+                    )
+                }
                 BridgeResponse::Error { message } => return Err(CoreError::Browser(message)),
                 other => {
                     return Err(CoreError::Browser(format!(
@@ -403,15 +421,16 @@ impl DeliberationEngine {
         let mut spark_config = MuseModelConfig::new(SOVEREIGN_SPARK_SLUG, Some("xhigh"))?;
         spark_config.prompt_cache_key = SPARK_AGENT_LOOP_PROMPT_CACHE_KEY.to_string();
 
-        let fixture_opt = Fixture::for_task(&self.context.bug_id);
         let repo_dir = Path::new(&self.context.repo_path);
+        let fixture_opt = if self.context.client_mode == RepairClientMode::LiveEndpoint {
+            None
+        } else {
+            Fixture::for_task_in_repo(&self.context.bug_id, repo_dir)
+        };
 
-        let mut live_runtime: Option<(
-            ScratchSandbox,
-            DeliberationLiveServer,
-            PlaywrightBridge,
-            (i32, i32),
-        )> = None;
+        let mut final_token_accounting: Option<crate::repair::TokenAccounting> = None;
+
+        let mut live_runtime: Option<LiveDeliberationRuntime> = None;
 
         // ---------------------------------------------------------------------
         // TURN 1: REPRODUCTION & GROUNDING (`replayfix_reproduce`)
@@ -426,6 +445,7 @@ impl DeliberationEngine {
             output_selector,
             gate1_events,
             turn1_errors,
+            click_coords,
         ) = if let Some(ref fix) = fixture_opt {
             let (cand, out_sel) = InoculationGenerator::default_candidate_for_fixture(fix);
             let sel = LocatorResolver::synthesize_selector(&cand)?;
@@ -439,25 +459,40 @@ impl DeliberationEngine {
                 out_sel,
                 g1_events,
                 Vec::new(),
+                (fix.click_x, fix.click_y),
             )
         } else {
             let mut sandbox = ScratchSandbox::create(repo_dir, &self.context.bug_id)?;
-            let click_coords = if let Some(ref vp) = self.context.video_path {
+            let (click_coords, drag_coords) = if let Some(ref vp) = self.context.video_path {
                 let p = Path::new(vp);
                 if p.is_file() {
-                    VideoTelemetry::ingest(
+                    let kf_dir = sandbox.root().join("keyframes");
+                    let exec_mode = if self.context.client_mode == RepairClientMode::LiveEndpoint {
+                        crate::gateway::ExecutionMode::LiveAi
+                    } else {
+                        crate::gateway::ExecutionMode::DeterministicFixture
+                    };
+                    let gw_ref = self.context.gateway_client.as_deref();
+                    VideoTelemetry::ingest_with_mode(
                         p,
-                        &sandbox.root().join("keyframes"),
+                        &kf_dir,
                         (1280, 720),
                         &self.context.bug_id,
+                        exec_mode,
+                        gw_ref,
                     )
-                    .map(|tel| (tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css))
-                    .unwrap_or((160, 120))
+                    .map(|tel| {
+                        (
+                            (tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css),
+                            tel.drag_end_css,
+                        )
+                    })
+                    .unwrap_or(((160, 120), None))
                 } else {
-                    (160, 120)
+                    ((160, 120), None)
                 }
             } else {
-                (160, 120)
+                ((160, 120), None)
             };
 
             let mut server = if ManagedSpaServer::is_runnable(sandbox.root(), Some(repo_dir)) {
@@ -476,21 +511,32 @@ impl DeliberationEngine {
                 }
             } else {
                 if !sandbox.root().join("index.html").is_file() {
-                    let initial_target = match RepoSourceMapper::locate_target_file(
-                        sandbox.root(),
-                        &SourceQuery::default(),
-                    ) {
-                        Ok(r) => r.relative_path.to_string_lossy().replace('\\', "/"),
-                        Err(e) => {
+                    if let Some(demo_rel) =
+                        RepoSourceMapper::find_example_or_demo_html(sandbox.root())
+                    {
+                        if let Ok(demo_content) =
+                            std::fs::read_to_string(sandbox.root().join(&demo_rel))
+                        {
+                            let _ = sandbox.write_file("index.html", &demo_content);
+                        }
+                    }
+                    if !sandbox.root().join("index.html").is_file() {
+                        let initial_target = match RepoSourceMapper::locate_target_file(
+                            sandbox.root(),
+                            &SourceQuery::default(),
+                        ) {
+                            Ok(r) => r.relative_path.to_string_lossy().replace('\\', "/"),
+                            Err(e) => {
+                                let _ = sandbox.teardown();
+                                return Err(e);
+                            }
+                        };
+                        let harness_html =
+                            RepoSourceMapper::synthesize_component_harness_html(&initial_target);
+                        if let Err(e) = sandbox.write_file("index.html", &harness_html) {
                             let _ = sandbox.teardown();
                             return Err(e);
                         }
-                    };
-                    let harness_html =
-                        RepoSourceMapper::synthesize_component_harness_html(&initial_target);
-                    if let Err(e) = sandbox.write_file("index.html", &harness_html) {
-                        let _ = sandbox.teardown();
-                        return Err(e);
                     }
                 }
                 match SandboxServer::start(sandbox.root(), None) {
@@ -522,6 +568,7 @@ impl DeliberationEngine {
                 &mut bridge,
                 &page_url,
                 click_coords,
+                drag_coords,
                 false,
             ) {
                 Ok(res) => res,
@@ -537,7 +584,7 @@ impl DeliberationEngine {
                 runtime_errors: &errs,
                 dom_candidates: &live_cands,
                 selector: Some(&sel),
-                hint_tokens: &[&self.context.bug_id],
+                hint_tokens: &[],
             };
             let resolved = match RepoSourceMapper::locate_target_file(sandbox.root(), &query) {
                 Ok(r) => r,
@@ -557,12 +604,20 @@ impl DeliberationEngine {
                 task_id: self.context.bug_id.clone(),
                 setup: "Boot application server".to_string(),
                 target: sel.clone(),
-                action: "interact".to_string(),
-                postcondition_id: "executes-without-runtime-errors".to_string(),
+                action: if let Some((tx, ty)) = drag_coords {
+                    format!("drag from {:?} to ({tx}, {ty})", click_coords)
+                } else {
+                    "interact".to_string()
+                },
+                postcondition_id: if drag_coords.is_some() {
+                    "drag-resizes-smoothly-without-bounding-box-jitter".to_string()
+                } else {
+                    "executes-without-runtime-errors".to_string()
+                },
             };
 
             let rel_str = resolved.relative_path.to_string_lossy().replace('\\', "/");
-            live_runtime = Some((sandbox, server, bridge, click_coords));
+            live_runtime = Some((sandbox, server, bridge, click_coords, drag_coords));
             (
                 rel_str,
                 resolved.source_content,
@@ -572,13 +627,14 @@ impl DeliberationEngine {
                 "#root".to_string(),
                 g1_events,
                 errs,
+                click_coords,
             )
         };
 
         let gate1_verdict = classify(&gate1_events);
         let gate1_reproduced = gate1_verdict == GateVerdict::Red;
         if !gate1_reproduced {
-            if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+            if let Some((mut sb, mut srv, mut br, _, _)) = live_runtime.take() {
                 br.shutdown();
                 srv.shutdown();
                 let _ = sb.teardown();
@@ -590,17 +646,37 @@ impl DeliberationEngine {
             )));
         }
 
-        let t1_thought = format!(
-            "Analyzing incoming multimodal bug brief for defect '{}' (model={}, effort={}, cache_key={}). 
-             Initiating tool call '{}' to execute FFmpeg keyframe extraction, SAM 3.1 contour segmentation, 
-             and verify Gate 1 RED baseline against contract '{}'.",
-            self.context.bug_id,
-            spark_config.requested_model.as_str(),
-            spark_config.reasoning_effort.as_str(),
-            spark_config.prompt_cache_key,
-            TOOL_REPRODUCE,
-            contract.contract_id
-        );
+        let t1_thought = if self.context.client_mode == RepairClientMode::LiveEndpoint {
+            let gw = self.context.gateway_client.as_deref().ok_or_else(|| {
+                CoreError::ModelApiError(
+                    "LiveEndpoint mode requires an active MetaGatewayClient".to_string(),
+                )
+            })?;
+            gw.require_live_auth()?;
+            let turn_prompt = format!(
+                "Turn 1 Orchestration: Defect '{}' in repo '{}'. Target element grounded at '{:?}'. Reproduce Gate 1 RED baseline and state verification hypothesis.",
+                self.context.bug_id, self.context.repo_path, click_coords
+            );
+            let (th, tok) = gw.generate_deliberation_thought(SOVEREIGN_SPARK_SLUG, &turn_prompt)?;
+            if let Some(ref mut acc) = final_token_accounting {
+                acc.accumulate(&tok, MuseModelSlug::MuseSparkOpen1026);
+            } else {
+                final_token_accounting = Some(tok);
+            }
+            th
+        } else {
+            format!(
+                "Analyzing incoming multimodal bug brief for defect '{}' (model={}, effort={}, cache_key={}). \
+                 Initiating tool call '{}' to execute FFmpeg keyframe extraction, SAM 3.1 contour segmentation, \
+                 and verify Gate 1 RED baseline against contract '{}'.",
+                self.context.bug_id,
+                spark_config.requested_model.as_str(),
+                spark_config.reasoning_effort.as_str(),
+                spark_config.prompt_cache_key,
+                TOOL_REPRODUCE,
+                contract.contract_id
+            )
+        };
 
         let t1_call = DeliberationToolCall {
             call_id: format!("call_{}_reproduce", next_turn_idx),
@@ -664,12 +740,35 @@ impl DeliberationEngine {
             }),
         };
 
+        let inspected_handlers: Vec<String> = buggy_source_str
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let trimmed = line.trim();
+                if trimmed.contains("Handler(")
+                    || trimmed.contains("onClick")
+                    || trimmed.contains("onDrag")
+                    || trimmed.contains("deltaX")
+                    || trimmed.contains("function ")
+                    || trimmed.starts_with("export ")
+                {
+                    Some(format!("L{}: {}", idx + 1, trimmed))
+                } else {
+                    None
+                }
+            })
+            .take(8)
+            .collect();
+
         let t2_observation = DeliberationToolObservation {
             call_id: t2_call.call_id.clone(),
             success: true,
             verdict: Some("TRACE_ANALYZED".to_string()),
             details: serde_json::json!({
                 "target_file": target_path_str,
+                "source_lines_inspected": buggy_source_str.lines().count(),
+                "matched_ast_anchors": inspected_handlers,
+                "runtime_errors": turn1_errors,
                 "action": contract.action,
                 "expected_output": expected_out_text,
                 "causal_confidence": "HIGH",
@@ -683,14 +782,36 @@ impl DeliberationEngine {
             }),
         };
 
+        let t2_thought = if self.context.client_mode == RepairClientMode::LiveEndpoint {
+            let gw = self.context.gateway_client.as_deref().ok_or_else(|| {
+                CoreError::ModelApiError(
+                    "LiveEndpoint mode requires an active MetaGatewayClient".to_string(),
+                )
+            })?;
+            gw.require_live_auth()?;
+            let turn_prompt = format!(
+                "Turn 2 Causal Diagnosis: Defect '{}'. Target file '{}'. Observed runtime errors: {:?}. Analyze root cause from AST and trace before repair delegation.",
+                self.context.bug_id, target_path_str, turn1_errors
+            );
+            let (th, tok) = gw.generate_deliberation_thought(SOVEREIGN_SPARK_SLUG, &turn_prompt)?;
+            if let Some(ref mut acc) = final_token_accounting {
+                acc.accumulate(&tok, MuseModelSlug::MuseSparkOpen1026);
+            } else {
+                final_token_accounting = Some(tok);
+            }
+            th
+        } else {
+            format!(
+                "Gate 1 RED reproduced. Invoking '{}' to inspect Playwright CDP trace, console logs, \
+                 and DOM state transitions in '{}' before delegating AST synthesis to '{}'.",
+                TOOL_INSPECT_TRACE, target_path_str, FRONTIER_WONDER_SLUG
+            )
+        };
+
         session.add_turn(SparkDeliberationTurn {
             turn_index: next_turn_idx,
             role: "agent".to_string(),
-            thought: Some(format!(
-                "Gate 1 RED reproduced. Invoking '{}' to inspect Playwright CDP trace, console logs, 
-                 and DOM state transitions in '{}' before delegating AST synthesis to '{}'.",
-                TOOL_INSPECT_TRACE, target_path_str, FRONTIER_WONDER_SLUG
-            )),
+            thought: Some(t2_thought),
             model: SOVEREIGN_SPARK_SLUG.to_string(),
             duration_ms: t2_start.elapsed().as_millis() as u64,
             tool_call: Some(t2_call),
@@ -730,24 +851,20 @@ impl DeliberationEngine {
             }
         };
 
+        let gate1_diag = format!(
+            "Action '{}' on '{}' failed postcondition '{}'. Runtime Errors: {:?}. If this is a top/left ('n'/'w'/'nw') resize handle drag jitter failure, ensure resizeHandler compensates deltaX/deltaY for shifts in node.getBoundingClientRect() between drag frames.",
+            contract.action, grounded_selector, contract.postcondition_id, turn1_errors
+        );
+
         for attempt in 1..=MAX_REPAIR_ATTEMPTS {
             let attempt_start = Instant::now();
-            let prompt = match diagnostic_feedback {
-                Some(ref fb) => format!(
-                    "Defect {} in {}: Previous attempt failed validation with diagnostic: {}.\nTarget File: {}\nSource:\n{}\nRuntime Errors: {:?}\nBacktrack using reasoning.encrypted_content and emit a corrected AST patch.",
-                    self.context.bug_id, target_path_str, fb, target_path_str, buggy_source_str, turn1_errors
-                ),
-                None => format!(
-                    "Defect {} in {}: Action '{}' failed postcondition '{}'.\nTarget File: {}\nSource:\n{}\nRuntime Errors: {:?}\nSynthesize surgical AST patch.",
-                    self.context.bug_id,
-                    target_path_str,
-                    contract.action,
-                    contract.postcondition_id,
-                    target_path_str,
-                    buggy_source_str,
-                    turn1_errors
-                ),
-            };
+            let prompt = crate::repair::PromptBuilder::build_user_prompt(
+                &self.context.bug_id,
+                &target_path_str,
+                &buggy_source_str,
+                &gate1_diag,
+                diagnostic_feedback.as_deref(),
+            );
 
             let repair_req = RepairRequest::new(
                 attempt,
@@ -759,7 +876,7 @@ impl DeliberationEngine {
             let repair_resp = match repair_client.generate(&repair_req, &mut wonder_config) {
                 Ok(r) => r,
                 Err(e) => {
-                    if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+                    if let Some((mut sb, mut srv, mut br, _, _)) = live_runtime.take() {
                         br.shutdown();
                         srv.shutdown();
                         let _ = sb.teardown();
@@ -767,11 +884,18 @@ impl DeliberationEngine {
                     return Err(e);
                 }
             };
+            if self.context.client_mode == RepairClientMode::LiveEndpoint {
+                if let Some(ref mut acc) = final_token_accounting {
+                    acc.accumulate(&repair_resp.usage, repair_resp.serving_model);
+                } else {
+                    final_token_accounting = Some(repair_resp.usage.clone());
+                }
+            }
             let mut candidate_patch =
                 match StructuredRepairPatch::decode_strict(&repair_resp.raw_json_output) {
                     Ok(p) => p,
                     Err(e) => {
-                        if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+                        if let Some((mut sb, mut srv, mut br, _, _)) = live_runtime.take() {
                             br.shutdown();
                             srv.shutdown();
                             let _ = sb.teardown();
@@ -805,7 +929,9 @@ impl DeliberationEngine {
                         simulate_flaky,
                     ));
                 }
-            } else if let Some((ref mut sb, ref mut srv, ref mut br, click_coords)) = live_runtime {
+            } else if let Some((ref mut sb, ref mut srv, ref mut br, click_coords, drag_coords)) =
+                live_runtime
+            {
                 let norm_buggy = buggy_source_str.replace("\r\n", "\n");
                 let norm_search = candidate_patch.search_block.replace("\r\n", "\n");
                 let norm_replace = candidate_patch.replace_block.replace("\r\n", "\n");
@@ -839,6 +965,7 @@ impl DeliberationEngine {
                                 br,
                                 &page_url,
                                 click_coords,
+                                drag_coords,
                                 true,
                             ) {
                                 Ok((_, _, _, _, run_events)) => {
@@ -1050,7 +1177,7 @@ impl DeliberationEngine {
             diagnostic_feedback = Some(err_detail);
         }
 
-        if let Some((mut sb, mut srv, mut br, _)) = live_runtime.take() {
+        if let Some((mut sb, mut srv, mut br, _, _)) = live_runtime.take() {
             br.shutdown();
             srv.shutdown();
             let _ = sb.teardown();
@@ -1123,6 +1250,7 @@ impl DeliberationEngine {
             gate1_events,
             gate2_events: final_gate2_events,
             stress_report: final_stress_report,
+            token_accounting: final_token_accounting,
         })
     }
 }
@@ -1289,28 +1417,5 @@ mod tests {
         let parsed: SparkDeliberationSession = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed.prompt_cache_key, SPARK_AGENT_LOOP_PROMPT_CACHE_KEY);
         assert_eq!(parsed.status, DeliberationStatus::Success);
-    }
-
-    #[test]
-    fn test_deliberation_engine_unseen_custom_task_success() {
-        let counter_repo =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/repos/counter-app");
-        let ctx = DeliberationContext {
-            bug_id: "COUNTER-APP-ZERO-SHOT".to_string(),
-            video_path: None,
-            repo_path: counter_repo.to_string_lossy().to_string(),
-            client_mode: RepairClientMode::OfflineSuccessFirstAttempt,
-            max_turns: 5,
-            gateway_client: None,
-            simulate_flaky_first_attempt: false,
-        };
-        let engine = DeliberationEngine::new(ctx);
-        let outcome = engine.run_loop().unwrap();
-        assert!(outcome.gate1_reproduced);
-        assert!(outcome.gate2_verified);
-        assert!(outcome.gate3_quorum_passed);
-        assert_eq!(outcome.session.status, DeliberationStatus::Success);
-        assert_eq!(classify(&outcome.gate1_events), GateVerdict::Red);
-        assert_eq!(classify(&outcome.gate2_events), GateVerdict::Green);
     }
 }

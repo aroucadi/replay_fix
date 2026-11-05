@@ -729,6 +729,7 @@ impl SweepCoordinator {
                             deliberation: Some(outcome.session.clone()),
                             merkle_root: None,
                             attestation: None,
+                            stage_classification: None,
                             created_at: timestamp_now(),
                         };
                         let _ = receipt.write_disaggregated_artifacts(task_out_dir, None, None);

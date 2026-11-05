@@ -151,11 +151,19 @@ pub struct InteractionEvidence {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RoiDiffer;
 
-struct PairChange {
-    frame_index: usize,
-    changed: u64,
-    sum_x: u64,
-    sum_y: u64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PairChange {
+    pub(crate) frame_index: usize,
+    pub(crate) changed: u64,
+    pub(crate) sum_x: u64,
+    pub(crate) sum_y: u64,
+}
+
+impl PairChange {
+    pub(crate) fn centroid(&self) -> (u32, u32) {
+        let n = self.changed.max(1);
+        ((self.sum_x / n) as u32, (self.sum_y / n) as u32)
+    }
 }
 
 struct Event {
@@ -173,7 +181,7 @@ impl Event {
 }
 
 impl RoiDiffer {
-    fn pair_change(prev: &[u8], cur: &[u8], width: u32, noise_floor: u8) -> PairChange {
+    pub(crate) fn pair_change(prev: &[u8], cur: &[u8], width: u32, noise_floor: u8) -> PairChange {
         let (mut changed, mut sum_x, mut sum_y) = (0u64, 0u64, 0u64);
         for (i, (a, b)) in prev.iter().zip(cur).enumerate() {
             if a.abs_diff(*b) > noise_floor {
