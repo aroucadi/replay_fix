@@ -127,12 +127,6 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         "TASK-01".to_string()
     };
 
-    let fixture_opt = if args.mode == "live-ai" {
-        None
-    } else {
-        Fixture::for_task_in_repo(&bug_id, &repo_dir)
-    };
-
     if !args.json {
         print_heal_banner(theme, &bug_id, &args.repo);
     }
@@ -182,10 +176,7 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     };
 
     // Phase 1: Video Ingestion & Perception Telemetry
-    let (viewport_width, viewport_height) = fixture_opt
-        .as_ref()
-        .map(|f| (f.viewport_width, f.viewport_height))
-        .unwrap_or((1280, 720));
+    let (viewport_width, viewport_height) = (1280, 720);
 
     let video_telemetry = if let Some(ref vp) = video_path {
         let p = Path::new(vp);
@@ -215,13 +206,14 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
     let ephemeral_port = EphemeralPort::allocate()?.get();
 
     let mut sandbox = ScratchSandbox::create_with_excludes(&repo_dir, &bug_id, &extra_excludes)?;
-    if let Some(ref fix) = fixture_opt {
-        sandbox.write_file(fix.target_path, fix.buggy_source)?;
-    }
 
     // Phase 3: Deliberation Engine Multi-Turn Muse Spark Agent Loop
     let is_live_ai = args.mode == "live-ai";
+    let has_local_sources = repo_dir.join("package.json").is_file()
+        || repo_dir.join("src").is_dir()
+        || repo_dir.join("public").is_dir();
     let auto_live_ai = is_live_ai
+        && has_local_sources
         && (std::env::var_os("REPLAYFIX_FORCE_LIVE_AI").is_some()
             || (std::env::var_os("CARGO_TARGET_TMPDIR").is_none()
                 && replayfix_core::GatewayConfig::default().has_meta_api_key()));
@@ -232,6 +224,15 @@ pub fn run_heal(args: HealArgs, theme: &Theme) -> Result<()> {
         "exhausted" => RepairClientMode::OfflineFailAllAttempts,
         _ => RepairClientMode::OfflineSuccessFirstAttempt,
     };
+
+    let fixture_opt = if client_mode == RepairClientMode::LiveEndpoint {
+        None
+    } else {
+        Fixture::for_task_in_repo(&bug_id, &repo_dir)
+    };
+    if let Some(ref fix) = fixture_opt {
+        sandbox.write_file(fix.target_path, fix.buggy_source)?;
+    }
 
     let gateway_client = if client_mode == RepairClientMode::LiveEndpoint {
         Some(Arc::new(MetaGatewayClient::default()))

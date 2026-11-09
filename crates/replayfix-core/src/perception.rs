@@ -398,30 +398,9 @@ impl SamSegmenter {
             candidate_video.0,
             candidate_video.1,
         )?;
-        let mut snap = match Self::parse_wire_tokens(&wire_tokens).and_then(|boxes| {
-            Self::snap_to_centroid(candidate_video.0, candidate_video.1, &boxes, calibration)
-        }) {
-            Ok(s) => s,
-            Err(_) => {
-                // Fuse live sam-3.1 response with the optical-flow interaction hotspot when the
-                // target control is outside the 200px proximity radius or on a synthetic frame.
-                let cx = candidate_video.0.max(60);
-                let cy = candidate_video.1.max(20);
-                let fused_box = SamContourBox {
-                    x1: cx - 60,
-                    y1: cy - 20,
-                    x2: cx + 60,
-                    y2: cy + 20,
-                    mask_rle: Some("rle:4800:120x40".to_string()),
-                };
-                Self::snap_to_centroid(
-                    candidate_video.0,
-                    candidate_video.1,
-                    &[fused_box],
-                    calibration,
-                )?
-            }
-        };
+        let boxes = Self::parse_wire_tokens(&wire_tokens)?;
+        let mut snap =
+            Self::snap_to_centroid(candidate_video.0, candidate_video.1, &boxes, calibration)?;
         snap.model = SAM_MODEL_SLUG.to_string();
         Ok((snap, latency_ms))
     }
@@ -661,6 +640,8 @@ impl AsrTranscriber {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VideoTelemetry {
     pub video_metadata: VideoMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_viewport: Option<(u32, u32)>,
     pub interaction: InteractionEvidence,
     pub sam_snap: SamSnapResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -730,11 +711,24 @@ impl VideoTelemetry {
         let after_idx = frame_idx.clamp(1, frames.frames.len().saturating_sub(1));
         let before_idx = after_idx.saturating_sub(1);
 
+        let detected_active_w = frames.detect_active_viewport_width();
+        let effective_vp_w = if detected_active_w < video_metadata.width {
+            detected_active_w
+        } else {
+            viewport_dims.0
+        };
+        let effective_vp_h = viewport_dims.1;
+        // When the browser viewport is left-aligned inside a wider video canvas (Playwright resize),
+        // the active canvas width equals effective_vp_w rather than centred letterboxing.
         let calibration = GeometricCalibration {
-            video_width: video_metadata.width,
+            video_width: if detected_active_w < video_metadata.width {
+                effective_vp_w
+            } else {
+                video_metadata.width
+            },
             video_height: video_metadata.height,
-            viewport_width: viewport_dims.0,
-            viewport_height: viewport_dims.1,
+            viewport_width: effective_vp_w,
+            viewport_height: effective_vp_h,
             dpr_milli: 1000,
         };
 
@@ -939,6 +933,7 @@ impl VideoTelemetry {
 
         Ok(Self {
             video_metadata,
+            detected_viewport: Some((effective_vp_w, effective_vp_h)),
             interaction,
             sam_snap,
             drag_end_css: top_level_drag_end,
@@ -1125,8 +1120,15 @@ data: [DONE]\n";
 
     #[test]
     fn test_ingest_react_resizable_demo() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-        let p = root.join("benchmarks").join("react-resizable").join("DEMO_react-resizable_issue-136.mp4");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let p = root
+            .join("benchmarks")
+            .join("react-resizable")
+            .join("DEMO_react-resizable_issue-136.mp4");
         if !p.exists() {
             return;
         }
@@ -1139,14 +1141,9 @@ data: [DONE]\n";
             crate::gateway::ExecutionMode::DeterministicFixture,
             None,
         );
-        if let Ok(tel) = res {
-            println!("TEL SAM CENTROID: ({}, {})", tel.sam_snap.calibrated_x_css, tel.sam_snap.calibrated_y_css);
-            println!("TEL INTERACTION: ({}, {})", tel.interaction.x_video, tel.interaction.y_video);
-            println!("TEL DRAG END: {:?}", tel.drag_end_css);
-            println!("TEL TRAJ: {:?}", tel.action_trajectory.as_ref().map(|t| t.actions.len()));
-        } else if let Err(e) = res {
-            println!("TEL ERROR: {e}");
-        }
+        let tel = res.expect("react-resizable demo video ingestion should succeed");
+        assert!(tel.sam_snap.calibrated_x_css >= 0);
+        assert!(tel.sam_snap.calibrated_y_css >= 0);
         let _ = std::fs::remove_dir_all(&kf);
     }
 }

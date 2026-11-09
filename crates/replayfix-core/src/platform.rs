@@ -90,13 +90,16 @@ impl Platform {
     /// playwright.cmd, npm.cmd) are not Win32 PE .exe binaries and cannot be spawned directly by
     /// CreateProcessW without their .cmd extension.
     pub fn create_command(program: &str) -> Command {
-        if cfg!(windows)
-            && !program.ends_with(".exe")
-            && !program.ends_with(".cmd")
-            && !program.ends_with(".bat")
-            && (program == "npx" || program == "npm" || program == "playwright")
-        {
-            return Command::new(format!("{program}.cmd"));
+        if cfg!(windows) {
+            let base = program
+                .trim_end_matches(".cmd")
+                .trim_end_matches(".bat")
+                .trim_end_matches(".exe");
+            if base == "npx" || base == "npm" || base == "playwright" {
+                let mut cmd = Command::new("cmd");
+                cmd.args(["/C", &format!("{base}.cmd")]);
+                return cmd;
+            }
         }
         Command::new(program)
     }

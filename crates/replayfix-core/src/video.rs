@@ -117,6 +117,84 @@ impl FrameSet {
     pub fn t_ms(&self, index: usize) -> u64 {
         index as u64 * 1000 / u64::from(self.sample_fps)
     }
+
+    /// Detect the active recorded viewport width when a browser window was resized
+    /// narrower than the video canvas (leaving a uniform right-side pillarbox matte).
+    #[must_use]
+    pub fn detect_active_viewport_width(&self) -> u32 {
+        if self.frames.is_empty() || self.width < 32 || self.height < 16 {
+            return self.source_width;
+        }
+        let sample = &self.frames[self.frames.len() - 1];
+        let w = self.width as usize;
+        let h = self.height as usize;
+        if sample.len() < w * h {
+            return self.source_width;
+        }
+
+        // Check if the rightmost column is a uniform mid-gray matte (Playwright default ~128).
+        let ref_val = sample[w - 1];
+        if !(115..=145).contains(&ref_val) {
+            return self.source_width;
+        }
+
+        let mut matte_cols = 0usize;
+        for x in (0..w).rev() {
+            let mut uniform = true;
+            for y in 0..h {
+                if sample[y * w + x].abs_diff(ref_val) > 3 {
+                    uniform = false;
+                    break;
+                }
+            }
+            if uniform {
+                matte_cols += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Only treat as a pillarbox matte if it spans at least 10% of the canvas width,
+        // leaves at least 25% active content width, and the active content region immediately
+        // to the left of the matte boundary exhibits vertical contrast across rows (so a uniform
+        // solid-gray background with a center button is not misclassified as pillarboxed).
+        if matte_cols * 10 >= w && (w - matte_cols) * 4 >= w {
+            let boundary_x = w - matte_cols - 1;
+            let mut min_luma = u8::MAX;
+            let mut max_luma = u8::MIN;
+            for y in 0..h {
+                let v = sample[y * w + boundary_x];
+                min_luma = min_luma.min(v);
+                max_luma = max_luma.max(v);
+            }
+            // In a real resized viewport, the top/bottom bars or page content differ from the
+            // mid-gray matte across the full height of the active column, or the active column
+            // mean differs strongly from the matte gray (~128).
+            let col_first = sample[boundary_x];
+            let is_pillarbox = (max_luma.saturating_sub(min_luma) > 15
+                && col_first.abs_diff(ref_val) > 10)
+                || (col_first.abs_diff(ref_val) > 40
+                    && sample[(h - 1) * w + boundary_x].abs_diff(ref_val) > 40);
+            if !is_pillarbox {
+                return self.source_width;
+            }
+            let active_analysis_w = (w - matte_cols) as u64;
+            let scaled =
+                (active_analysis_w * u64::from(self.source_width) + (w as u64 / 2)) / (w as u64);
+            let rem = scaled % 10;
+            let snapped = if rem <= 4 {
+                scaled - rem
+            } else if rem >= 6 {
+                scaled + (10 - rem)
+            } else {
+                scaled
+            };
+            u32::try_from(snapped.clamp(320, u64::from(self.source_width)))
+                .unwrap_or(self.source_width)
+        } else {
+            self.source_width
+        }
+    }
 }
 
 /// Thresholds for [`RoiDiffer`].

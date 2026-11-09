@@ -991,7 +991,8 @@ impl BlockPatcher {
                 }
                 "function" | "class" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";")
+                            && !Self::is_js_keyword(name)
                         {
                             pending_decl = Some(name.to_string());
                         }
@@ -1000,7 +1001,8 @@ impl BlockPatcher {
                 }
                 "const" | "let" | "var" if paren_depth == 0 => {
                     if let Some(&name) = tokens.get(idx + 1) {
-                        if !matches!(name, "{" | "}" | "(" | ")" | ";") && !Self::is_js_keyword(name)
+                        if !matches!(name, "{" | "}" | "(" | ")" | ";")
+                            && !Self::is_js_keyword(name)
                         {
                             pending_decl = Some(name.to_string());
                         }
@@ -1089,23 +1091,28 @@ impl BlockPatcher {
 
         let match_pos = norm_source.find(&norm_search).unwrap_or(0);
         let active_enclosing = Self::open_enclosing_declarations(&norm_source[..match_pos]);
+        let is_non_js_target = safe_target.ends_with(".css")
+            || safe_target.ends_with(".scss")
+            || safe_target.ends_with(".html");
 
-        for sym in &patch.touched_symbols {
-            let trimmed_sym = sym.trim();
-            if !Self::is_valid_symbol_identifier(trimmed_sym) {
-                return Err(CoreError::PatchApplicationError(format!(
-                    "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' is not a \
-                     valid identifier"
-                )));
-            }
-            let in_modified_block = Self::contains_identifier_token(&norm_search, trimmed_sym)
-                || Self::contains_identifier_token(&norm_replace, trimmed_sym);
-            let in_enclosing_scope = active_enclosing.iter().any(|enc| enc == trimmed_sym);
-            if !in_modified_block && !in_enclosing_scope {
-                return Err(CoreError::PatchApplicationError(format!(
-                    "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' does not \
-                     belong to the modified region or its enclosing declaration in '{safe_target}'"
-                )));
+        if !is_non_js_target {
+            for sym in &patch.touched_symbols {
+                let trimmed_sym = sym.trim();
+                if !Self::is_valid_symbol_identifier(trimmed_sym) {
+                    return Err(CoreError::PatchApplicationError(format!(
+                        "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' is not a \
+                         valid identifier"
+                    )));
+                }
+                let in_modified_block = Self::contains_identifier_token(&norm_search, trimmed_sym)
+                    || Self::contains_identifier_token(&norm_replace, trimmed_sym);
+                let in_enclosing_scope = active_enclosing.iter().any(|enc| enc == trimmed_sym);
+                if !in_modified_block && !in_enclosing_scope {
+                    return Err(CoreError::PatchApplicationError(format!(
+                        "SYMBOL_VERIFICATION_FAILED: declared touched symbol '{trimmed_sym}' does not \
+                         belong to the modified region or its enclosing declaration in '{safe_target}'"
+                    )));
+                }
             }
         }
 
@@ -1195,11 +1202,16 @@ impl SyntaxPreflight {
 
         let source_bytes = fs::read(&full_path)?;
         let source_str = String::from_utf8_lossy(&source_bytes);
-        let is_ts_or_flow = target_file.ends_with(".ts")
+        if target_file.ends_with(".html") {
+            return Ok(());
+        }
+        let is_non_node_check = target_file.ends_with(".ts")
             || target_file.ends_with(".tsx")
             || target_file.ends_with(".jsx")
+            || target_file.ends_with(".css")
+            || target_file.ends_with(".scss")
             || source_str.trim_start().starts_with("// @flow");
-        if is_ts_or_flow {
+        if is_non_node_check {
             let open_parens = source_str.matches('(').count();
             let close_parens = source_str.matches(')').count();
             let open_braces = source_str.matches('{').count();
@@ -1495,8 +1507,7 @@ impl BoundedRepairClient {
                  Output ONLY a single valid JSON object with EXACTLY these 5 fields (no prose before or after, no markdown fences):\n\
                  {{\n  \"explanation\": \"...\",\n  \"target_file\": \"...\",\n  \"search_block\": \"...\",\n  \"replace_block\": \"...\",\n  \"touched_symbols\": [\"...\"]\n}}\n\
                  - `search_block` MUST be an exact, verbatim, multi-line substring copied directly from the Target Source File above (matching indentation and whitespace exactly, occurring once).\n\
-                 - `touched_symbols` MUST list valid identifier(s) appearing in `search_block`/`replace_block` or the enclosing function/method/class name.\n\
-                 - If repairing top/left ('n'/'w'/'nw') resize handle jitter in `resizeHandler`, track `this.lastHandleRect = node.getBoundingClientRect()` (resetting `this.lastHandleRect = null` on `onResizeStop`) and before reversing `deltaX`/`deltaY` for `'w'`/`'n'`, add `(node.getBoundingClientRect().left - this.lastHandleRect.left)` to `deltaX` and `(node.getBoundingClientRect().top - this.lastHandleRect.top)` to `deltaY` when `this.lastHandleRect != null`.",
+                 - `touched_symbols` MUST list valid identifier(s) appearing in `search_block`/`replace_block` or the enclosing function/method/class name.",
                 request.system_prefix,
                 request.prompt_cache_key,
                 request.user_prompt,

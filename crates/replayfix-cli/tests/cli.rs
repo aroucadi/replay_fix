@@ -24,6 +24,10 @@ fn scratch(name: &str) -> PathBuf {
 fn run(dir: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_replayfix"))
         .current_dir(dir)
+        .env("REPLAYFIX_TEST_NO_REG", "1")
+        .env_remove("META_API_KEY")
+        .env_remove("REPLAYFIX_AI_KEY")
+        .env_remove("BASETEN_API_KEY")
         .args(BASE)
         .args(extra)
         .output()
@@ -338,11 +342,7 @@ fn nonexistent_repo_directory_is_a_usage_error() {
 #[test]
 fn run_subcommand_alias_with_bug_flag_works() {
     let dir = scratch("run-bug-alias");
-    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
-        .current_dir(&dir)
-        .args(["run", "--bug", "RF-01", "--mock-heal"])
-        .output()
-        .unwrap();
+    let out = run_cmd(&dir, &["run", "--bug", "RF-01", "--mock-heal"]);
     assert_eq!(
         code(&out),
         0,
@@ -362,18 +362,17 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
     let mp4_path = video_dir.join("rf01_demo.mp4");
     replayfix_core::VideoPreprocessor::synthesize_demo_video(&mp4_path).unwrap();
 
-    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
-        .current_dir(&dir)
-        .args([
+    let out = run_cmd(
+        &dir,
+        &[
             "run",
             "--video",
             "assets/fixtures/rf01_demo.mp4",
             "--repo",
             ".",
             "--mock-heal",
-        ])
-        .output()
-        .unwrap();
+        ],
+    );
     assert_eq!(
         code(&out),
         0,
@@ -411,9 +410,9 @@ fn live_browser_video_telemetry_ingests_keyframes_sam_and_asr() {
 #[test]
 fn model_autonomous_repair_and_syntax_retry_write_receipt() {
     let dir = scratch("model-autonomous-retry");
-    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
-        .current_dir(&dir)
-        .args([
+    let out = run_cmd(
+        &dir,
+        &[
             "run",
             "--bug",
             "RF-01",
@@ -422,9 +421,8 @@ fn model_autonomous_repair_and_syntax_retry_write_receipt() {
             "--mock-syntax-retry",
             "--output-dir",
             "out-retry",
-        ])
-        .output()
-        .unwrap();
+        ],
+    );
     assert_eq!(
         code(&out),
         0,
@@ -460,18 +458,17 @@ fn model_autonomous_repair_and_syntax_retry_write_receipt() {
 #[test]
 fn mock_failing_repair_exits_21_with_quarantine_triage_report() {
     let dir = scratch("quarantine-v06");
-    let out = Command::new(env!("CARGO_BIN_EXE_replayfix"))
-        .current_dir(&dir)
-        .args([
+    let out = run_cmd(
+        &dir,
+        &[
             "run",
             "--bug",
             "RF-01",
             "--mock-failing-repair",
             "--output-dir",
             "out-quarantine",
-        ])
-        .output()
-        .unwrap();
+        ],
+    );
     assert_eq!(
         code(&out),
         21,
@@ -809,6 +806,10 @@ fn test_apply_with_yes_approves_and_mutates_base_repo_exit_0() {
 fn run_cmd(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_replayfix"))
         .current_dir(dir)
+        .env("REPLAYFIX_TEST_NO_REG", "1")
+        .env_remove("META_API_KEY")
+        .env_remove("REPLAYFIX_AI_KEY")
+        .env_remove("BASETEN_API_KEY")
         .args(args)
         .output()
         .expect("failed to launch replayfix")
