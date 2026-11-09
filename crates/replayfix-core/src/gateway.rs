@@ -70,8 +70,8 @@ pub fn escape_untrusted_dom_context(raw_dom: &str) -> String {
     format!("<UNTRUSTED_DOM_CONTEXT>\n{escaped}\n</UNTRUSTED_DOM_CONTEXT>")
 }
 
-/// Default per-request timeout in milliseconds (15 seconds).
-pub const DEFAULT_GATEWAY_TIMEOUT_MS: u64 = 15_000;
+/// Default per-request timeout in milliseconds (60 seconds).
+pub const DEFAULT_GATEWAY_TIMEOUT_MS: u64 = 60_000;
 
 /// Default maximum retry count for transient HTTP 429 / 5xx errors.
 pub const DEFAULT_MAX_RETRIES: u32 = 2;
@@ -234,6 +234,21 @@ pub fn resolve_env_key(var_name: &str) -> Option<String> {
                             }
                         }
                     }
+                }
+            }
+        }
+        if let Ok(output) = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("[Environment]::GetEnvironmentVariable('{var_name}', 'User')"),
+            ])
+            .output()
+        {
+            if output.status.success() {
+                let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !val.is_empty() {
+                    return Some(val);
                 }
             }
         }
@@ -1165,12 +1180,27 @@ impl MetaGatewayClient {
         let max_attempts = self.config.max_retries.saturating_add(1);
         let mut last_err = String::new();
 
+        let mut candidate_keys = vec![api_key.to_string()];
+        for k_opt in [
+            resolve_env_key("META_API_KEY"),
+            resolve_env_key("REPLAYFIX_AI_KEY"),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !candidate_keys.contains(&k_opt) {
+                candidate_keys.push(k_opt);
+            }
+        }
+        let mut active_key_idx = 0usize;
+
         for attempt in 0..max_attempts {
             let start = std::time::Instant::now();
             let payload = build_payload(&request.requested_model);
+            let current_key = &candidate_keys[active_key_idx];
             let resp_res = http_client
                 .post(&self.base_url)
-                .bearer_auth(api_key)
+                .bearer_auth(current_key)
                 .json(&payload)
                 .send();
 
@@ -1183,16 +1213,29 @@ impl MetaGatewayClient {
                                 "Malformed JSON from Meta AI gateway: {e}"
                             ))
                         })?;
-                        return Self::parse_live_json_response(
+                        match Self::parse_live_json_response(
                             &body_val,
                             request,
                             GatewayProvider::MetaAi,
                             false,
                             attempt,
                             start.elapsed().as_millis() as u64,
-                            fingerprint,
-                        );
+                            fingerprint.clone(),
+                        ) {
+                            Ok(res) => return Ok(res),
+                            Err(e) => {
+                                if active_key_idx + 1 < candidate_keys.len() {
+                                    active_key_idx += 1;
+                                    continue;
+                                }
+                                return Err(e);
+                            }
+                        }
                     } else if status == 401 || status == 403 {
+                        if active_key_idx + 1 < candidate_keys.len() {
+                            active_key_idx += 1;
+                            continue;
+                        }
                         let err_detail = resp.text().unwrap_or_default();
                         let hint = if err_detail.contains("invalid_api_key") || status == 401 {
                             "Authentication failed (invalid or expired META_API_KEY). Ensure your key is valid and has active model quota on https://api.meta.ai/v1."
@@ -1205,6 +1248,10 @@ impl MetaGatewayClient {
                             self.config.redact_secrets(&err_detail)
                         )));
                     } else if status == 429 || status == 503 || status >= 500 {
+                        if active_key_idx + 1 < candidate_keys.len() {
+                            active_key_idx += 1;
+                            continue;
+                        }
                         let retry_after = resp
                             .headers()
                             .get("retry-after")
@@ -1215,6 +1262,10 @@ impl MetaGatewayClient {
                         last_err = format!("HTTP {status} (backoff {delay_ms}ms)");
                         continue;
                     } else {
+                        if active_key_idx + 1 < candidate_keys.len() {
+                            active_key_idx += 1;
+                            continue;
+                        }
                         return Err(CoreError::ModelApiError(format!(
                             "GATEWAY_HTTP_ERROR: HTTP {status} from {}",
                             self.base_url

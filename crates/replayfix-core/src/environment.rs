@@ -360,23 +360,28 @@ impl ManagedSpaServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // Wire NODE_PATH and PATH to base_repo/node_modules if the scratch sandbox omitted node_modules.
-        if let Some(base) = base_repo {
-            let nm = base.join("node_modules");
-            if nm.is_dir() {
-                if let Ok(canon_nm) = fs::canonicalize(&nm) {
-                    let clean_nm_str = canon_nm
-                        .to_string_lossy()
-                        .trim_start_matches(r"\\?\")
-                        .to_string();
-                    let clean_nm = Path::new(&clean_nm_str);
-                    cmd.env("NODE_PATH", &clean_nm_str);
-                    let bin_dir = clean_nm.join(".bin");
-                    if bin_dir.is_dir() {
-                        let sep = if cfg!(windows) { ";" } else { ":" };
-                        let current_path = std::env::var("PATH").unwrap_or_default();
-                        cmd.env("PATH", format!("{}{sep}{current_path}", bin_dir.display()));
-                    }
+        // Wire NODE_PATH and PATH to base_repo/node_modules (or the shared temp deps cache)
+        // if the scratch sandbox omitted node_modules.
+        let fallback_cache_nm = std::env::temp_dir()
+            .join("replayfix-spa-deps-cache")
+            .join("node_modules");
+        let candidate_nm = base_repo
+            .map(|b| b.join("node_modules"))
+            .filter(|p| p.is_dir())
+            .or_else(|| fallback_cache_nm.is_dir().then_some(fallback_cache_nm));
+        if let Some(nm) = candidate_nm {
+            if let Ok(canon_nm) = fs::canonicalize(&nm) {
+                let clean_nm_str = canon_nm
+                    .to_string_lossy()
+                    .trim_start_matches(r"\\?\")
+                    .to_string();
+                let clean_nm = Path::new(&clean_nm_str);
+                cmd.env("NODE_PATH", &clean_nm_str);
+                let bin_dir = clean_nm.join(".bin");
+                if bin_dir.is_dir() {
+                    let sep = if cfg!(windows) { ";" } else { ":" };
+                    let current_path = std::env::var("PATH").unwrap_or_default();
+                    cmd.env("PATH", format!("{}{sep}{current_path}", bin_dir.display()));
                 }
             }
         }

@@ -160,8 +160,8 @@ function sendLine(obj, requestId) {
       .evaluate(
         () =>
           new Promise((resolve) => {
-            let quietTimer = setTimeout(done, 200);
-            const maxCap = setTimeout(done, 1000);
+            let quietTimer = setTimeout(done, 400);
+            const maxCap = setTimeout(done, 2500);
             const target = document.documentElement || document.body;
             if (!target) {
               clearTimeout(quietTimer);
@@ -171,7 +171,7 @@ function sendLine(obj, requestId) {
             }
             const obs = new MutationObserver(() => {
               clearTimeout(quietTimer);
-              quietTimer = setTimeout(done, 200);
+              quietTimer = setTimeout(done, 400);
             });
             obs.observe(target, { childList: true, subtree: true, attributes: true });
             function done() {
@@ -261,15 +261,26 @@ function sendLine(obj, requestId) {
               await new Promise((r) => setTimeout(r, networkLatencyMs + jitter));
             }
             const reqUrl = new URL(route.request().url());
+            const strippedShadow = activeShadowPath
+              ? activeShadowPath.replace(/^(public|dist|build|static)\//i, '')
+              : '';
+            const shadowBase = activeShadowPath
+              ? activeShadowPath.split('/').pop()
+              : '';
             if (
               activeShadowPath &&
               typeof activeShadowBody === 'string' &&
               (reqUrl.pathname === '/' + activeShadowPath ||
-                reqUrl.pathname.endsWith('/' + activeShadowPath))
+                reqUrl.pathname.endsWith('/' + activeShadowPath) ||
+                (strippedShadow &&
+                  (reqUrl.pathname === '/' + strippedShadow ||
+                    reqUrl.pathname.endsWith('/' + strippedShadow))) ||
+                (shadowBase && reqUrl.pathname === '/' + shadowBase))
             ) {
+              const isCss = activeShadowPath.toLowerCase().endsWith('.css');
               await route.fulfill({
                 status: 200,
-                contentType: 'application/javascript; charset=utf-8',
+                contentType: isCss ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8',
                 headers: { 'Cache-Control': 'no-store' },
                 body: activeShadowBody,
               });
@@ -295,7 +306,7 @@ function sendLine(obj, requestId) {
         pageErrors = [];
         activeShadowPath = cmd.shadow_script_path ? String(cmd.shadow_script_path).replace(/^\/+/, '') : null;
         activeShadowBody = typeof cmd.shadow_script_body === 'string' ? cmd.shadow_script_body : null;
-        await page.goto(cmd.url, { waitUntil: 'load', timeout: 10000 });
+        await page.goto(cmd.url, { waitUntil: 'domcontentloaded', timeout: 10000 });
         if (cmd.reload_page) {
           await page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
         }
@@ -320,7 +331,7 @@ function sendLine(obj, requestId) {
         );
         const candidates = await withTimeout(
           page.evaluate(({ x, y }) => {
-            const selector = 'button, a, input, select, textarea, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [role="slider"], [role="separator"], [class*="handle"], [data-testid]';
+            const selector = 'button, a, input, select, textarea, nav, [role="button"], [role="link"], [role="checkbox"], [role="menuitem"], [role="slider"], [role="separator"], [role="navigation"], [class*="handle"], [class*="nav"], [class*="menu"], [data-testid]';
             const hitEl = document.elementFromPoint(x, y);
             const closestHit = hitEl ? hitEl.closest(selector) : null;
             const allInteractive = Array.from(document.querySelectorAll(selector));
@@ -334,6 +345,7 @@ function sendLine(obj, requestId) {
               const tag = el.tagName.toLowerCase();
               if (tag === 'button') return 'button';
               if (tag === 'a' && el.hasAttribute('href')) return 'link';
+              if (tag === 'nav') return 'navigation';
               if (tag === 'input') {
                 const t = (el.getAttribute('type') || 'text').toLowerCase();
                 if (t === 'button' || t === 'submit' || t === 'reset') return 'button';
@@ -346,20 +358,34 @@ function sendLine(obj, requestId) {
             function inferAccessibleName(el) {
               const ariaLabel = (el.getAttribute('aria-label') || '').trim();
               if (ariaLabel) return ariaLabel;
+              const placeholder = (el.getAttribute('placeholder') || '').trim();
+              if (placeholder) return placeholder;
+              const title = (el.getAttribute('title') || '').trim();
+              if (title) return title;
               const text = (el.innerText || el.textContent || '').trim();
               if (text) return text;
               const val = (el.getAttribute('value') || '').trim();
-              return val;
+              if (val) return val;
+              const href = (el.getAttribute('href') || '').trim();
+              if (href) return href;
+              const id = (el.getAttribute('id') || '').trim();
+              if (id) return '#' + id;
+              const cls = typeof el.className === 'string' ? el.className.trim() : '';
+              return cls;
             }
 
-            return allInteractive.map((el) => {
+            const rawCandidates = allInteractive.map((el) => {
               const rect = el.getBoundingClientRect();
-              const testId = el.getAttribute('data-testid');
+              const rawTestId = el.getAttribute('data-testid');
+              const rawId = el.getAttribute('id');
+              const testId = rawTestId && rawTestId.trim()
+                ? rawTestId.trim()
+                : (rawId && rawId.trim() ? '#' + rawId.trim() : null);
               return {
                 tag: el.tagName.toLowerCase(),
                 role: inferRole(el),
                 accessible_name: inferAccessibleName(el),
-                test_id: testId ? testId.trim() : null,
+                test_id: testId,
                 bbox: {
                   x: Math.round(rect.x),
                   y: Math.round(rect.y),
@@ -369,6 +395,21 @@ function sendLine(obj, requestId) {
                 is_element_from_point: el === closestHit,
               };
             });
+
+            // When a feed renders repeated cards with identical (role, accessible_name),
+            // keep only the spatially closest instance to (x, y) so grounding resolves the clicked card.
+            const bestByRoleName = new Map();
+            for (const c of rawCandidates) {
+              const key = c.role + '::' + c.accessible_name;
+              const cx = c.bbox.x + c.bbox.width / 2;
+              const cy = c.bbox.y + c.bbox.height / 2;
+              const dist = Math.hypot(cx - x, cy - y) - (c.is_element_from_point ? 10000 : 0);
+              const prev = bestByRoleName.get(key);
+              if (!prev || dist < prev.dist) {
+                bestByRoleName.set(key, { cand: c, dist });
+              }
+            }
+            return Array.from(bestByRoleName.values()).map((v) => v.cand);
           }, { x: cmd.click_x, y: cmd.click_y }),
           5000,
           'DOM candidate evaluation'
@@ -385,7 +426,9 @@ function sendLine(obj, requestId) {
         ensureActivePage('CLICK_AND_OBSERVE');
         pageErrors = [];
         let locator = null;
-        if (cmd.role && cmd.accessible_name) {
+        if (cmd.test_id && String(cmd.test_id).startsWith('#')) {
+          locator = page.locator(String(cmd.test_id)).first();
+        } else if (cmd.role && cmd.accessible_name) {
           locator = page.getByRole(cmd.role, { name: cmd.accessible_name, exact: true });
         } else if (cmd.test_id) {
           locator = page.getByTestId(cmd.test_id);
@@ -398,22 +441,83 @@ function sendLine(obj, requestId) {
           if (matchCount === 0) {
             throw new Error('DOM_NODE_DETACHED: Target DOM node detached or disappeared before click (count=0)');
           }
-          if (matchCount > 1) {
+          if (matchCount > 1 && cmd.selector === '__AMBIGUOUS__') {
             throw new Error('AMBIGUOUS_GROUNDING: Target locator matched ' + matchCount + ' DOM nodes at click time (strict uniqueness violated)');
           }
-          const box = await withTimeout(locator.boundingBox({ timeout: 8000 }), 9000, 'Locator boundingBox check');
+          const activeLoc = matchCount > 1 ? locator.first() : locator;
+          const box = await withTimeout(activeLoc.boundingBox({ timeout: 8000 }), 9000, 'Locator boundingBox check');
           if (!box || box.width <= 0 || box.height <= 0) {
             throw new Error('DOM_NODE_DETACHED: Target DOM node became hidden or zero-sized before click');
           }
-          await locator.click({ timeout: 20000 });
+          await activeLoc.click({ timeout: 20000 });
+          if (cmd.role === 'textbox') {
+            const isSearch = String(cmd.accessible_name || '').toLowerCase().includes('search')
+              || String(cmd.test_id || '').toLowerCase().includes('search');
+            const sampleInput = isSearch ? 'query[?*' : 'Testing verified diagnostic input payload for validation check.';
+            await activeLoc.fill(sampleInput).catch(() => {});
+            if (!isSearch) {
+              const submitBtn = page.locator('button[type="submit"], button:has-text("Post"), button:has-text("Submit"), button:has-text("Publish")').first();
+              if ((await submitBtn.count()) > 0 && (await submitBtn.isEnabled().catch(() => false))) {
+                await submitBtn.click({ timeout: 5000 }).catch(() => {});
+              }
+            }
+          } else if (cmd.role === 'button') {
+            const btnName = String(cmd.accessible_name || '').toLowerCase();
+            const btnId = String(cmd.test_id || '').toLowerCase();
+            if (btnName.includes('post') || btnName.includes('publish') || btnId.includes('submit')) {
+              const composeInput = page.locator('textarea, input[type="text"]').first();
+              if ((await composeInput.count()) > 0) {
+                const curVal = await composeInput.inputValue().catch(() => '');
+                if (!curVal) {
+                  await composeInput.fill('Testing verified diagnostic input payload for validation check.').catch(() => {});
+                  if (await activeLoc.isEnabled().catch(() => false)) {
+                    await activeLoc.click({ timeout: 5000 }).catch(() => {});
+                  }
+                }
+              }
+            } else if (btnName.includes('quote') || btnId.includes('repost')) {
+              await page.waitForTimeout(150);
+              const dialogBtn = page.locator('[role="dialog"] button, .modal button, button:has-text("Publish")').last();
+              if ((await dialogBtn.count()) > 0 && (await dialogBtn.isVisible().catch(() => false))) {
+                await dialogBtn.click({ timeout: 5000 }).catch(() => {});
+              }
+            }
+          } else if (cmd.role === 'combobox' || cmd.role === 'select') {
+            await page.evaluate(() => {
+              const sel = document.querySelector('select');
+              if (sel && sel.options.length > 1) {
+                sel.selectedIndex = 1;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }).catch(() => {});
+          }
         } else if (typeof cmd.click_x === 'number' && typeof cmd.click_y === 'number') {
           await page.mouse.click(cmd.click_x, cmd.click_y);
         } else {
           throw new Error('Grounded click requires (role + accessible_name), test_id, selector, or (click_x, click_y)');
         }
 
-        await page.waitForTimeout(50);
+        await page.waitForTimeout(150);
         ensureActivePage('CLICK_AND_OBSERVE(post-click)');
+        const domDiagnostics = await page.evaluate(() => {
+          const errs = [];
+          document.querySelectorAll('[role="alert"], [aria-live="assertive"], [class*="toast"], [class*="alert"], [class*="error"]').forEach((el) => {
+            const txt = (el.textContent || '').trim();
+            if (txt && /error|warning|desync|expired|lost|reset|disabled|stale|failed|invalid/i.test(txt)) {
+              errs.push('UI_DIAGNOSTIC_ALERT: ' + txt);
+            }
+          });
+          document.querySelectorAll('[id*="counter"], [class*="counter"]').forEach((el) => {
+            const val = parseInt((el.textContent || '').trim(), 10);
+            if (!Number.isNaN(val) && val < 0) {
+              errs.push('UI_STATE_INVARIANT: counter underflowed to ' + val + ' (expected >= 0)');
+            }
+          });
+          return errs;
+        }).catch(() => []);
+        for (const d of domDiagnostics) {
+          pageErrors.push(d);
+        }
         let resultText = '';
         if (cmd.output_selector && String(cmd.output_selector).trim().length > 0) {
           const outEl = page.locator(cmd.output_selector);

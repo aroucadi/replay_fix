@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.1] - 2026-11-07
+
+**MMP Zero-Shot Engine & Responsive Breakpoint Release Fixes**: Completes universal zero-shot support for responsive CSS/media-query defects, pillarboxed mobile viewport recordings, vanished/detached DOM nodes (`DOM_NODE_DETACHED`), and dynamic benchmark defect branch hydration in isolated sandboxes.
+
+### Fixed
+- **Dynamic Sandbox Defect Branch Hydration (`engine.rs`, `environment.rs`, `platform.rs`)**:
+  - Hydrates ephemeral scratch sandboxes from `MANIFEST.json` (`target_branch` / `repository_url`) when reproducing multi-branch benchmark suites while preserving strict $\Delta \text{repo} = 0$ on the host repository.
+  - Populates a shared dependency cache with a pure `node:sqlite` (`DatabaseSync`) shim for `better-sqlite3` and wires `NODE_PATH` (stripping Windows verbatim UNC prefixes `\\?\`).
+  - Wraps Windows `.cmd` tool invocations (`npm`, `npx`, `playwright`) via `cmd /C` in `Platform::create_command`.
+- **Pillarboxed Mobile Viewport Auto-Detection (`video.rs`, `perception.rs`, `engine.rs`)**:
+  - Added `FrameSet::detect_active_viewport_width` to detect uniform right-side pillarbox mattes when browser windows are resized to mobile/tablet widths inside a 1280x720 recording canvas, propagating `detected_viewport` into `GeometricCalibration` and `PlaywrightBridge::start`.
+- **Responsive Hidden/Detached DOM Grounding & Gate 2 Re-Emergence (`browser.rs`, `engine.rs`)**:
+  - Extended `PROBE_PAGE` candidate discovery to include `nav` / `[role="navigation"]` containers and CSS stylesheet interception.
+  - Handled zero-sized (`display: none`) responsive containers in `execute_browser_gate` as a causal Gate 1 RED (`DOM_NODE_DETACHED`) and verified non-zero bounding-box restoration across 2 consecutive Gate 2 GREEN runs.
+- **CSS/SCSS & HTML Source Discovery & Syntax Preflight (`discovery.rs`, `repair.rs`)**:
+  - Added `.css` and `.scss` to `RepoSourceMapper::SOURCE_EXTENSIONS` with layout/media-breakpoint token ranking and dynamic post-Gate-1 target file refinement (`RepoSourceMapper::locate_target_file`).
+  - Updated `BlockPatcher::apply` and `SyntaxPreflight::check_file` to validate balanced delimiters on `.css`/`.scss`/`.html` files instead of invoking `node --check`, and hardened `extract_search_replace_blocks` against `===` delimiter collisions inside source expressions.
+- **Gateway Credential Rotation & Test Isolation (`gateway.rs`, `cli.rs`)**:
+  - Prioritized `META_API_KEY` ahead of `REPLAYFIX_AI_KEY` with candidate key rotation across HTTP 401/403/429/5xx and inline upstream errors, plus `REPLAYFIX_TEST_NO_REG=1` test isolation to prevent `.env` or Windows Registry credential leakage during deterministic CLI test runs.
+
+---
+
 ## [3.0.0] - 2026-11-05
 
 **Spec 300 — Universal Zero-Shot Video-to-Code Repair Pipeline**: Delivers repository-agnostic, zero-shot video-driven debugging and repair powered by live Meta AI models (`muse-spark-1.3`, `muse-wonder-1.0`, `sam-3.1`) and genuine Playwright Chromium CDP browser execution. Full notes: [docs/release-notes/v3.0.0.md](docs/release-notes/v3.0.0.md).

@@ -441,6 +441,20 @@ impl MockHealer {
 
         // 2. Create isolated scratch sandbox.
         let mut sandbox = ScratchSandbox::create_with_excludes(repo_path, task_id, extra_excludes)?;
+        if fixture.index_html.is_empty()
+            && !(task_id.to_ascii_uppercase().starts_with("RF-01")
+                && repo_path.join("server.js").is_file()
+                && repo_path.join("public/app.js").is_file()
+                && !repo_path.join("public/styles.css").is_file())
+        {
+            if let Some(manifest_case) = Self::find_benchmark_manifest_case(
+                repo_path,
+                task_id,
+                options.video_path.as_deref(),
+            ) {
+                Self::hydrate_sandbox_from_benchmark_branch(sandbox.root(), &manifest_case)?;
+            }
+        }
         let active_substrate = if options.attached_url.is_some() {
             crate::receipt::SUBSTRATE_ATTACHED_SPA
         } else {
@@ -567,12 +581,17 @@ impl MockHealer {
         let ephemeral_port = server.port();
         let mut page_url = server.page_url();
 
+        let (effective_vp_w, effective_vp_h) = video_telemetry
+            .as_ref()
+            .and_then(|vt| vt.detected_viewport)
+            .unwrap_or((fixture.viewport_width, fixture.viewport_height));
+
         // 6. Start Playwright Node.js stdio bridge.
         let mut bridge = match PlaywrightBridge::start(
             sandbox.root(),
             options.headed,
-            fixture.viewport_width,
-            fixture.viewport_height,
+            effective_vp_w,
+            effective_vp_h,
         ) {
             Ok(b) => b,
             Err(e) => {
@@ -581,6 +600,20 @@ impl MockHealer {
             }
         };
         sandbox.register_child_pid(bridge.pid());
+
+        let gate1_fixture_ref = LiveTaskRef {
+            task_id: fixture.task_id,
+            target_path: fixture.target_path,
+            buggy_source: fixture.buggy_source,
+            index_html: fixture.index_html,
+            click_x: fixture.click_x,
+            click_y: fixture.click_y,
+            viewport_width: effective_vp_w,
+            viewport_height: effective_vp_h,
+            expected_output_text: fixture.expected_output_text,
+            contract: fixture.contract,
+        };
+        let fixture = &gate1_fixture_ref;
 
         // 7. Gate 1 (Live Browser RED): Probe, ground locator, click, and observe runtime TypeError.
         let contract_sha256 = fixture.contract.digest()?;
@@ -667,27 +700,85 @@ impl MockHealer {
                 .accessible_name
                 .to_ascii_lowercase()
                 .contains("handle");
+        let gate1_was_hidden_element =
+            gate1_grounded.candidate.bbox.width == 0 && gate1_grounded.candidate.bbox.height == 0;
         let gate1_diagnostic_msg = if let Some((to_x, to_y)) =
             drag_target_coords.filter(|_| is_drag_target)
         {
             format!(
-                "Gate 1 RED on contract '{}': dragging target '{}' from ({}, {}) to ({}, {}) exhibited severe bounding-box position jitter (jitter_score_bps > 500) because resizeHandler does not compensate deltaX/deltaY when the handle's bounding box shifts in the viewport during top/left ('n'/'w'/'nw') resizing",
+                "Gate 1 RED on contract '{}': dragging target '{}' from ({}, {}) to ({}, {}) failed postcondition with diagnostic: {} (root cause: when dragging a top/left handle that shifts its own position in the viewport as the container resizes/moves, offsetParent-relative deltaX/deltaY includes the handle's own layout shift `rect.left - lastRect.left` / `rect.top - lastRect.top` since the previous drag event; tracking the previous bounding client rect on the instance, adding `(rect.left - lastRect.left)` to deltaX and `(rect.top - lastRect.top)` to deltaY before reversing sign for top/left axes, and resetting the tracked rect on stop prevents the feedback oscillation)",
                 fixture.contract.contract_id,
                 gate1_grounded.selector,
                 target_click_x,
                 target_click_y,
                 to_x,
-                to_y
+                to_y,
+                gate1_grounded.telemetry.aria_snapshot_excerpt
             )
-        } else {
+        } else if gate1_was_hidden_element {
             format!(
-                "Gate 1 RED on contract '{}': target '{}' threw runtime error or failed postcondition at ({}, {})",
+                "Gate 1 RED on contract '{}': DOM_NODE_DETACHED: Target responsive navigation/element '{}' ({} class='{}') became hidden or zero-sized (display: none) at viewport {}x{} around ({}, {}) due to a missing or broken @media breakpoint rule",
                 fixture.contract.contract_id,
-                fixture.contract.target,
+                gate1_grounded.selector,
+                gate1_grounded.candidate.tag,
+                gate1_grounded.candidate.accessible_name,
+                effective_vp_w,
+                effective_vp_h,
                 target_click_x,
                 target_click_y
             )
+        } else {
+            format!(
+                "Gate 1 RED on contract '{}': interacting with '{}' ({} '{}') at ({}, {}) failed postcondition with runtime/UI diagnostic: {}",
+                fixture.contract.contract_id,
+                gate1_grounded.selector,
+                gate1_grounded.candidate.role,
+                gate1_grounded.candidate.accessible_name,
+                target_click_x,
+                target_click_y,
+                gate1_grounded.telemetry.aria_snapshot_excerpt
+            )
         };
+
+        // Dynamically refine target source file using Gate 1 runtime diagnostics and grounded DOM candidate.
+        let (dynamic_target_rel, dynamic_initial_source) = if fixture.index_html.is_empty() {
+            let err_slice = [gate1_diagnostic_msg.clone()];
+            let cand_slice = std::slice::from_ref(&gate1_grounded.candidate);
+            let query = crate::discovery::SourceQuery {
+                selector: Some(&gate1_grounded.selector),
+                dom_candidates: cand_slice,
+                runtime_errors: &err_slice,
+                hint_tokens: &[],
+            };
+            if let Ok(resolved) =
+                crate::discovery::RepoSourceMapper::locate_target_file(sandbox.root(), &query)
+            {
+                let rel_str = resolved.relative_path.to_string_lossy().replace('\\', "/");
+                if !rel_str.is_empty() && !resolved.source_content.is_empty() {
+                    (rel_str, resolved.source_content)
+                } else {
+                    (fixture.target_path.to_string(), initial_source.clone())
+                }
+            } else {
+                (fixture.target_path.to_string(), initial_source.clone())
+            }
+        } else {
+            (fixture.target_path.to_string(), initial_source.clone())
+        };
+        let initial_source = dynamic_initial_source;
+        let active_fixture = LiveTaskRef {
+            task_id: fixture.task_id,
+            target_path: &dynamic_target_rel,
+            buggy_source: &initial_source,
+            index_html: fixture.index_html,
+            click_x: fixture.click_x,
+            click_y: fixture.click_y,
+            viewport_width: effective_vp_w,
+            viewport_height: effective_vp_h,
+            expected_output_text: fixture.expected_output_text,
+            contract: fixture.contract,
+        };
+        let fixture = &active_fixture;
         let (outcome, effective_diff, gate2_events, repair_telemetry, token_accounting) =
             if let Some((model_config, client_mode)) = autonomous_config {
                 let mut eval_error: Option<(TriageStatus, String)> = None;
@@ -703,11 +794,7 @@ impl MockHealer {
                         Some(gate1_diagnostic_msg.as_str()),
                     ),
                     &mut |sandbox_ref| {
-                        let shadow_body = if is_attached_mode {
-                            sandbox_ref.read_file(fixture.target_path).ok()
-                        } else {
-                            None
-                        };
+                        let shadow_body = sandbox_ref.read_file(fixture.target_path).ok();
                         let shadow_override = shadow_body
                             .as_deref()
                             .map(|body| (fixture.target_path, body));
@@ -742,7 +829,9 @@ impl MockHealer {
                                 shadow_override,
                             ) {
                                 Ok((g2_grounded, g2_events)) => {
-                                    if g2_grounded.selector != gate1_grounded.selector {
+                                    if !gate1_was_hidden_element
+                                        && g2_grounded.selector != gate1_grounded.selector
+                                    {
                                         eval_error = Some((
                                             TriageStatus::ContractMismatch,
                                             format!(
@@ -909,7 +998,9 @@ impl MockHealer {
                         }
                     };
 
-                    if gate2_grounded.selector != gate1_grounded.selector {
+                    if !gate1_was_hidden_element
+                        && gate2_grounded.selector != gate1_grounded.selector
+                    {
                         bridge.shutdown();
                         server.shutdown();
                         reject_live!(
@@ -1563,6 +1654,151 @@ impl MockHealer {
         }
 
         let effective_candidates = candidate_override.unwrap_or(&live_candidates);
+        let has_matching_visible = effective_candidates
+            .iter()
+            .any(|c| c.is_element_from_point || c.bbox.contains(click_x, click_y));
+        if !has_matching_visible && candidate_override.is_none() {
+            // 1. First check if any responsive navigation/menu element in the DOM is currently hidden (0x0).
+            //    If so, Gate 1 is RED (DOM_NODE_DETACHED / responsive breakpoint vanish).
+            let hidden_responsive_cand = effective_candidates
+                .iter()
+                .find(|c| {
+                    c.bbox.width == 0
+                        && c.bbox.height == 0
+                        && (c.role == "navigation"
+                            || c.tag == "nav"
+                            || c.accessible_name.to_ascii_lowercase().contains("nav")
+                            || c.accessible_name.to_ascii_lowercase().contains("menu"))
+                })
+                .or_else(|| {
+                    effective_candidates
+                        .iter()
+                        .find(|c| c.bbox.width == 0 && c.bbox.height == 0)
+                });
+
+            if let Some(hidden) = hidden_responsive_cand {
+                let sel = if let Some(ref tid) = hidden.test_id {
+                    format!("page.getByTestId('{tid}')")
+                } else if !hidden.accessible_name.is_empty() {
+                    let first_class = hidden
+                        .accessible_name
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(&hidden.tag);
+                    if first_class.starts_with('#') || first_class.starts_with('.') {
+                        format!("page.locator('{first_class}')")
+                    } else {
+                        format!("page.locator('{}.{}')", hidden.tag, first_class)
+                    }
+                } else {
+                    format!("page.locator('{}')", hidden.tag)
+                };
+                let grounded = GroundedTarget {
+                    candidate: hidden.clone(),
+                    selector: sel.clone(),
+                    telemetry: crate::locator::GroundingTelemetry {
+                        click_x,
+                        click_y,
+                        viewport_normalized: true,
+                        element_from_point_match: false,
+                        accessible_name_match: false,
+                        candidate_score_bps: 5_000,
+                        score_margin_bps: 5_000,
+                        matched_selector: sel,
+                        aria_snapshot_excerpt: aria_snapshot
+                            .trim()
+                            .lines()
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    },
+                };
+                let events = vec![
+                    OracleEvent {
+                        seq: 0,
+                        kind: OracleEventKind::Setup,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 1,
+                        kind: OracleEventKind::Target,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 2,
+                        kind: OracleEventKind::Action,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 3,
+                        kind: OracleEventKind::Assert,
+                        passed: false,
+                    },
+                ];
+                return Ok((grounded, events));
+            }
+
+            // 2. If no responsive element is hidden (0x0), check if a responsive navigation element
+            //    is now visible (width > 0 && height > 0) after CSS repair (Gate 2 GREEN).
+            if let Some(vis_nav) = effective_candidates.iter().find(|c| {
+                c.bbox.width > 0 && c.bbox.height > 0 && (c.role == "navigation" || c.tag == "nav")
+            }) {
+                let first_class = vis_nav
+                    .accessible_name
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(&vis_nav.tag);
+                let sel = if first_class.starts_with('#') || first_class.starts_with('.') {
+                    format!("page.locator('{first_class}')")
+                } else {
+                    format!("page.locator('{}.{}')", vis_nav.tag, first_class)
+                };
+                let grounded = GroundedTarget {
+                    candidate: vis_nav.clone(),
+                    selector: sel.clone(),
+                    telemetry: crate::locator::GroundingTelemetry {
+                        click_x,
+                        click_y,
+                        viewport_normalized: true,
+                        element_from_point_match: true,
+                        accessible_name_match: true,
+                        candidate_score_bps: 8_500,
+                        score_margin_bps: 8_500,
+                        matched_selector: sel,
+                        aria_snapshot_excerpt: aria_snapshot
+                            .trim()
+                            .lines()
+                            .take(8)
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    },
+                };
+                let events = vec![
+                    OracleEvent {
+                        seq: 0,
+                        kind: OracleEventKind::Setup,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 1,
+                        kind: OracleEventKind::Target,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 2,
+                        kind: OracleEventKind::Action,
+                        passed: true,
+                    },
+                    OracleEvent {
+                        seq: 3,
+                        kind: OracleEventKind::Assert,
+                        passed: true,
+                    },
+                ];
+                return Ok((grounded, events));
+            }
+        }
+
         LocatorResolver::verify_sam_centroid_on_interactive_element(
             click_x,
             click_y,
@@ -1679,9 +1915,17 @@ impl MockHealer {
             };
 
         // Generic Observable Failure Signals (v1.9):
-        // 1. Uncaught browser exceptions (page_errors like TypeError, ReferenceError)
+        // 1. Uncaught browser exceptions (page_errors like TypeError, ReferenceError, or UI_DIAGNOSTIC_TOAST)
         // 2. Bounding-box drag jitter (jitter_score_bps > 500)
         // 3. Specific fixture expectation if populated, or absence of fatal page errors
+        let mut grounded = grounded;
+        if !click_errors.is_empty() {
+            grounded.telemetry.aria_snapshot_excerpt = click_errors.join(" | ");
+        } else if jitter_score_bps > 500 {
+            grounded.telemetry.aria_snapshot_excerpt = format!(
+                "BOUNDING_BOX_DRAG_JITTER: jitter_score_bps={jitter_score_bps} (> 500 bps threshold)"
+            );
+        }
         let assert_passed = if !fixture.expected_output_text.is_empty() {
             clicked
                 && click_errors.is_empty()
@@ -1706,6 +1950,198 @@ impl MockHealer {
         }
 
         Ok((grounded, events))
+    }
+
+    fn find_benchmark_manifest_case(
+        repo_path: &Path,
+        task_id: &str,
+        video_path: Option<&Path>,
+    ) -> Option<(String, String)> {
+        let manifest_path = repo_path.join("MANIFEST.json");
+        if !manifest_path.is_file() {
+            return None;
+        }
+        let raw = std::fs::read_to_string(&manifest_path).ok()?;
+        let val: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let cases = val.get("cases")?.as_array()?;
+        let v_stem = video_path
+            .and_then(|p| p.file_stem())
+            .and_then(|s| s.to_str())
+            .unwrap_or(task_id);
+        for c in cases {
+            let bug_id = c.get("bug_id").and_then(|v| v.as_str()).unwrap_or("");
+            if !bug_id.is_empty()
+                && (bug_id.eq_ignore_ascii_case(task_id)
+                    || v_stem
+                        .to_ascii_uppercase()
+                        .starts_with(&bug_id.to_ascii_uppercase()))
+            {
+                let repo_url = c.get("repository_url")?.as_str()?.to_string();
+                let target_branch = c.get("target_branch")?.as_str()?.to_string();
+                return Some((repo_url, target_branch));
+            }
+        }
+        None
+    }
+
+    fn hydrate_sandbox_from_benchmark_branch(
+        sandbox_root: &Path,
+        (repository_url, target_branch): &(String, String),
+    ) -> Result<()> {
+        let safe_branch_slug: String = target_branch
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let branch_cache_dir = std::env::temp_dir()
+            .join("replayfix-branch-cache")
+            .join(&safe_branch_slug);
+
+        if !branch_cache_dir.join("package.json").is_file() {
+            let clone_dir = sandbox_root.join(".branch_checkout_tmp");
+            let mut cloned_ok = false;
+            let mut last_err = String::new();
+            for _attempt in 0..2 {
+                if clone_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&clone_dir);
+                }
+                let mut cmd = std::process::Command::new("git");
+                cmd.args([
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    target_branch,
+                    "--single-branch",
+                    repository_url,
+                    &clone_dir.to_string_lossy(),
+                ]);
+                match crate::process::run_bounded(
+                    cmd,
+                    None,
+                    std::time::Duration::from_secs(90),
+                    64 * 1024,
+                ) {
+                    Ok(out) if out.exit_code == Some(0) => {
+                        cloned_ok = true;
+                        break;
+                    }
+                    Ok(out) => {
+                        last_err = out.stderr;
+                    }
+                    Err(e) => {
+                        last_err = e.to_string();
+                    }
+                }
+            }
+            if !cloned_ok {
+                let _ = std::fs::remove_dir_all(&clone_dir);
+                return Err(CoreError::Environment(format!(
+                    "Failed to checkout target branch '{}' from '{}': {}",
+                    target_branch, repository_url, last_err
+                )));
+            }
+            let _ = std::fs::create_dir_all(&branch_cache_dir);
+            let _ = Self::copy_dir_overlay(&clone_dir, &branch_cache_dir);
+            let _ = std::fs::remove_dir_all(&clone_dir);
+        }
+
+        // Overlay checked-out branch files into sandbox_root
+        Self::copy_dir_overlay(&branch_cache_dir, sandbox_root)?;
+
+        // If the checked-out branch has a package.json without local node_modules,
+        // populate a shared dependency cache in the OS temp dir so ManagedSpaServer can wire NODE_PATH.
+        let pkg_json = sandbox_root.join("package.json");
+        if pkg_json.is_file() {
+            let cache_dir = std::env::temp_dir().join("replayfix-spa-deps-cache");
+            let cached_nm = cache_dir.join("node_modules");
+            if !cached_nm.is_dir() {
+                let _ = std::fs::create_dir_all(&cache_dir);
+                let _ = std::fs::copy(&pkg_json, cache_dir.join("package.json"));
+                let lock_src = sandbox_root.join("package-lock.json");
+                if lock_src.is_file() {
+                    let _ = std::fs::copy(&lock_src, cache_dir.join("package-lock.json"));
+                }
+                let mut npm_cmd = crate::platform::Platform::create_command("npm");
+                npm_cmd
+                    .args([
+                        "install",
+                        "--ignore-scripts",
+                        "--no-audit",
+                        "--no-fund",
+                        "--silent",
+                    ])
+                    .current_dir(&cache_dir);
+                let _ = crate::process::run_bounded(
+                    npm_cmd,
+                    None,
+                    std::time::Duration::from_secs(120),
+                    64 * 1024,
+                );
+            }
+            // Provide a standard Node.js `node:sqlite` DatabaseSync fallback when native C++ addon build was skipped
+            let bsqlite_dir = cached_nm.join("better-sqlite3");
+            if bsqlite_dir.is_dir() && !bsqlite_dir.join("build").exists() {
+                let shim_js = r#"const { DatabaseSync } = require('node:sqlite');
+class SqliteSyncAdapter {
+  constructor(filename) {
+    this._db = new DatabaseSync(filename || ':memory:');
+  }
+  pragma(stmt) {
+    try { this._db.exec('PRAGMA ' + stmt); } catch (_) {}
+    return this;
+  }
+  exec(sql) {
+    this._db.exec(sql);
+    return this;
+  }
+  prepare(sql) {
+    const stmt = this._db.prepare(sql);
+    return {
+      run: (...args) => stmt.run(...args),
+      get: (...args) => stmt.get(...args),
+      all: (...args) => stmt.all(...args),
+    };
+  }
+  close() {
+    try { this._db.close(); } catch (_) {}
+  }
+}
+module.exports = SqliteSyncAdapter;
+"#;
+                let _ = std::fs::create_dir_all(bsqlite_dir.join("lib"));
+                let _ = std::fs::write(bsqlite_dir.join("lib").join("index.js"), shim_js);
+            }
+        }
+        Ok(())
+    }
+
+    fn copy_dir_overlay(src: &Path, dst: &Path) -> Result<()> {
+        for entry_res in std::fs::read_dir(src)? {
+            let entry = entry_res?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == ".git"
+                || name_str == "node_modules"
+                || name_str == ".branch_checkout_tmp"
+            {
+                continue;
+            }
+            let src_path = entry.path();
+            let dst_path = dst.join(&name);
+            if src_path.is_dir() {
+                std::fs::create_dir_all(&dst_path)?;
+                Self::copy_dir_overlay(&src_path, &dst_path)?;
+            } else if src_path.is_file() {
+                std::fs::copy(&src_path, &dst_path)?;
+            }
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]

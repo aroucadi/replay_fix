@@ -333,10 +333,15 @@ impl Fixture {
 
     /// Resolve fixture for a task id, detecting if `repo_path` is an authentic MetaPulse checkout.
     pub fn for_task_in_repo(task_id: &str, repo_path: &Path) -> Option<Fixture> {
-        if repo_path.join("public/app.js").exists() && task_id == "RF-01" {
+        let normalized = if task_id.starts_with("RF-01") {
+            "RF-01"
+        } else {
+            task_id
+        };
+        if repo_path.join("public/app.js").exists() && normalized == "RF-01" {
             return Some(Self::metapulse_rf01());
         }
-        Self::for_task(task_id)
+        Self::for_task(normalized)
     }
 
     fn metapulse_rf01() -> Fixture {

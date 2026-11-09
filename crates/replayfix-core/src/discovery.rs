@@ -53,7 +53,7 @@ pub struct RepoSourceMapper;
 impl RepoSourceMapper {
     /// Supported source code extensions to scan.
     const SOURCE_EXTENSIONS: &'static [&'static str] = &[
-        "tsx", "ts", "jsx", "js", "vue", "svelte", "html", "mjs", "cjs",
+        "tsx", "ts", "jsx", "js", "vue", "svelte", "css", "scss", "html", "mjs", "cjs",
     ];
 
     /// Standard directory names to skip during recursive source discovery.
@@ -149,6 +149,18 @@ impl RepoSourceMapper {
             let mut score = match_count.saturating_mul(1000);
             if match_count > 0 && (rel_str.starts_with("src/") || rel_str.starts_with("lib/")) {
                 score = score.saturating_add(500);
+            }
+            let has_css_layout_signal = query.runtime_errors.iter().any(|e| {
+                e.contains("DOM_NODE_DETACHED")
+                    || e.contains("display: none")
+                    || e.contains("@media")
+                    || e.contains("breakpoint")
+            });
+            if match_count > 0
+                && has_css_layout_signal
+                && (rel_str.ends_with(".css") || rel_str.ends_with(".scss"))
+            {
+                score = score.saturating_add(2000);
             }
 
             if score > best_score {

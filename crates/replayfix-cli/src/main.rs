@@ -658,6 +658,11 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         }
     }
 
+    let effective_video = video.clone().or_else(|| {
+        manifest
+            .as_ref()
+            .and_then(|p| TaskManifest::from_file(p).ok().map(|m| m.video_path))
+    });
     let parsed_mode = if let Some(ref raw_mode) = mode {
         match ExecutionMode::parse(raw_mode) {
             Ok(m) => Some(m),
@@ -672,7 +677,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         && !mock_regression
         && mock_patch == "builtin"
         && replayfix_core::GatewayConfig::default().has_meta_api_key()
-        && video.as_deref().is_some_and(|v| Path::new(v).exists())
+        && effective_video
+            .as_deref()
+            .is_some_and(|v| Path::new(v).exists())
     {
         Some(ExecutionMode::LiveAi)
     } else {
@@ -728,7 +735,14 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
             Path::new(v)
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .map(|s| s.trim().to_string())
+                .map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.eq_ignore_ascii_case("rf01_demo") {
+                        "RF-01".to_string()
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
                 .filter(|s| !s.is_empty())
         })
     } else {
@@ -740,9 +754,9 @@ fn build_manifest(args: ReproArgs, theme: &Theme) -> (TaskManifest, ReproExtras)
         || mock_failing_repair
         || mock_syntax_retry
         || mock_pkg_test_mutation;
-    let auto_live_from_video = !mock_heal
-        && parsed_mode != Some(ExecutionMode::DeterministicFixture)
-        && (video.as_deref().is_some_and(|v| Path::new(v).exists()) || is_spa_workspace);
+    let auto_live_from_video = parsed_mode != Some(ExecutionMode::DeterministicFixture)
+        && (video.as_deref().is_some_and(|v| Path::new(v).exists())
+            || (!mock_heal && is_spa_workspace));
     let live_browser = live_browser || auto_live_from_video || url.is_some();
     let mock_heal = mock_heal
         || (bug.is_some() && !live_browser)
@@ -1079,12 +1093,15 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         );
     }
     if m.repo_path == "."
-        && !repo_dir.join("public/app.js").exists()
+        && !repo_dir.join("package.json").exists()
         && !repo_dir.join("src/cart-summary.js").exists()
     {
-        if let Some(video_grandparent) = Path::new(&m.video_path).parent().and_then(|p| p.parent())
+        if let Some(video_grandparent) = Path::new(&m.video_path)
+            .parent()
+            .and_then(|p| p.parent())
+            .filter(|p| !p.as_os_str().is_empty())
         {
-            if video_grandparent.join("public/app.js").exists() {
+            if video_grandparent.join("package.json").exists() {
                 repo_dir = video_grandparent.to_path_buf();
             }
         }
@@ -1095,9 +1112,25 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
     } else {
         "--mock-heal"
     };
-    // Release 2.1: Universal Zero-Shot Pipeline with owned DynamicTaskSpec
-    let fixture_opt =
-        Fixture::for_task_in_repo(&m.task_id, &repo_dir).or_else(|| Fixture::for_task(&m.task_id));
+    let explicit_fixture_mode = extras.execution_mode != Some(ExecutionMode::LiveAi)
+        && (extras.mock_heal
+            || extras.execution_mode == Some(ExecutionMode::DeterministicFixture)
+            || extras.mock_ambiguous
+            || extras.mock_failing_repair
+            || extras.mock_syntax_retry
+            || extras.mock_pkg_test_mutation
+            || extras.mock_regression
+            || extras.mock_flaky
+            || extras.verify_matrix
+            || extras.stress_quorum
+            || extras.mock_patch != "builtin"
+            || !Path::new(&m.video_path).exists()
+            || Fixture::for_task_in_repo(&m.task_id, &repo_dir).is_some());
+    let fixture_opt = if explicit_fixture_mode {
+        Fixture::for_task_in_repo(&m.task_id, &repo_dir).or_else(|| Fixture::for_task(&m.task_id))
+    } else {
+        None
+    };
     if fixture_opt.is_none()
         && extras.mock_heal
         && extras.mock_patch == "builtin"
@@ -1181,7 +1214,9 @@ fn run_two_gate_loop(m: &TaskManifest, extras: &ReproExtras, theme: &Theme) -> !
         Some(ref f) => load_patch(f, &extras.mock_patch, theme),
         None => {
             if extras.mock_patch == "builtin" {
-                if let Some(ref dyn_spec) = dynamic_spec {
+                if repair_mode == Some(RepairClientMode::LiveEndpoint) {
+                    String::new()
+                } else if let Some(ref dyn_spec) = dynamic_spec {
                     if let Ok(mut cfg) = replayfix_core::MuseModelConfig::new(
                         extras.model.as_deref().unwrap_or(MUSE_SPARK_13_SLUG),
                         None,
